@@ -1030,9 +1030,14 @@ class BBSMenuUI:
 
     async def _msp_pick_directory_bbs(self):
         """BBS directory lightbar picker. Returns the picked dict (with
-        hostname/name/sysop/location/systat_port keys), or None on an
-        empty directory or the user backing out -- both are meant to
-        fall through to manual user@host entry, not dead-end.
+        hostname/name/sysop/location/systat_port keys), the string
+        'MANUAL' if the caller should fall through to manual user@host
+        entry (empty directory, or the 'M' hotkey), or None if the user
+        genuinely cancelled (Q/ESC) -- callers must NOT treat None as
+        "fall through to manual", that was the real bug reported live
+        live (Jerry, testing v1.1.8): "you cannot Q quit back or use esc to quit, it goes
+        to manual .. lol I think that should be M instead of Q and Q
+        and ESC will work to quit."
 
         'S' filters by name/hostname/sysop/location -- added per Jerry's
         live 80x24 feedback 2026-09-29 ("this could also use a search
@@ -1053,7 +1058,7 @@ class BBSMenuUI:
             await self.session.write(
                 f"  {FG['gry']}No BBSes in the directory yet.{RESET}\r\n")
             await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
-            return None
+            return 'MANUAL'
 
         search_term = None
         while True:
@@ -1072,7 +1077,8 @@ class BBSMenuUI:
                     f"  {FG['gry']}No matches for \"{search_term}\".{RESET}\r\n\r\n")
                 ans = (await self.session.read_line(
                     f"  {FG['cyan']}S{RESET}=New search  {FG['cyan']}C{RESET}=Clear  "
-                    f"{FG['cyan']}Q{RESET}=Cancel: ") or '').strip().upper()
+                    f"{FG['cyan']}M{RESET}=Manual entry  {FG['cyan']}Q{RESET}=Cancel: "
+                ) or '').strip().upper()
                 if ans == 'S':
                     search_term = (await self.session.read_line(
                         "  Search name/hostname/sysop/location: "
@@ -1081,6 +1087,8 @@ class BBSMenuUI:
                 if ans == 'C':
                     search_term = None
                     continue
+                if ans == 'M':
+                    return 'MANUAL'
                 return None
 
             async def render_header():
@@ -1111,7 +1119,7 @@ class BBSMenuUI:
                 return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
                         f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=pick  "
                         f"{FG['cyan']}S{RESET}=Search  "
-                        f"{FG['cyan']}Q{RESET}=type user@host manually")
+                        f"{FG['cyan']}M{RESET}=Manual entry  {FG['cyan']}Q{RESET}=Cancel")
 
             result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
             if result[0] == 'enter':
@@ -1124,6 +1132,10 @@ class BBSMenuUI:
             elif result[0] == 'key' and result[1] == 'C' and search_term:
                 search_term = None
                 continue
+            elif result[0] == 'key' and result[1] == 'M':
+                return 'MANUAL'
+            # Q/ESC/CTRL_C (result[0] == 'quit') and any other stray key
+            # fall through to here -- a genuine cancel, not manual entry.
             return None
 
     async def _msp_pick_online_user(self, bbs_row):
@@ -1158,7 +1170,7 @@ class BBSMenuUI:
                 f"{FG['dim']}No reply, or nobody online there -- "
                 f"switching to manual entry.{RESET}\r\n")
             await self.session.read_line("Press Enter...")
-            return None
+            return 'MANUAL'
 
         MANUAL = object()  # sentinel row for the injected manual-entry option
         display_rows = [MANUAL] + online
@@ -1193,21 +1205,33 @@ class BBSMenuUI:
 
         result = await self._rss_lightbar(display_rows, render_header, render_row, render_hint)
         if result[0] != 'enter':
+            # Q/ESC/CTRL_C -- a genuine cancel, not manual entry (same
+            # fix as _msp_pick_directory_bbs(), one step further down
+            # this same picker chain).
             return None
         picked = display_rows[result[1]]
-        return None if picked is MANUAL else picked['user']
+        return 'MANUAL' if picked is MANUAL else picked['user']
 
     async def _msp_pick_recipient(self):
         """Directory -> live-probe -> online-user picker, in one flow.
-        Returns (username, host) or None if the whole flow fell through
-        (empty directory, failed/empty probe, or cancelled) -- callers
-        must fall back to their own manual user@host prompt on None."""
+        Returns (username, host) on a pick, the string 'MANUAL' if the
+        caller should fall through to its own manual user@host prompt
+        (empty directory, an empty/failed probe, or the 'M' hotkey at
+        either step), or None if the user genuinely cancelled (Q/ESC at
+        either step) -- callers must NOT treat None the same as
+        'MANUAL', that conflation was the real bug reported live
+        (Q/ESC silently landing in manual entry instead of
+        actually cancelling)."""
         bbs_row = await self._msp_pick_directory_bbs()
-        if not bbs_row:
+        if bbs_row is None:
             return None
+        if bbs_row == 'MANUAL':
+            return 'MANUAL'
         username = await self._msp_pick_online_user(bbs_row)
-        if not username:
+        if username is None:
             return None
+        if username == 'MANUAL':
+            return 'MANUAL'
         return (username, bbs_row['hostname'])
 
     async def browse_bbs_directory(self):
@@ -1360,13 +1384,20 @@ class BBSMenuUI:
         """Compose a fresh InterBBS IM from the terminal. Tries the BBS
         directory + live-online picker first; falls back to manual
         user@host entry if the directory is empty, the probe finds
-        nobody, or the sysop/user cancels out of either picker."""
+        nobody, or the sysop/user explicitly asks for manual entry (the
+        'M' hotkey) -- but Q/ESC at either picker step now genuinely
+        cancels the whole send instead of landing in manual entry, per
+        real live feedback ("you cannot Q quit back or use
+        esc to quit, it goes to manual .. lol I think that should be M
+        instead of Q and Q and ESC will work to quit")."""
         from anetbbs.msp.client import send_msp
         from anetbbs.msp.protocol import MSP_DEFAULT_PORT
         from .ansi_ui import banner, FG, RESET, ui_width
 
         picked = await self._msp_pick_recipient()
-        if picked:
+        if picked is None:
+            return
+        if picked != 'MANUAL':
             target_user, target_host = picked
             _w = ui_width(self.session)
             await self.session.write('\x1b[2J\x1b[H')

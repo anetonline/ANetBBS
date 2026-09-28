@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.8`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.9`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.9 — Send InterBBS Message: Q/ESC now actually cancel (September 2026)
+
+Fixed the "Send InterBBS Message" BBS/recipient pickers: pressing Q or ESC to back out silently landed in the manual user@host entry prompt instead of actually cancelling, because both outcomes were treated as the same thing internally. Manual entry now has its own dedicated M key at every step of the picker; Q and ESC genuinely cancel the whole send instead.
 
 ## v1.1.8 — Terminal lightbar readability, echomail/file search, MSP who's-online fix (September 2026)
 

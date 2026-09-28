@@ -1,3 +1,7 @@
+# ANetBBS v1.1.9 — Send InterBBS Message: Q/ESC now actually cancel (September 2026)
+
+Fixed the "Send InterBBS Message" BBS/recipient pickers: pressing Q or ESC to back out silently landed in the manual user@host entry prompt instead of actually cancelling, because both outcomes were treated as the same thing internally. Manual entry now has its own dedicated M key at every step of the picker; Q and ESC genuinely cancel the whole send instead.
+
 # ANetBBS v1.1.8 — Terminal lightbar readability, echomail/file search, MSP who's-online fix (September 2026)
 
 Found and fixed the real cause of the highlighted row becoming unreadable on several of the terminal lightbar screens added in the previous release: the reverse-video highlight used to mark the selected row doesn't render visibly on some real terminal clients, regardless of what color the row's own text uses. Every affected screen (message boards, echomail networks, the file-area browser, the private-message inbox, the BBS directory browser, and the Inter-BBS instant-message pickers) now cancels the reverse-video highlight on the selected row and draws its own clearly visible marker and color instead, matching a fix already proven correct on the tagline picker.
