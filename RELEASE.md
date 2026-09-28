@@ -1,3 +1,7 @@
+# ANetBBS v1.1.10 — CI test fix, no functional change (September 2026)
+
+Fixed a test left asserting the old behavior of the previous release's Send InterBBS Message picker fix, which broke the automated test suite (and with it, the Docker image build) without affecting the live BBS itself. No functional changes in this release.
+
 # ANetBBS v1.1.9 — Send InterBBS Message: Q/ESC now actually cancel (September 2026)
 
 Fixed the "Send InterBBS Message" BBS/recipient pickers: pressing Q or ESC to back out silently landed in the manual user@host entry prompt instead of actually cancelling, because both outcomes were treated as the same thing internally. Manual entry now has its own dedicated M key at every step of the picker; Q and ESC genuinely cancel the whole send instead.

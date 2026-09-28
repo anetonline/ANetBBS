@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.9`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.10`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.10 — CI test fix, no functional change (September 2026)
+
+Fixed a test left asserting the old behavior of the previous release's Send InterBBS Message picker fix, which broke the automated test suite (and with it, the Docker image build) without affecting the live BBS itself. No functional changes in this release.
 
 ## v1.1.9 — Send InterBBS Message: Q/ESC now actually cancel (September 2026)
 

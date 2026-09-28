@@ -231,7 +231,14 @@ class MspOnlineUserProbeIpFallbackTests(unittest.TestCase):
             result = asyncio.run(ui._msp_pick_online_user(bbs_row))
         joined = ''.join(ui.session.written)
         self.assertIn('No reply, or nobody online there', joined)
-        self.assertIsNone(result)
+        # An empty/failed probe is an intentional auto-fallback to
+        # manual entry, not a user-initiated cancel -- distinguished
+        # from Q/ESC (which returns None) by the 'MANUAL' sentinel
+        # since real live feedback ("you cannot Q quit back or use esc
+        # to quit, it goes to manual") found the two were being
+        # conflated into the same None return, so a caller had no way
+        # to tell "fall through to manual" apart from "user backed out".
+        self.assertEqual(result, 'MANUAL')
 
     def test_directory_picker_rows_carry_ip_address(self):
         cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
