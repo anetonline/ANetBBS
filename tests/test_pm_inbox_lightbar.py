@@ -51,6 +51,24 @@ def _strip_ansi(text):
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
+class _StubANView:
+    """Captures constructor args and returns a caller-chosen result
+    instead of running the real interactive viewer (which would block
+    forever on _read_key() against a fake session with no read_raw()).
+    Same pattern as test_message_board_read_thread_anview.py's stub."""
+    last_instance = None
+    next_result = 'back'
+
+    def __init__(self, session, lines, subject=""):
+        self.session = session
+        self.lines = lines
+        self.subject = subject
+        _StubANView.last_instance = self
+
+    async def run(self):
+        return _StubANView.next_result
+
+
 class PmInboxLightbarTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -118,13 +136,22 @@ class PmInboxLightbarTests(unittest.TestCase):
         self.assertIn('inbox is empty', _strip_ansi(session.transcript()))
 
     def test_enter_reads_the_highlighted_message_and_marks_it_read(self):
+        # Reading now goes through ANView (Jerry, live 80x24 test
+        # 2026-09-29: "we should be using ANetVIEW message reader
+        # here"), not the old --MORE-- pager -- stub it out so the test
+        # doesn't block on a real interactive viewer.
         self._seed_messages(3, prefix='readme')
-        ui, session = self._ui(keys=['DOWN', 'ENTER'], lines=[''])
-        with self._patched_app():
+        _StubANView.last_instance = None
+        _StubANView.next_result = 'back'
+        ui, session = self._ui(keys=['DOWN', 'ENTER'])
+        with self._patched_app(), \
+             patch('anetbbs.features.anedit.ANView', _StubANView):
             asyncio.run(ui.list_pm_inbox())
-        text = _strip_ansi(session.transcript())
-        self.assertIn('readme body 1', text,
-                     'moving DOWN once then ENTER should open the 2nd message')
+        self.assertIsNotNone(
+            _StubANView.last_instance,
+            'moving DOWN once then ENTER should open the 2nd message via ANView')
+        joined = '\n'.join(_StubANView.last_instance.lines)
+        self.assertIn('readme body 1', joined)
 
         from anetbbs.models import PrivateMessage
         with self.app.app_context():
@@ -159,6 +186,24 @@ class PmInboxLightbarTests(unittest.TestCase):
                      .count())
             self.assertEqual(unread, 2, 'backing out must not mark anything read')
 
+    def test_selected_row_does_not_rely_on_reverse_video(self):
+        # Real bug found live via screenshot 2026-09-29 ("PM same thing
+        # with the highlighted item the text is blocked/not viewable")
+        # -- same root cause already proven for the tagline picker
+        # (_maybe_prompt_tagline): reverse-video SEL doesn't render
+        # visibly on the user's real terminal client (SyncTERM), so
+        # render_row() must cancel it and draw its own visible marker
+        # for the selected row instead of relying on it.
+        from anetbbs.features.ansi_ui import FG
+        self._seed_messages(1, prefix='selrow')
+        ui, session = self._ui(keys=['Q'])  # row 0 stays selected throughout
+        with self._patched_app():
+            asyncio.run(ui.list_pm_inbox())
+        text = session.transcript()
+        self.assertIn('\x1b[0m' + FG['yel'] + '> ', text,
+                      'selected row must explicitly cancel SEL and draw '
+                      'its own visible marker+color')
+
     def test_non_enter_key_redraws_without_opening_a_message(self):
         # Any unrecognized key (not Enter, not Q) must just redraw the
         # lightbar, not silently open the highlighted message.
@@ -168,6 +213,40 @@ class PmInboxLightbarTests(unittest.TestCase):
             asyncio.run(ui.list_pm_inbox())
         text = _strip_ansi(session.transcript())
         self.assertNotIn('stray body', text)
+
+    def test_ansview_reply_sends_a_new_pm_to_the_original_sender(self):
+        # ANView's own 'R' key must actually wire into a reply, not be a
+        # dead end now that PM reading goes through it.
+        self._seed_messages(1, prefix='replyme')
+        _StubANView.last_instance = None
+        _StubANView.next_result = 'reply'
+        ui, session = self._ui(keys=['ENTER', 'Q'])
+        with self._patched_app(), \
+             patch('anetbbs.features.anedit.ANView', _StubANView), \
+             patch('anetbbs.features.anedit.launch_anedit',
+                   new=AsyncMock(return_value='my reply body')):
+            asyncio.run(ui.list_pm_inbox())
+
+        from anetbbs.models import PrivateMessage
+        with self.app.app_context():
+            reply = (PrivateMessage.query
+                    .filter_by(sender_id=self.recipient_id,
+                               recipient_id=self.sender_id)
+                    .first())
+            self.assertIsNotNone(reply, 'reply must be sent to the original sender')
+            self.assertEqual(reply.body, 'my reply body')
+            self.assertTrue(reply.subject.startswith('Re: '))
+
+    def test_ansview_new_routes_to_send_pm(self):
+        self._seed_messages(1, prefix='newkey')
+        _StubANView.last_instance = None
+        _StubANView.next_result = 'new'
+        ui, session = self._ui(keys=['ENTER', 'Q'])
+        with self._patched_app(), \
+             patch('anetbbs.features.anedit.ANView', _StubANView), \
+             patch.object(ui, 'send_pm', new=AsyncMock()) as mock_send:
+            asyncio.run(ui.list_pm_inbox())
+        mock_send.assert_called_once()
 
 
 if __name__ == '__main__':

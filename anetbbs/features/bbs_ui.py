@@ -319,8 +319,15 @@ class BBSMenuUI:
         while True:
             board_list = _current_list()
             _w = ui_width(self.session)
-            _name_w = max(24, _w - 20)
-            _desc_w = max(20, _w - _name_w - 20)
+            # Row shape: "  " + name + " " + "(NNNN threads)" + "  " + desc.
+            # Old math (name_w = _w-20, desc_w = _w-name_w-20) didn't account
+            # for the "(NNNN threads)" field itself, overrunning 80 cols by
+            # ~19 chars and getting clipped mid-word by the real terminal
+            # (Jerry, live 80x24 test). Budget exactly to _w instead.
+            _fixed = 17  # "  " (2) + " " before count (1) + "(NNNN threads)" (14)
+            _budget = max(10, _w - _fixed - 2)  # 2 = "  " separator before desc
+            _name_w = min(28, _budget)
+            _desc_w = max(0, _budget - _name_w)
 
             async def render_header():
                 await self.session.write(banner('Message Boards', _w))
@@ -331,6 +338,18 @@ class BBSMenuUI:
 
             def render_row(idx, b, selected):
                 _, name, desc, count, _last = b
+                if selected:
+                    # _rss_lightbar's reverse-video SEL wrapper doesn't
+                    # render visibly on the user's real terminal client
+                    # (SyncTERM), confirmed live through two prior failed
+                    # fix attempts on the tagline picker (see
+                    # _maybe_prompt_tagline's render_row for the full
+                    # history). Cancel SEL and draw a plain, single
+                    # bright marker instead of depending on reverse-video
+                    # working at all.
+                    extra = f"  {desc[:_desc_w]}" if desc else ''
+                    text = f"{name[:_name_w]:<{_name_w}} ({count:4d} threads){extra}"
+                    return f"\x1b[0m{FG['yel']}> {text}{RESET}"
                 extra = f"  {FG['dim']}{desc[:_desc_w]}{RESET}" if desc else ''
                 return (f"  {FG['grn']}{name[:_name_w]:<{_name_w}}{RESET} "
                         f"{FG['cyan']}({count:4d} threads){RESET}{extra}")
@@ -784,6 +803,21 @@ class BBSMenuUI:
             def render_row(idx, m, selected):
                 _, subj, who, when, was_read, _ = m
                 ts = fmt_eastern(when, '%m-%d %H:%M', '?')
+                if selected:
+                    # _rss_lightbar's reverse-video SEL wrapper doesn't
+                    # render visibly on the user's real terminal client
+                    # (SyncTERM), confirmed live through two prior failed
+                    # fix attempts on the tagline picker (see
+                    # _maybe_prompt_tagline's render_row for the full
+                    # history) -- same root cause Jerry hit here and on
+                    # the file browser ("you cannot see the words when
+                    # the highlighted section is over the text"). Cancel
+                    # SEL and draw a plain, single bright marker instead
+                    # of depending on reverse-video working at all.
+                    mark = '*' if not was_read else ' '
+                    text = (f"{mark} {subj[:_subj_w]:<{_subj_w}}  "
+                            f"{who[:12]:<12}  {ts}")
+                    return f"\x1b[0m{FG['yel']}> {text}{RESET}"
                 mark = ' ' if was_read else f"{FG['yel']}*{RESET}"
                 return (f"  {mark} "
                         f"{FG['wht']}{subj[:_subj_w]:<{_subj_w}}{RESET}  "
@@ -807,18 +841,55 @@ class BBSMenuUI:
             sel = result[1]
             pm_id, subj, who, when, _, body = i_list[sel]
             ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write("\r\n" + "═" * _w + "\r\n")
-            await self.session.write(f"  Subject: {subj}\r\n  From: {who}\r\n  Date: {ts}\r\n")
-            await self.session.write("─" * _w + "\r\n")
-            await self._page_lines(
-                [self._linkify_url_line(l) for l in self._wrap_text(body or '', _w)])
+            # ANView instead of the old --MORE-- pager (Jerry, live 80x24
+            # test 2026-09-29: "we should be using ANetVIEW message reader
+            # here") -- matches board threads/echomail, which already read
+            # through launch_aneview(). PMs are typed via launch_anedit
+            # same as echomail, so the CP437/pipe-code decode it expects
+            # is correct here too.
+            from .anedit import launch_aneview, launch_anedit
+            view_result = await launch_aneview(
+                self.session, body or '',
+                subject=subj or '(no subject)', from_name=who,
+                to_name=self.session.user.get('username', 'guest'),
+                date_str=ts,
+            )
             # Mark as read
             with _app().app_context():
                 pm = PrivateMessage.query.get(pm_id)
                 if pm and pm.read_at is None:
                     pm.read_at = datetime.utcnow()
                     db.session.commit()
+
+            if view_result == 'reply':
+                with _app().app_context():
+                    sender = User.query.filter_by(username=who).first()
+                    recipient_id = sender.id if sender else None
+                if not recipient_id:
+                    await self.session.write(
+                        f"\r\n{FG['red']}Can't reply -- sender no longer "
+                        f"exists.{RESET}\r\n")
+                    await self.session.read_line("Press Enter...")
+                    continue
+                reply_subj = subj if subj and subj.lower().startswith('re:') \
+                    else ('Re: ' + subj if subj else 'Re: (no subject)')
+                username = self.session.user.get('username', 'guest')
+                reply_body = await launch_anedit(
+                    self.session, quote=body or '', subject=reply_subj,
+                    username=username,
+                    tagline_picker=lambda: _maybe_prompt_tagline(self))
+                if reply_body is not None:
+                    with _app().app_context():
+                        new_pm = PrivateMessage(
+                            sender_id=my_id, recipient_id=recipient_id,
+                            subject=reply_subj[:200], body=reply_body)
+                        db.session.add(new_pm)
+                        db.session.commit()
+                    await self.session.write(
+                        f"\r\n{FG['grn']}{BOLD}[OK]{RESET} Reply sent to {who}.\r\n")
+                    await self.session.read_line("Press Enter...")
+            elif view_result == 'new':
+                await self.send_pm()
 
     # ------------------------------------------------------------------
     # Inter-BBS Instant Messages (RFC 1312 / MSP)
@@ -961,17 +1032,22 @@ class BBSMenuUI:
         """BBS directory lightbar picker. Returns the picked dict (with
         hostname/name/sysop/location/systat_port keys), or None on an
         empty directory or the user backing out -- both are meant to
-        fall through to manual user@host entry, not dead-end."""
+        fall through to manual user@host entry, not dead-end.
+
+        'S' filters by name/hostname/sysop/location -- added per Jerry's
+        live 80x24 feedback 2026-09-29 ("this could also use a search
+        option at the top, like we offer on the webUI"), directed at
+        this exact 99-entry picker screen."""
         from anetbbs.models import BbsDirectoryEntry
         from .ansi_ui import banner, FG, RESET, BOLD, ui_width
 
         with _app().app_context():
             entries = BbsDirectoryEntry.query.order_by(BbsDirectoryEntry.name).all()
-            rows = [{'hostname': e.hostname, 'ip_address': e.ip_address or '',
-                     'name': e.name or e.hostname,
-                     'sysop': e.sysop or '', 'location': e.location or '',
-                     'systat_port': e.systat_port or 11} for e in entries]
-        if not rows:
+            all_rows = [{'hostname': e.hostname, 'ip_address': e.ip_address or '',
+                         'name': e.name or e.hostname,
+                         'sysop': e.sysop or '', 'location': e.location or '',
+                         'systat_port': e.systat_port or 11} for e in entries]
+        if not all_rows:
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(banner('Pick a BBS', ui_width(self.session)))
             await self.session.write(
@@ -979,26 +1055,76 @@ class BBSMenuUI:
             await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
             return None
 
-        async def render_header():
-            _w = ui_width(self.session)
-            await self.session.write(banner('Pick a BBS', _w))
-            await self.session.write(
-                f"  {FG['cyan']}{BOLD}{'#':>2}  {'Name':<24}  {'Sysop':<18}  {'Location':<16}{RESET}\r\n"
-                f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+        search_term = None
+        while True:
+            if search_term:
+                st = search_term.lower()
+                rows = [r for r in all_rows
+                        if st in r['name'].lower() or st in r['hostname'].lower()
+                        or st in r['sysop'].lower() or st in r['location'].lower()]
+            else:
+                rows = all_rows
 
-        def render_row(idx, row, selected):
-            return (f"  {FG['grn']}{idx+1:>2}{RESET}  {row['name'][:24]:<24}  "
-                    f"{FG['dim']}{row['sysop'][:18]:<18}{RESET}  {row['location'][:16]:<16}")
+            if not rows:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('Pick a BBS', ui_width(self.session)))
+                await self.session.write(
+                    f"  {FG['gry']}No matches for \"{search_term}\".{RESET}\r\n\r\n")
+                ans = (await self.session.read_line(
+                    f"  {FG['cyan']}S{RESET}=New search  {FG['cyan']}C{RESET}=Clear  "
+                    f"{FG['cyan']}Q{RESET}=Cancel: ") or '').strip().upper()
+                if ans == 'S':
+                    search_term = (await self.session.read_line(
+                        "  Search name/hostname/sysop/location: "
+                    ) or '').strip() or None
+                    continue
+                if ans == 'C':
+                    search_term = None
+                    continue
+                return None
 
-        def render_hint(sel, total):
-            return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
-                    f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=pick  "
-                    f"{FG['cyan']}Q{RESET}=type user@host manually")
+            async def render_header():
+                _w = ui_width(self.session)
+                await self.session.write(banner('Pick a BBS', _w))
+                if search_term:
+                    await self.session.write(
+                        f"  {FG['gry']}Search: \"{search_term}\" "
+                        f"({len(rows)} of {len(all_rows)}, C=clear){RESET}\r\n")
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}{'#':>2}  {'Name':<24}  {'Sysop':<18}  {'Location':<16}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
 
-        result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
-        if result[0] == 'enter':
-            return rows[result[1]]
-        return None
+            def render_row(idx, row, selected):
+                if selected:
+                    # Reverse-video SEL doesn't render visibly on the
+                    # user's real terminal client (SyncTERM), confirmed
+                    # live (see _maybe_prompt_tagline's render_row for
+                    # the full history) -- cancel it and draw a plain
+                    # bright marker instead.
+                    text = (f"{idx+1:>2}  {row['name'][:24]:<24}  "
+                            f"{row['sysop'][:18]:<18}  {row['location'][:16]:<16}")
+                    return f"\x1b[0m{FG['yel']}> {text}{RESET}"
+                return (f"  {FG['grn']}{idx+1:>2}{RESET}  {row['name'][:24]:<24}  "
+                        f"{FG['dim']}{row['sysop'][:18]:<18}{RESET}  {row['location'][:16]:<16}")
+
+            def render_hint(sel, total):
+                return (f"  {FG['cyan']}{sel+1}/{total}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=pick  "
+                        f"{FG['cyan']}S{RESET}=Search  "
+                        f"{FG['cyan']}Q{RESET}=type user@host manually")
+
+            result = await self._rss_lightbar(rows, render_header, render_row, render_hint)
+            if result[0] == 'enter':
+                return rows[result[1]]
+            elif result[0] == 'key' and result[1] == 'S':
+                search_term = (await self.session.read_line(
+                    "\r\n  Search name/hostname/sysop/location "
+                    "(blank=clear): ") or '').strip() or None
+                continue
+            elif result[0] == 'key' and result[1] == 'C' and search_term:
+                search_term = None
+                continue
+            return None
 
     async def _msp_pick_online_user(self, bbs_row):
         """Live-SYSTAT-probe bbs_row and let the sysop/user pick a
@@ -1046,7 +1172,17 @@ class BBSMenuUI:
 
         def render_row(idx, row, selected):
             if row is MANUAL:
-                return f"  {FG['yel']}[Manual entry -- type user@host]{RESET}"
+                text = '[Manual entry -- type user@host]'
+                if selected:
+                    return f"\x1b[0m{FG['yel']}> {text}{RESET}"
+                return f"  {FG['yel']}{text}{RESET}"
+            if selected:
+                # Reverse-video SEL doesn't render visibly on the user's
+                # real terminal client (SyncTERM), confirmed live (see
+                # _maybe_prompt_tagline's render_row for the full
+                # history) -- cancel it and draw a plain bright marker.
+                text = f"{row['user'][:22]:<22}  {row['action'][:24]}"
+                return f"\x1b[0m{FG['yel']}> {text}{RESET}"
             return (f"  {FG['grn']}{row['user'][:22]:<22}{RESET}  "
                     f"{FG['dim']}{row['action'][:24]}{RESET}")
 
@@ -1089,7 +1225,7 @@ class BBSMenuUI:
 
         with _app().app_context():
             entries = BbsDirectoryEntry.query.order_by(BbsDirectoryEntry.name).all()
-            rows = [{
+            all_rows = [{
                 'hostname': e.hostname, 'name': e.name or e.hostname,
                 'sysop': e.sysop or '', 'location': e.location or '',
                 'software': e.software or '',
@@ -1102,7 +1238,7 @@ class BBSMenuUI:
                 'last_seen': fmt_eastern(e.last_seen_at, '%Y-%m-%d %H:%M', 'never'),
             } for e in entries]
 
-        if not rows:
+        if not all_rows:
             await self.session.write('\x1b[2J\x1b[H')
             await self.session.write(banner('BBS Directory', ui_width(self.session)))
             await self.session.write(
@@ -1110,11 +1246,46 @@ class BBSMenuUI:
             await self.session.read_line(f"  {FG['cyan']}Press Enter...{RESET}")
             return
 
+        # 'S' filters by name/hostname/sysop/location -- added per
+        # Jerry's live 80x24 feedback 2026-09-29 ("this could also use
+        # a search option at the top, like we offer on the webUI"),
+        # same treatment as the recipient-picker version of this screen.
         sel = 0
+        search_term = None
         while True:
+            if search_term:
+                st = search_term.lower()
+                rows = [r for r in all_rows
+                        if st in r['name'].lower() or st in r['hostname'].lower()
+                        or st in r['sysop'].lower() or st in r['location'].lower()]
+            else:
+                rows = all_rows
+
+            if not rows:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('BBS Directory', ui_width(self.session)))
+                await self.session.write(
+                    f"  {FG['gry']}No matches for \"{search_term}\".{RESET}\r\n\r\n")
+                ans = (await self.session.read_line(
+                    f"  {FG['cyan']}S{RESET}=New search  {FG['cyan']}C{RESET}=Clear  "
+                    f"{FG['cyan']}Q{RESET}=Back: ") or '').strip().upper()
+                if ans == 'S':
+                    search_term = (await self.session.read_line(
+                        "  Search name/hostname/sysop/location: "
+                    ) or '').strip() or None
+                    continue
+                if ans == 'C':
+                    search_term = None
+                    continue
+                return
+
             async def render_header():
                 _w = ui_width(self.session)
                 await self.session.write(banner('BBS Directory', _w))
+                if search_term:
+                    await self.session.write(
+                        f"  {FG['gry']}Search: \"{search_term}\" "
+                        f"({len(rows)} of {len(all_rows)}, C=clear){RESET}\r\n")
                 await self.session.write(
                     f"  {FG['cyan']}{BOLD}{'#':>3}  {'Name':<22}  {'Sysop':<16}  "
                     f"{'Software':<16}  {'Last Seen':<16}{RESET}\r\n"
@@ -1124,6 +1295,16 @@ class BBSMenuUI:
                 sw = row['software']
                 if row['software_version']:
                     sw = f"{sw} {row['software_version']}"
+                if selected:
+                    # Reverse-video SEL doesn't render visibly on the
+                    # user's real terminal client (SyncTERM), confirmed
+                    # live (see _maybe_prompt_tagline's render_row for
+                    # the full history) -- cancel it and draw a plain
+                    # bright marker instead.
+                    text = (f"{idx+1:>3}  {row['name'][:22]:<22}  "
+                            f"{row['sysop'][:16]:<16}  "
+                            f"{sw[:16]:<16}  {row['last_seen'][:16]:<16}")
+                    return f"\x1b[0m{FG['yel']}> {text}{RESET}"
                 return (f"  {FG['grn']}{idx+1:>3}{RESET}  {row['name'][:22]:<22}  "
                         f"{FG['dim']}{row['sysop'][:16]:<16}{RESET}  "
                         f"{sw[:16]:<16}  {row['last_seen'][:16]:<16}")
@@ -1131,14 +1312,24 @@ class BBSMenuUI:
             def render_hint(s, total):
                 return (f"  {FG['cyan']}{s+1}/{total}{RESET} "
                         f"{FG['cyan']}Up/Dn{RESET}=move  {FG['cyan']}Enter{RESET}=details  "
-                        f"{FG['cyan']}Q{RESET}=back")
+                        f"{FG['cyan']}S{RESET}=Search  {FG['cyan']}Q{RESET}=back")
 
             result = await self._rss_lightbar(rows, render_header, render_row,
-                                              render_hint, initial_sel=sel)
-            if result[0] != 'enter':
+                                              render_hint,
+                                              initial_sel=min(sel, len(rows) - 1))
+            if result[0] == 'enter':
+                sel = result[1]
+                await self._show_bbs_directory_detail(rows[sel])
+            elif result[0] == 'key' and result[1] == 'S':
+                search_term = (await self.session.read_line(
+                    "\r\n  Search name/hostname/sysop/location "
+                    "(blank=clear): ") or '').strip() or None
+                sel = 0
+            elif result[0] == 'key' and result[1] == 'C' and search_term:
+                search_term = None
+                sel = 0
+            else:
                 return
-            sel = result[1]
-            await self._show_bbs_directory_detail(rows[sel])
 
     async def _show_bbs_directory_detail(self, row):
         from .ansi_ui import banner, FG, RESET, BOLD, ui_width
@@ -1217,9 +1408,17 @@ class BBSMenuUI:
     # ------------------------------------------------------------------
 
     async def list_echo_areas(self):
-        """Network chooser → per-network area list → read area."""
+        """Network chooser → per-network area list → read area.
+
+        Converted to the same _rss_lightbar widget as the boards/threads/
+        PM/file-browser screens (Jerry, live 80x24 test 2026-09-29: "echomail,
+        is missing the lightbar and a search"). 'S' routes to
+        search_messages(), which already covers echomail alongside local
+        boards, for parity with the boards-list search entry point. The
+        old bare "A=apply" hotkey label is now explicit about what it
+        applies for (a QWK node), per the same feedback."""
         from anetbbs.models import EchoArea, EchomailNetwork
-        from .ansi_ui import banner, footer, prompt as _prompt, FG, RESET, BOLD, ui_width
+        from .ansi_ui import banner, prompt as _prompt, FG, RESET, BOLD, ui_width
 
         _user_level = int((self.session.user or {}).get('access_level', 10))
         _is_admin   = bool((self.session.user or {}).get('is_admin'))
@@ -1247,47 +1446,78 @@ class BBSMenuUI:
         # screen's "Apply for ANotherNetwork QWK node" option exists
         # for. Returning early used to make that option unreachable for
         # precisely the audience who'd need it.
+        if not net_rows:
+            while True:
+                _w = ui_width(self.session)
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('Echomail Networks', _w))
+                await self.session.write(
+                    f"  {FG['gry']}No echomail areas configured yet -- apply "
+                    f"for a network below to get started.{RESET}\r\n\r\n"
+                    f"  {FG['cyan']}A{RESET}=Apply for ANotherNetwork QWK node  "
+                    f"{FG['cyan']}S{RESET}=Search messages  "
+                    f"{FG['cyan']}Q{RESET}=Back\r\n")
+                choice = (await self.session.read_line(
+                    _prompt('Choice: ')) or '').strip().upper()
+                if choice == 'A':
+                    await self._apply_qwk_node()
+                elif choice == 'S':
+                    await self.search_messages()
+                else:
+                    return
+
+        sel = 0
         while True:
             _w = ui_width(self.session)
-            _net_w = max(30, _w - 22)
-            await self.session.write('\x1b[2J\x1b[H')
-            await self.session.write(banner('Echomail Networks', _w))
-            if net_rows:
+            _net_w = max(24, _w - 22)
+
+            async def render_header():
+                await self.session.write(banner('Echomail Networks', _w))
                 await self.session.write(
+                    f"  {FG['gry']}A = Apply for ANotherNetwork QWK node{RESET}\r\n"
                     f"  {FG['cyan']}{BOLD}{'#':>2}  {'Network':<{_net_w}} "
                     f"{'Type':<6} {'Areas':>5}{RESET}\r\n"
                     f"  {FG['gry']}{'─' * max(50, _w - 4)}{RESET}\r\n")
-                for i, (_, name, ntype, count) in enumerate(net_rows, 1):
-                    type_col = FG['cyan'] if ntype == 'binkp' else FG['yel']
-                    await self.session.write(
-                        f"  {FG['yel']}{BOLD}{i:2d}{RESET}  "
+
+            def render_row(idx, row, selected):
+                _, name, ntype, count = row
+                if selected:
+                    # Reverse-video SEL doesn't render visibly on the
+                    # user's real terminal client (SyncTERM), confirmed
+                    # live (see _maybe_prompt_tagline's render_row for
+                    # the full history) -- cancel it and draw a plain
+                    # bright marker instead.
+                    text = (f"{idx+1:>2}  {name[:_net_w]:<{_net_w}}  "
+                            f"{ntype[:5]:<5}  {count:5d}")
+                    return f"\x1b[0m{FG['yel']}> {text}{RESET}"
+                type_col = FG['cyan'] if ntype == 'binkp' else FG['yel']
+                return (f"  {FG['yel']}{idx+1:>2}{RESET}  "
                         f"{FG['wht']}{name[:_net_w]:<{_net_w}}{RESET}  "
                         f"{type_col}{ntype[:5]:<5}{RESET}  "
-                        f"{FG['grn']}{count:5d}{RESET}\r\n")
-            else:
-                await self.session.write(
-                    f"  {FG['gry']}No echomail areas configured yet -- apply "
-                    f"for a network below to get started.{RESET}\r\n")
-            await self.session.write(
-                f"\r\n  {FG['gry']}A = Apply for ANotherNetwork QWK node{RESET}\r\n")
-            await self.session.write('\r\n' + footer(_w) + '\r\n')
-            choice = (await self.session.read_line(
-                _prompt('Choose network (number / A=apply / Q): ')) or '').strip().upper()
-            if choice == 'Q' or not choice:
+                        f"{FG['grn']}{count:5d}{RESET}")
+
+            def render_hint(s, tot):
+                return (f"  {FG['cyan']}{s+1}/{tot}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=Move  {FG['cyan']}Enter{RESET}=Open  "
+                        f"{FG['cyan']}A{RESET}=Apply(QWK Node)  "
+                        f"{FG['cyan']}S{RESET}=Search  {FG['cyan']}Q{RESET}=Back")
+
+            result = await self._rss_lightbar(
+                net_rows, render_header, render_row, render_hint,
+                initial_sel=min(sel, len(net_rows) - 1))
+
+            if result[0] == 'quit':
                 return
-            if choice == 'A':
-                await self._apply_qwk_node()
-                continue
-            if not net_rows:
-                continue
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < len(net_rows):
-                    await self._list_network_areas(
-                        net_rows[idx][0], net_rows[idx][1],
-                        _user_level, _is_admin)
-            except ValueError:
-                pass
+            elif result[0] == 'enter':
+                sel = result[1]
+                await self._list_network_areas(
+                    net_rows[sel][0], net_rows[sel][1], _user_level, _is_admin)
+            else:
+                key, sel = result[1], result[2]
+                if key == 'A':
+                    await self._apply_qwk_node()
+                elif key == 'S':
+                    await self.search_messages()
 
     async def _list_network_areas(self, network_id, net_name,
                                    user_level, is_admin):
@@ -2089,6 +2319,7 @@ class BBSMenuUI:
         app = _app()
         batch_set = set()
         sel = 0
+        search_term = None
 
         while True:
             _w = ui_width(self.session)
@@ -2170,12 +2401,40 @@ class BBSMenuUI:
 
                 total = len(f_list)
 
+                # File search (Jerry, live 80x24 test 2026-09-29: "we need
+                # to add a search for file areas too. search for a filename
+                # and search for text in description") -- one term matched
+                # against either field, same either-match convention as
+                # search_messages().
+                if search_term:
+                    st = search_term.lower()
+                    f_list = [
+                        f for f in f_list
+                        if st in f['name'].lower()
+                        or st in (f.get('desc_full') or f.get('desc') or '').lower()
+                    ]
+
             # An empty area still needs to offer Upload (and Back) --
             # _rss_lightbar() itself auto-quits on an empty row list, so
             # handle this case before ever calling it.
             if not f_list:
                 await self.session.write('\x1b[2J\x1b[H')
                 await self.session.write(banner(area_name, _w))
+                if search_term:
+                    await self.session.write(
+                        f"  {FG['gry']}No files match \"{search_term}\".{RESET}\r\n\r\n")
+                    ans = (await self.session.read_line(
+                        f"  {FG['cyan']}F{RESET}=New search  "
+                        f"{FG['cyan']}C{RESET}=Clear search  "
+                        f"{FG['cyan']}Q{RESET}=Back: ") or '').strip().upper()
+                    if ans == 'F':
+                        search_term = (await self.session.read_line(
+                            "  Search filename/description: ") or '').strip() or None
+                        continue
+                    if ans == 'C':
+                        search_term = None
+                        continue
+                    return
                 await self.session.write(
                     f"  {FG['gry']}(no files here yet){RESET}\r\n\r\n")
                 if can_upload and protos:
@@ -2193,28 +2452,65 @@ class BBSMenuUI:
 
             async def render_header():
                 await self.session.write(banner(area_name, _w))
+                if search_term:
+                    _n = len(f_list)
+                    await self.session.write(
+                        f"  {FG['gry']}Search: \"{search_term}\" "
+                        f"({_n} of {total} match{'es' if _n != 1 else ''}, "
+                        f"C=clear){RESET}\r\n")
                 await self.session.write(
                     f"  {FG['cyan']}{BOLD}{'':4}{'Name':<{_name_w}}  "
                     f"{'Size':>10}  {'Source':<12}{RESET}\r\n"
                     f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
 
             def render_row(idx, f, selected):
-                mark = f"{FG['grn']}[x]{RESET}" if f['path'] in batch_set else '[ ]'
+                marked = f['path'] in batch_set
                 sz = (f"{f['size']:>10,}" if isinstance(f['size'], int)
                       else f"{str(f['size']):>10}")
                 src = ('FTN' if f['tic_id'] else f['who'][:10])
+                if selected:
+                    # _rss_lightbar's reverse-video SEL wrapper doesn't
+                    # render visibly on the user's real terminal client
+                    # (SyncTERM), confirmed live through two prior failed
+                    # fix attempts on the tagline picker (see
+                    # _maybe_prompt_tagline's render_row for the full
+                    # history) -- same root cause Jerry hit here ("you
+                    # cannot see the words when the highlighted section
+                    # is over the text"). Cancel SEL and draw a plain,
+                    # single bright marker instead of depending on
+                    # reverse-video working at all.
+                    mark = '[x]' if marked else '[ ]'
+                    text = (f"{mark} {f['name'][:_name_w]:<{_name_w}} "
+                            f"{sz}  {src:<12}")
+                    return f"\x1b[0m{FG['yel']}> {text}{RESET}"
+                mark = f"{FG['grn']}[x]{RESET}" if marked else '[ ]'
                 return (f"  {mark} "
                         f"{FG['wht']}{f['name'][:_name_w]:<{_name_w}}{RESET} "
                         f"{FG['gry']}{sz}  {src:<12}{RESET}")
 
             def render_hint(s, tot):
-                parts = [f"{s+1}/{tot} ({total} total)", "Up/Dn=Move",
-                        "Enter=DL", "V=Info", "Space=Mark"]
+                # `tot` (== len(f_list)) already equals what a separate
+                # "(N total)" would have said -- that was a literal
+                # duplicate, e.g. "28/28 (28 total)". Dropping it also
+                # buys back the room this hint line was overflowing 80
+                # cols by (Jerry, live 80x24 test: "U=Uplo"/"ad" split
+                # mid-word by the terminal's own auto-wrap).
+                parts = [f"{s+1}/{tot}", "Up/Dn=Move", "Enter=DL",
+                         "V=Info", "Space=Mark", "F=Search"]
                 if batch_set:
-                    parts.append(f"B=DL Batch({len(batch_set)})")
+                    parts.append(f"B=Batch({len(batch_set)})")
                 if can_upload and protos:
                     parts.append("U=Upload")
                 parts.append("Q=Back")
+                # Fit explicitly to the real terminal width instead of
+                # trusting its own auto-wrap, which breaks wherever it
+                # lands rather than at a word boundary. Drop the least-
+                # essential hints first if still too wide.
+                for label in ("Up/Dn=Move", "V=Info", "Enter=DL"):
+                    if len('  '.join(parts)) <= _w:
+                        break
+                    if label in parts:
+                        parts.remove(label)
                 return '  '.join(f"{FG['cyan']}{p}{RESET}" for p in parts)
 
             result = await self._rss_lightbar(
@@ -2249,6 +2545,14 @@ class BBSMenuUI:
                 elif key == 'U' and can_upload and protos:
                     await self._upload_terminal_file(
                         area_id, uploads_dir, protos, storage_path)
+                elif key == 'F':
+                    search_term = (await self.session.read_line(
+                        "\r\n  Search filename/description "
+                        "(blank=clear): ") or '').strip() or None
+                    sel = 0
+                elif key == 'C' and search_term:
+                    search_term = None
+                    sel = 0
 
     async def _view_file_desc(self, f):
         """Show extended description for a file, with word-wrap."""

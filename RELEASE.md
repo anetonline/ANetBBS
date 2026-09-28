@@ -1,3 +1,15 @@
+# ANetBBS v1.1.8 — Terminal lightbar readability, echomail/file search, MSP who's-online fix (September 2026)
+
+Found and fixed the real cause of the highlighted row becoming unreadable on several of the terminal lightbar screens added in the previous release: the reverse-video highlight used to mark the selected row doesn't render visibly on some real terminal clients, regardless of what color the row's own text uses. Every affected screen (message boards, echomail networks, the file-area browser, the private-message inbox, the BBS directory browser, and the Inter-BBS instant-message pickers) now cancels the reverse-video highlight on the selected row and draws its own clearly visible marker and color instead, matching a fix already proven correct on the tagline picker.
+
+Fixed the message-board list overrunning 80 columns and getting cut off mid-word at that width — the column-width math never accounted for the thread-count field's own width. Converted the echomail networks list from typing a number to the same arrow-key lightbar as the other list screens, added a message-search hotkey there, and clarified the network-apply hotkey to say what it applies for (a QWK node). Fixed the file browser's status line overflowing 80 columns and wrapping a word in half.
+
+Added search to file areas (by filename or by text in a file's description) and to the terminal BBS directory browser and Inter-BBS IM recipient picker (by name, hostname, sysop, or location), matching the equivalent search already available on the web UI.
+
+Found and fixed the real reason the terminal "who's online" probe kept reporting nobody online at a real, reachable peer BBS: that peer's reply used the opposite column order from what this BBS's own who's-online service produces (a genuine, differently-ordered real-world reply, confirmed by probing it directly), and the parser only recognized its own column order. It now recognizes either.
+
+Private-message reading now goes through the same scrollable ANetView reader already used for message-board threads and echomail, replacing the older page-by-page pager, and now supports replying directly from the reader.
+
 # ANetBBS v1.1.7 — Federation directory IP publishing; login-message-scan feedback (September 2026)
 
 Fixed the terminal Inter-BBS IM directory picker still failing to probe federation-network (A-Net) directory entries even after the previous release's hostname-to-IP fallback. Root cause traced further back: the federation hub already captured each peer's real connecting IP address at registration, but never published it in the directory feed it distributes to other BBSes, so nothing ever had an IP on file to fall back to. The hub now publishes that address (kept fresh on every heartbeat, not just initial registration), and the directory picker can actually use it.

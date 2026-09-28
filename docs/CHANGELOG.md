@@ -1,11 +1,23 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.7`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.8`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.8 — Terminal lightbar readability, echomail/file search, MSP who's-online fix (September 2026)
+
+Found and fixed the real cause of the highlighted row becoming unreadable on several of the terminal lightbar screens added in the previous release: the reverse-video highlight used to mark the selected row doesn't render visibly on some real terminal clients, regardless of what color the row's own text uses. Every affected screen (message boards, echomail networks, the file-area browser, the private-message inbox, the BBS directory browser, and the Inter-BBS instant-message pickers) now cancels the reverse-video highlight on the selected row and draws its own clearly visible marker and color instead, matching a fix already proven correct on the tagline picker.
+
+Fixed the message-board list overrunning 80 columns and getting cut off mid-word at that width — the column-width math never accounted for the thread-count field's own width. Converted the echomail networks list from typing a number to the same arrow-key lightbar as the other list screens, added a message-search hotkey there, and clarified the network-apply hotkey to say what it applies for (a QWK node). Fixed the file browser's status line overflowing 80 columns and wrapping a word in half.
+
+Added search to file areas (by filename or by text in a file's description) and to the terminal BBS directory browser and Inter-BBS IM recipient picker (by name, hostname, sysop, or location), matching the equivalent search already available on the web UI.
+
+Found and fixed the real reason the terminal "who's online" probe kept reporting nobody online at a real, reachable peer BBS: that peer's reply used the opposite column order from what this BBS's own who's-online service produces (a genuine, differently-ordered real-world reply, confirmed by probing it directly), and the parser only recognized its own column order. It now recognizes either.
+
+Private-message reading now goes through the same scrollable ANetView reader already used for message-board threads and echomail, replacing the older page-by-page pager, and now supports replying directly from the reader.
 
 ## v1.1.7 — Federation directory IP publishing; login-message-scan feedback (September 2026)
 

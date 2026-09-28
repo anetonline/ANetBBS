@@ -78,6 +78,31 @@ class SystatParserTests(unittest.TestCase):
         rows = parse_systat_response(text)
         self.assertEqual(rows, [{'node': '1', 'user': 'eve', 'action': '', 'idle': ''}])
 
+    def test_real_synchronet_peer_reply_reverse_column_order(self):
+        # Real bug found live (2026-09-29): a direct UDP probe of an
+        # actual Synchronet peer (a-net-online.lol) confirmed the
+        # network round trip works -- it replies -- but with columns in
+        # Synchronet's own real fingerservice.js order (User, Action,
+        # Time-on, Age, Node), the reverse of our own header. The old
+        # parser only recognized a header starting with the literal
+        # word "node", so this exact reply was silently dropped and the
+        # terminal MSP picker always reported "nobody online there"
+        # even though the peer answered correctly. This is the verbatim
+        # byte sequence captured from that live probe.
+        text = (
+            "ANetBBS a-net-online.lol - A-Net Online\r\n\r\n"
+            "User                      Action                           "
+            "Time-on Age     Node\r\n"
+            "------------------------- ------------------------------- "
+            "-------- ---     ----\r\n"
+            "StingRay                  running uMRC (MN)                "
+            "2:07:47  45        1\r\n"
+        )
+        rows = parse_systat_response(text)
+        self.assertEqual(rows, [{'node': '1', 'user': 'StingRay',
+                                  'action': 'running uMRC (MN)',
+                                  'idle': '2:07:47'}])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -271,26 +271,56 @@ def query_systat(host: str, port: int = 11, timeout: float = 5.0) -> str:
 _SEPARATOR_RE = re.compile(r'^-{2,}(\s+-{2,})*$')
 
 
+_COL_KEYWORDS = ('node', 'user', 'action', 'idle', 'time-on', 'age')
+
+
 def parse_systat_response(text: str) -> list:
     """Parse a query_systat() reply into a list of
     {'node': str, 'user': str, 'action': str, 'idle': str} dicts.
 
-    Matches our own _build_response() format (a "Node  User  Action
-    Idle" header + dashed separator, then one fixed-width-ish line per
-    active user) closely enough to also handle real Synchronet peers,
-    which use the same convention. Splits each data line on runs of 2+
-    spaces rather than fixed column offsets, so small width differences
-    from a peer's implementation don't break parsing. Returns [] for an
-    empty reply, "No users currently active.", or anything that doesn't
-    contain a recognizable header -- callers should treat an empty
-    result as "probe succeeded but nothing to show" and fall back to
-    manual entry, same as a failed/timed-out probe.
+    Real bug found live (2026-09-29): a direct UDP probe of a real
+    Synchronet peer (a-net-online.lol) confirmed the network round trip
+    works fine -- it replies -- but its header is column-ordered
+    "User  Action  Time-on Age  Node" (Synchronet's own real
+    fingerservice.js convention), the reverse of our own _build_response()
+    "Node  User  Action  Idle". The old parser only recognized a header
+    starting with the literal word "node", so every real Synchronet
+    reply was silently dropped as "noise before the header" and the
+    terminal MSP picker always reported "nobody online there" even
+    against a peer that answered correctly.
+
+    Fixed to detect the header by keyword regardless of column order,
+    then determine field order from where each keyword's substring
+    appears in the header text (not by splitting the header itself --
+    "Time-on" and "Age" are only one space apart in the real reply
+    above, a single 2+-space-split token spanning two real data
+    columns). Each data row is still split on runs of 2+ spaces, and
+    zipped against the header-derived field order positionally -- this
+    stays correct even for the "Time-on"/"Age" case because both
+    columns are counted (Age is simply dropped from the output after
+    zipping), keeping every later column's position aligned.
     """
     if not text:
         return []
+    lines = text.splitlines()
+    header_i = None
+    field_order = []
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if (re.search(r'\buser\b', low)
+                and (re.search(r'\bnode\b', low) or re.search(r'\baction\b', low))):
+            positions = [(low.find(kw), kw) for kw in _COL_KEYWORDS if kw in low]
+            field_order = [kw for _pos, kw in sorted(positions)]
+            header_i = i
+            break
+    if header_i is None or 'user' not in field_order:
+        return []
+
+    idle_key = ('idle' if 'idle' in field_order
+                else ('time-on' if 'time-on' in field_order else None))
+
     rows = []
-    seen_header = False
-    for line in text.splitlines():
+    for line in lines[header_i + 1:]:
         stripped = line.strip()
         if not stripped:
             continue
@@ -299,19 +329,14 @@ def parse_systat_response(text: str) -> list:
             continue
         if _SEPARATOR_RE.match(stripped):
             continue
-        if not seen_header:
-            if low.startswith('node') and 'user' in low:
-                seen_header = True
-            # Anything before the header (the "<software> <host> - <bbs
-            # name>" banner line) is noise, not data -- skip either way.
-            continue
-        parts = re.split(r'\s{2,}', stripped)
-        if len(parts) < 2 or not parts[1].strip():
+        tokens = re.split(r'\s{2,}', stripped)
+        vals = dict(zip(field_order, tokens))
+        if not vals.get('user'):
             continue
         rows.append({
-            'node': parts[0].strip(),
-            'user': parts[1].strip(),
-            'action': parts[2].strip() if len(parts) > 2 else '',
-            'idle': parts[3].strip() if len(parts) > 3 else '',
+            'node': vals.get('node', ''),
+            'user': vals.get('user', ''),
+            'action': vals.get('action', ''),
+            'idle': vals.get(idle_key, '') if idle_key else '',
         })
     return rows

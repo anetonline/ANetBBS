@@ -138,5 +138,92 @@ class BoardListActivitySortTests(unittest.TestCase):
                         '(Board A)')
 
 
+    def test_selected_row_does_not_rely_on_reverse_video(self):
+        # Same root cause already proven for the tagline picker
+        # (_maybe_prompt_tagline): reverse-video SEL doesn't render
+        # visibly on the user's real terminal client (SyncTERM), so
+        # render_row() must cancel it and draw its own visible marker
+        # for the selected row instead of relying on it. Applied
+        # proactively to every render_row() touched during the 2026-09-29
+        # bug-fix pass.
+        from anetbbs.features.ansi_ui import FG
+        from anetbbs.features.bbs_ui import BBSMenuUI
+
+        class _FakeSession:
+            def __init__(self, keys):
+                self.user = {'id': 1, 'access_level': 100, 'is_admin': True}
+                self.written = []
+                self._keys = list(keys)
+                self.window_size = (80, 24)
+
+            async def write(self, text):
+                self.written.append(text)
+
+            async def read_key_arrow(self):
+                return self._keys.pop(0) if self._keys else 'Q'
+
+        session = _FakeSession(keys=['Q'])  # row 0 stays selected throughout
+        ui = BBSMenuUI(session)
+        with patch('anetbbs.features.bbs_ui._app', return_value=self.app):
+            asyncio.run(ui.list_boards())
+        text = ''.join(session.written)
+        self.assertIn('\x1b[0m' + FG['yel'] + '> ', text,
+                      'selected row must explicitly cancel SEL and draw '
+                      'its own visible marker+color')
+
+    def test_row_width_never_overflows_80_columns(self):
+        # Real bug found live (Jerry, 80x24 test 2026-09-29): "80x24
+        # local board words get cut off, the alignment is not correct".
+        # The old width math (name_w = _w-20, desc_w = _w-name_w-20)
+        # never accounted for the "(NNNN threads)" field's own width,
+        # overrunning 80 cols by ~19 chars and getting clipped mid-word
+        # by the real terminal. Verify every rendered row -- with a
+        # long name AND a long description, the worst case -- fits
+        # within the real 80-column terminal width.
+        from anetbbs.features.bbs_ui import BBSMenuUI
+        from anetbbs.models import db, Board
+
+        with self.app.app_context():
+            long_board = Board(
+                name='A' * 60, order=99, is_active=True, min_access_level=0,
+                description='D' * 100)
+            db.session.add(long_board)
+            db.session.commit()
+
+        class _FakeSession:
+            def __init__(self, keys):
+                self.user = {'id': 1, 'access_level': 100, 'is_admin': True}
+                self.written = []
+                self._keys = list(keys)
+                self.window_size = (80, 24)
+
+            async def write(self, text):
+                self.written.append(text)
+
+            async def read_key_arrow(self):
+                return self._keys.pop(0) if self._keys else 'Q'
+
+        session = _FakeSession(keys=['Q'])
+        ui = BBSMenuUI(session)
+        with patch('anetbbs.features.bbs_ui._app', return_value=self.app):
+            asyncio.run(ui.list_boards())
+
+        # _rss_lightbar() writes each row as its own write() call via
+        # absolute cursor positioning (no \r\n between rows) -- check
+        # per-write-call, splitting only on \r\n WITHIN a call (multi-
+        # line writes like render_header() use real \r\n internally).
+        import re
+        for w in session.written:
+            visible_call = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', w)
+            for line in visible_call.split('\r\n'):
+                self.assertLessEqual(
+                    len(line), 80,
+                    f'rendered line exceeds 80 columns ({len(line)}): {line!r}')
+
+        with self.app.app_context():
+            Board.query.filter_by(name='A' * 60).delete()
+            db.session.commit()
+
+
 if __name__ == '__main__':
     unittest.main()

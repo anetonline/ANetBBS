@@ -20,12 +20,13 @@ import anetbbs.config as cfg_mod
 
 
 class FakeSession:
-    def __init__(self, arrow_keys=None, window_size=(80, 24)):
+    def __init__(self, arrow_keys=None, window_size=(80, 24), lines=None):
         self.user = {'id': 1, 'username': 'testuser', 'access_level': 100,
                      'is_admin': True}
         self.written = []
         self._arrow_keys = list(arrow_keys or [])
         self.window_size = window_size
+        self._lines = list(lines or [])
 
     async def write(self, text):
         self.written.append(text)
@@ -34,7 +35,9 @@ class FakeSession:
         return self._arrow_keys.pop(0) if self._arrow_keys else 'Q'
 
     async def read_line(self, prompt=''):
-        return ''
+        if prompt:
+            await self.write(prompt)
+        return self._lines.pop(0) if self._lines else ''
 
 
 class BbsDirectoryTerminalBrowserTests(unittest.TestCase):
@@ -177,6 +180,64 @@ class BbsDirectoryTerminalBrowserTests(unittest.TestCase):
                     software_version='3.20', msp_port=18, systat_port=11,
                     notes='Great sysop, terrible pizza.', source='sbbsimsg'))
                 db.session.commit()
+
+
+    # ------------------------------------------------------------------
+    # Search (Jerry, live 80x24 test 2026-09-29: "this could also use a
+    # search option at the top, like we offer on the webUI" -- said of
+    # the MSP/BBS-directory picker screens with 99 real live entries).
+    # ------------------------------------------------------------------
+
+    def test_s_search_filters_the_list_by_name(self):
+        session = FakeSession(arrow_keys=['S', 'Q'], lines=['Alpha'])
+        from anetbbs.features.bbs_ui import BBSMenuUI
+        ui = BBSMenuUI(session)
+        with self._patched_app():
+            asyncio.run(ui.browse_bbs_directory())
+        last_frame = ''.join(session.written).rsplit('\x1b[2J\x1b[H', 1)[-1]
+        self.assertIn('Alpha BBS', last_frame)
+        self.assertNotIn('Beta BBS', last_frame)
+
+    def test_search_matches_sysop_and_location_too(self):
+        session = FakeSession(arrow_keys=['S', 'Q'], lines=['Sampleburg'])
+        from anetbbs.features.bbs_ui import BBSMenuUI
+        ui = BBSMenuUI(session)
+        with self._patched_app():
+            asyncio.run(ui.browse_bbs_directory())
+        last_frame = ''.join(session.written).rsplit('\x1b[2J\x1b[H', 1)[-1]
+        self.assertIn('Beta BBS', last_frame,
+                      'search must match the location field too, not just name')
+        self.assertNotIn('Alpha BBS', last_frame)
+
+    def test_selected_row_does_not_rely_on_reverse_video(self):
+        # Same root cause already proven for the tagline picker
+        # (_maybe_prompt_tagline): reverse-video SEL doesn't render
+        # visibly on the user's real terminal client (SyncTERM), so
+        # render_row() must cancel it and draw its own visible marker
+        # instead of relying on it. Applied proactively to every
+        # render_row() touched during the 2026-09-29 bug-fix pass.
+        from anetbbs.features.ansi_ui import FG
+        session = FakeSession(arrow_keys=['Q'])  # row 0 stays selected
+        from anetbbs.features.bbs_ui import BBSMenuUI
+        ui = BBSMenuUI(session)
+        with self._patched_app():
+            asyncio.run(ui.browse_bbs_directory())
+        text = ''.join(session.written)
+        self.assertIn('\x1b[0m' + FG['yel'] + '> ', text,
+                      'selected row must explicitly cancel SEL and draw '
+                      'its own visible marker+color')
+
+    def test_directory_bbs_picker_also_supports_search(self):
+        # _msp_pick_directory_bbs() is the recipient-picker variant of
+        # this same screen (reached from Send Inter-BBS IM) -- same
+        # search treatment applied there independently.
+        session = FakeSession(arrow_keys=['S', 'ENTER'], lines=['Alpha'])
+        from anetbbs.features.bbs_ui import BBSMenuUI
+        ui = BBSMenuUI(session)
+        with self._patched_app():
+            picked = asyncio.run(ui._msp_pick_directory_bbs())
+        self.assertIsNotNone(picked)
+        self.assertEqual(picked['hostname'], 'alpha.example.com')
 
 
 if __name__ == '__main__':

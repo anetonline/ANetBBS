@@ -208,6 +208,27 @@ class FileAreaBrowseLightbarTests(unittest.TestCase):
                 protos=[]))
         self.assertIn('no files here yet', _strip_ansi(session.transcript()))
 
+    def test_selected_row_does_not_rely_on_reverse_video(self):
+        # Real bug found live via screenshot 2026-09-29 ("you cannot see
+        # the words when the highlighted section is over the text") --
+        # same root cause already proven for the tagline picker
+        # (_maybe_prompt_tagline): reverse-video SEL doesn't render
+        # visibly on the user's real terminal client (SyncTERM), so
+        # render_row() must cancel it and draw its own visible marker
+        # for the selected row instead of relying on it.
+        from anetbbs.features.ansi_ui import FG
+        self._seed_files(1, prefix='selrow')
+        ui, session = self._ui(keys=['Q'])  # row 0 stays selected throughout
+        with self._patched_app():
+            asyncio.run(ui._file_area_browse(
+                area_id=None, area_name='Top', area_filter='top',
+                can_upload=False, uploads_dir='/tmp', web_base='',
+                protos=[]))
+        text = session.transcript()
+        self.assertIn('\x1b[0m' + FG['yel'] + '> ', text,
+                      'selected row must explicitly cancel SEL and draw '
+                      'its own visible marker+color')
+
     def test_marked_file_shows_a_visible_checkbox_marker(self):
         self._seed_files(1, prefix='marker')
         ui, session = self._ui(keys=[' ', 'Q'])
@@ -220,6 +241,87 @@ class FileAreaBrowseLightbarTests(unittest.TestCase):
         # transcript -- proves the mark actually took visible effect,
         # not just internal state.
         self.assertIn('[x]', _strip_ansi(session.transcript()))
+
+    # ------------------------------------------------------------------
+    # File search (Jerry, live 80x24 test 2026-09-29: "we need to add a
+    # search for file areas too. search for a filename and search for
+    # text in description.")
+    # ------------------------------------------------------------------
+
+    def test_f_search_filters_by_filename(self):
+        self._seed_files(1, prefix='needle')
+        self._seed_files(1, prefix='haystack')
+        ui, session = self._ui(keys=['F', 'Q'], lines=['needle'])
+        with self._patched_app():
+            asyncio.run(ui._file_area_browse(
+                area_id=None, area_name='Top', area_filter='top',
+                can_upload=False, uploads_dir='/tmp', web_base='',
+                protos=[]))
+        # Only the LAST redraw reflects the search filter -- the first
+        # (pre-search) frame legitimately shows both files.
+        last_frame = _strip_ansi(session.transcript().rsplit('\x1b[2J\x1b[H', 1)[-1])
+        self.assertIn('needle0.zip', last_frame)
+        self.assertNotIn('haystack0.zip', last_frame)
+
+    def test_f_search_matches_description_text_not_just_filename(self):
+        from anetbbs.models import db, FileUpload
+        with self.app.app_context():
+            db.session.add(FileUpload(
+                uploader_id=self.uploader_id, filename='plainname.zip',
+                original_filename='plainname.zip',
+                file_path='/tmp/plainname.zip', file_size=500,
+                description='a very special unicorn artifact'))
+            db.session.add(FileUpload(
+                uploader_id=self.uploader_id, filename='other.zip',
+                original_filename='other.zip',
+                file_path='/tmp/other.zip', file_size=500,
+                description='nothing interesting here'))
+            db.session.commit()
+        ui, session = self._ui(keys=['F', 'Q'], lines=['unicorn'])
+        with self._patched_app():
+            asyncio.run(ui._file_area_browse(
+                area_id=None, area_name='Top', area_filter='top',
+                can_upload=False, uploads_dir='/tmp', web_base='',
+                protos=[]))
+        last_frame = _strip_ansi(session.transcript().rsplit('\x1b[2J\x1b[H', 1)[-1])
+        self.assertIn('plainname.zip', last_frame,
+                      'a description-only match must still surface the file')
+        self.assertNotIn('other.zip', last_frame)
+
+    def test_search_with_no_matches_offers_new_search_or_clear(self):
+        self._seed_files(1, prefix='onlyfile')
+        ui, session = self._ui(keys=['F'], lines=['zzz-no-match', 'C'])
+        with self._patched_app():
+            asyncio.run(ui._file_area_browse(
+                area_id=None, area_name='Top', area_filter='top',
+                can_upload=False, uploads_dir='/tmp', web_base='',
+                protos=[]))
+        text = _strip_ansi(session.transcript())
+        self.assertIn('No files match', text)
+        # 'C' clears the search, which should bring the file back into view.
+        self.assertIn('onlyfile0.zip', text)
+
+    def test_hint_line_never_overflows_80_columns_with_every_optional_part(self):
+        # Real bug found live (Jerry, 80x24 test 2026-09-29): the hint
+        # line with position+batch+upload all present overflowed 80
+        # cols and the terminal's own auto-wrap split "Upload" mid-word
+        # ("U=Uplo" / "ad"). Force every optional part on at once (mark
+        # a file so B=Batch appears, allow upload so U=Upload appears)
+        # and confirm no rendered line exceeds 80 visible columns.
+        self._seed_files(2, prefix='widehint')
+        ui, session = self._ui(keys=[' ', 'Q'])  # mark file 0, then quit
+        with self._patched_app():
+            asyncio.run(ui._file_area_browse(
+                area_id=None, area_name='Top', area_filter='top',
+                can_upload=True, uploads_dir='/tmp', web_base='',
+                protos=['zmodem']))
+        import re
+        for w in session.written:
+            visible_call = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', w)
+            for line in visible_call.split('\r\n'):
+                self.assertLessEqual(
+                    len(line), 80,
+                    f'rendered line exceeds 80 columns ({len(line)}): {line!r}')
 
 
 if __name__ == '__main__':
