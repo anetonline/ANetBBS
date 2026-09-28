@@ -64,6 +64,21 @@ def _strip_untrusted(s):
     return _CONTROL_RE.sub('', _INJECTED_ANSI_RE.sub('', s))
 
 
+def _msp_sender_real_name(user_dict):
+    """Value for send_msp()'s sender_real_name -- MSP's SENDER-TERM
+    field, echoed RAW right after the sender's name on Synchronet's
+    side (confirmed live 2026-09-27: a message with no distinct display
+    name showed as "Instant Message from StingRay StingRay [ip]
+    (<no name>)", the second "StingRay" being this field echoing back
+    the same username already sent as `sender`). RFC 1312 explicitly
+    allows SENDER-TERM to be empty -- only return a name here when it's
+    genuinely distinct from the username, never fall back to
+    re-sending the username itself."""
+    username = user_dict.get('username', '')
+    display_name = (user_dict.get('display_name') or '').strip()
+    return display_name if display_name and display_name != username else ''
+
+
 _cached_app = None
 _cached_app_key = None
 
@@ -782,7 +797,7 @@ class BBSMenuUI:
                     recipient=target_user,
                     message=msg,
                     sender=me.get('username', 'sysop'),
-                    sender_real_name=me.get('display_name') or me.get('username', ''),
+                    sender_real_name=_msp_sender_real_name(me),
                     sender_system=bbs_name,
                 )
                 await self.session.write(
@@ -798,7 +813,8 @@ class BBSMenuUI:
 
         with _app().app_context():
             entries = BbsDirectoryEntry.query.order_by(BbsDirectoryEntry.name).all()
-            rows = [{'hostname': e.hostname, 'name': e.name or e.hostname,
+            rows = [{'hostname': e.hostname, 'ip_address': e.ip_address or '',
+                     'name': e.name or e.hostname,
                      'sysop': e.sysop or '', 'location': e.location or '',
                      'systat_port': e.systat_port or 11} for e in entries]
         if not rows:
@@ -846,6 +862,16 @@ class BBSMenuUI:
         # idiom as games/builtin_runner.py's run_in_executor use.
         text = await loop.run_in_executor(
             None, query_systat, bbs_row['hostname'], bbs_row['systat_port'], 5.0)
+        # Real bug reported live (2026-09-27): every directory entry
+        # failed here, even ones confirmed online via the web UI's own
+        # /imsg/directory/<id>/who, which already falls back to
+        # ip_address when the hostname alone doesn't resolve/reply
+        # (imsg.py's directory_who() -- same query_systat() call, same
+        # SSRF-guarded resolver). This picker never had that fallback.
+        if not text and bbs_row.get('ip_address'):
+            text = await loop.run_in_executor(
+                None, query_systat, bbs_row['ip_address'],
+                bbs_row['systat_port'], 5.0)
         online = parse_systat_response(text) if text else []
         if not online:
             await self.session.write(
@@ -1025,7 +1051,7 @@ class BBSMenuUI:
             recipient=target_user,
             message=msg,
             sender=me.get('username', 'sysop'),
-            sender_real_name=me.get('display_name') or me.get('username', ''),
+            sender_real_name=_msp_sender_real_name(me),
             sender_system=bbs_name,
         )
         await self.session.write(

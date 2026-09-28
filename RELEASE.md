@@ -1,3 +1,9 @@
+# ANetBBS v1.1.5 — Inter-BBS instant messages corrected against real Synchronet behavior (September 2026)
+
+Fixed the terminal Inter-BBS IM directory picker reporting "No reply, or nobody online there" for every BBS in the directory, even ones confirmed online. The web UI's own who's-online probe already falls back to a directory entry's IP address when the hostname alone doesn't resolve or reply; the terminal picker never had that fallback and always gave up after the hostname alone.
+
+Corrected how outbound Inter-BBS instant messages identify their sender, verified directly against Synchronet's own real source. A message with no distinct display name set was showing up on the receiving end with the sender's name doubled (e.g. "Instant Message from StingRay StingRay"), and the BBS name wasn't appearing at all — instead showing the raw sending IP address and a "(no name)" placeholder. Both are now fixed: the field that was duplicating the username is left empty unless there's a genuinely different display name, and the BBS name is now sent in the correct protocol field, which also removes the "(no name)" placeholder entirely.
+
 # ANetBBS v1.1.4 — Terminal admin tool scrolling fix; file area descriptions restored; drop file guidance clarified (September 2026)
 
 Fixed the `anetbbs-cfg` terminal admin tool's editing forms (for example, editing or managing a door game) having no scrolling at all once a form had more fields than fit on a short terminal — content past the visible rows, including the Save/Cancel row itself, simply never rendered, with no way to reach it on a fixed-size SSH session. Its list screens already scrolled correctly; the same scroll-into-view behavior has now been added to every form and menu screen too.

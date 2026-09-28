@@ -99,6 +99,25 @@ def tools_hub(section):
 @main_bp.route('/')
 def index():
     """Home page"""
+    # A sysop can drop a full replacement at data/mods/core/web_landing.py
+    # (defining render_web_landing(request) -> a Flask response, or None
+    # to fall through to the normal home page below) to show a custom
+    # pre-login landing page -- e.g. a connection-options "matrix" --
+    # to visitors who haven't logged in yet. Same mechanism as the
+    # terminal login_menu/chat_menu/game_center/sysop_tools overrides
+    # in core/mods_override.py, just the sync variant for a WSGI route.
+    # Skipped entirely for an already-authenticated visitor -- this is
+    # a PRE-login concept, and returning None from an override (a mod
+    # that only wants to show once, or under some other condition) also
+    # falls straight through to the normal page below.
+    if not current_user.is_authenticated:
+        from ..core.mods_override import has_core_override, call_core_web_override
+        if has_core_override('web_landing'):
+            landing = call_core_web_override(
+                'web_landing', 'render_web_landing', lambda: None, request)
+            if landing is not None:
+                return landing
+
     # Get recent posts. Fetch extra and filter through evaluate_access()
     # -- same access-control gap as search()/boards.py had (fixed
     # elsewhere in this audit): a board's min_access_level must be

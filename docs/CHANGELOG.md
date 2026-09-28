@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.4`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.5`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.5 — Inter-BBS instant messages corrected against real Synchronet behavior (September 2026)
+
+Fixed the terminal Inter-BBS IM directory picker reporting "No reply, or nobody online there" for every BBS in the directory, even ones confirmed online. The web UI's own who's-online probe already falls back to a directory entry's IP address when the hostname alone doesn't resolve or reply; the terminal picker never had that fallback and always gave up after the hostname alone.
+
+Corrected how outbound Inter-BBS instant messages identify their sender, verified directly against Synchronet's own real source. A message with no distinct display name set was showing up on the receiving end with the sender's name doubled (e.g. "Instant Message from StingRay StingRay"), and the BBS name wasn't appearing at all — instead showing the raw sending IP address and a "(no name)" placeholder. Both are now fixed: the field that was duplicating the username is left empty unless there's a genuinely different display name, and the BBS name is now sent in the correct protocol field, which also removes the "(no name)" placeholder entirely.
 
 ## v1.1.4 — Terminal admin tool scrolling fix; file area descriptions restored; drop file guidance clarified (September 2026)
 

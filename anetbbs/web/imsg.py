@@ -92,10 +92,17 @@ def send():
                   'danger')
             return render_template('imsg/send.html', form=form)
 
-        # Real name goes in sender_terminal; Synchronet's IMSG renders it
-        # as the parenthesized name after the address. Fallback: username.
-        real_name = (getattr(current_user, 'display_name', '')
-                     or current_user.username)
+        # sender_terminal (MSP's SENDER-TERM field) gets echoed RAW right
+        # after the sender's name on Synchronet's side -- confirmed live
+        # 2026-09-27, a message with no distinct display name showed as
+        # "Instant Message from StingRay StingRay [ip] (<no name>)",
+        # the second "StingRay" being this field echoing back the same
+        # username we already sent as `sender`. RFC 1312 explicitly
+        # allows SENDER-TERM to be empty, so only send a real name here
+        # when the user actually HAS one distinct from their username --
+        # never fall back to re-sending the username itself.
+        display_name = (getattr(current_user, 'display_name', '') or '').strip()
+        real_name = display_name if display_name != current_user.username else ''
         ok = send_msp(
             host=host_raw,
             port=form.port.data or MSP_DEFAULT_PORT,

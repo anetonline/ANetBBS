@@ -44,7 +44,7 @@ immediately with **no service restart**.
 | -------- | --------- | ------ | ---- |
 | `data/mods/text/<slot>.ans` | Lifecycle ANSI screens (`welcome`, `goodbye`, `newuser`, any custom slot) | Your art shown instead of the database screen | [04](04-ansi-screens.md) |
 | `data/mods/text/menus/<name>.ans` | Any menu's header art — `main`, any admin-editable picker, a custom sub-menu, or the remaining code-driven screens (Door Games list, Dial-Out) | Your art shown above the live prompt, instead of the generated menu | [04](04-ansi-screens.md) |
-| `data/mods/core/<name>.py` | The pre-login menu, or the Chat Systems / Game Center / Sysop Tools pickers' actual **logic** — add a genuinely new option, not just reorder/re-skin the existing ones | Your Python function runs instead of the admin-editable menu (or the built-in fallback if that menu row is missing) | This page, below |
+| `data/mods/core/<name>.py` | The pre-login menu, the Chat Systems / Game Center / Sysop Tools pickers' actual **logic**, or a custom pre-login **web landing page** — add a genuinely new option/screen, not just reorder/re-skin the existing ones | Your Python function runs instead of the admin-editable menu (or the built-in fallback if that menu row is missing) | This page, below |
 | `data/mods/<name>.js` / `data/mods/<relative/path>.js` | A bundled Synchronet-compat door script, or any file it `load()`s at runtime | Your JS file runs instead of the bundled copy | [14](14-door-games.md) |
 
 The first two rows are pure **art** replacement — drop a file, get
@@ -142,7 +142,7 @@ exists and the easiest one to underestimate.
 
 Everything in sections 1 and 2 above swaps **art**; the code that
 decides what happens next is untouched. `data/mods/core/` is
-different: drop a complete replacement Python file defining an async
+different: drop a complete replacement Python file defining a
 function, and *your code runs instead of ANetBBS's own*. This is real
 Synchronet precedent, carried over on purpose: on real Synchronet,
 `login.js`/`logon.js` are core system scripts (not doors) that the
@@ -154,11 +154,14 @@ script-driven the same way — `login_screen()`, `ChatManager.show_menu()`,
 etc. are compiled-in Python methods, not files loaded by name at
 runtime — so getting the same capability needs an explicit override
 point built per screen (`anetbbs/core/mods_override.py`'s
-`call_core_override()`), rather than falling out for free. Four
-screens are wired up to it today, checked in this order ahead of
-everything else (including the admin-editable menu from section 1):
-the pre-login menu (`login_menu`), and the Chat Systems (`chat_menu`),
-Game Center (`game_center`), and Sysop Tools (`sysop_tools`) pickers.
+`call_core_override()` for terminal-session screens, or its sync
+counterpart `call_core_web_override()` for a Flask web route), rather
+than falling out for free. Five screens are wired up to it today,
+checked ahead of everything else (including the admin-editable menu
+from section 1): the terminal pre-login menu (`login_menu`), the Chat
+Systems (`chat_menu`), Game Center (`game_center`), and Sysop Tools
+(`sysop_tools`) pickers, and a web pre-login landing page
+(`web_landing`, see below).
 
 For the three pickers, reach for this only when what you want genuinely
 isn't expressible as a menu item — a real custom control flow, not
@@ -231,21 +234,53 @@ and `show_sysop_tools_menu(session, bbs_ui)` respectively.
 `game_manager.show_door_menu()`/`play_number_guess()`, or
 `bbs_ui.sysop_users()` and friends, instead of reimplementing them.
 
-### All four screens share the same behavior
+### `data/mods/core/web_landing.py` — a custom pre-login web page
 
-The file is read fresh from disk on every visit to that menu — edit
-it, reconnect, see the change, no restart. A syntax error, a missing
-function, or any exception raised while your override runs all
-degrade gracefully back to the stock built-in menu instead of breaking
-that part of the BBS for everyone — check the BBS log
-(`journalctl -u anetbbs`) if an edit doesn't seem to be taking effect.
+Drop a complete replacement defining `render_web_landing(request)`,
+called on every visit to the site's home page (`/`) from a visitor who
+isn't logged in yet — an actual `flask.Request` object is passed in,
+same as any Flask route gets. Return anything a normal Flask view can
+return (a rendered template, a redirect, a plain string) to show that
+instead of the normal home page, or return `None` to fall through to
+the normal home page unchanged (useful for a mod that only wants to
+show its landing page under some condition — e.g. once per session via
+a cookie it sets itself):
 
-`call_core_override()` is a general mechanism any other core screen
-could opt into the same way in the future — these four are just what's
-wired up today, not the only ones it's designed for. If there's a
-specific other core screen you'd want this level of control over,
-that's worth raising as a feature request rather than assuming it's
-already possible — see the bug-report template for how.
+```python
+# data/mods/core/web_landing.py
+from flask import render_template_string
+
+def render_web_landing(request):
+    return render_template_string("""
+        <h1>Welcome to {{ bbs_name }}</h1>
+        <p>Connect via <a href="/terminal/">Browser Terminal</a>,
+           or telnet/SSH in directly.</p>
+    """, bbs_name="Your BBS")
+```
+
+Already logged-in visitors never see this — it's a pre-login concept
+by definition, same as the terminal `login_menu` override — and it's
+checked before any of the home page's own (fairly heavy) database
+queries run, not after.
+
+### All five screens share the same behavior
+
+The file is read fresh from disk on every visit to that screen — edit
+it, reconnect (or reload the page, for `web_landing`), see the change,
+no restart. A syntax error, a missing function, or any exception
+raised while your override runs all degrade gracefully back to the
+stock built-in screen instead of breaking that part of the BBS for
+everyone — check the BBS log (`journalctl -u anetbbs` for the terminal
+screens, `journalctl -u anetbbs-web` for `web_landing`) if an edit
+doesn't seem to be taking effect.
+
+`call_core_override()`/`call_core_web_override()` are a general
+mechanism any other core screen could opt into the same way in the
+future — these five are just what's wired up today, not the only ones
+they're designed for. If there's a specific other core screen you'd
+want this level of control over, that's worth raising as a feature
+request rather than assuming it's already possible — see the
+bug-report template for how.
 
 ## 4. Synchronet-compat door script overrides — `data/mods/<name>.js`
 
@@ -292,6 +327,7 @@ shell account on this box."
 | Any menu's header art, including width-variant (80 vs. 132-col) | `data/mods/text/menus/<menu-name>.ans` (+`132.ans`) — works for every menu, database-driven or not |
 | The `welcome`/`goodbye`/`newuser` screen, or a custom `ansi`-action slot | `data/mods/text/<slot>.ans`, or Admin → BBS Menus → ANSI screens |
 | The pre-login menu's, or Chat/Game Center/Sysop Tools' actual **logic**, beyond what a menu item can express | `data/mods/core/<name>.py` |
+| A custom pre-login web landing page for logged-out visitors | `data/mods/core/web_landing.py` |
 | A bundled Synchronet-compat door's behavior | `data/mods/<name>.js` |
 | Site theme / colors | Admin → Themes ([doc 8](08-themes.md)) — not `mods/` |
 | Translations / language packs | Admin → Translations — not `mods/` |

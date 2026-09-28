@@ -85,3 +85,35 @@ async def call_core_override(mod_name: str, func_name: str, stock_fn, *args):
             "data/mods/core/%s.py failed to load/run -- falling back "
             "to the stock version", mod_name)
     return await stock_fn()
+
+
+def call_core_web_override(mod_name: str, func_name: str, stock_fn, *args, **kwargs):
+    """Sync counterpart to call_core_override() above, for Flask (WSGI,
+    synchronous) call sites -- the terminal session code above is all
+    async, but the web app's routes are plain sync functions, so the
+    loader itself needs a sync variant rather than forcing every web
+    call site to run an event loop just to call this. Same contract:
+    try data/mods/core/<mod_name>.py's <func_name>(*args, **kwargs)
+    first, fall back to stock_fn() (a zero-arg callable) if the
+    override file doesn't exist, fails to import, or doesn't define
+    the expected function -- a broken sysop override degrades to stock
+    instead of taking down the route that called this.
+    """
+    try:
+        override_path = _override_path(mod_name)
+        if os.path.isfile(override_path):
+            spec = importlib.util.spec_from_file_location(
+                f'anetbbs_mods_core_{mod_name}', override_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            fn = getattr(module, func_name, None)
+            if fn is not None:
+                return fn(*args, **kwargs)
+            logger.warning(
+                "data/mods/core/%s.py exists but has no %s() -- "
+                "falling back to the stock version", mod_name, func_name)
+    except Exception:
+        logger.exception(
+            "data/mods/core/%s.py failed to load/run -- falling back "
+            "to the stock version", mod_name)
+    return stock_fn()
