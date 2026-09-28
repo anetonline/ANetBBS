@@ -1800,6 +1800,7 @@ def file_areas_admin():
         if action == 'create':
             tag = (request.form.get('tag') or '').strip().upper()
             name = (request.form.get('name') or '').strip()
+            description = (request.form.get('description') or '').strip() or None
             storage_path = (request.form.get('storage_path') or '').strip()
             net_id = request.form.get('network_id', type=int) or None
             create_dir = bool(request.form.get('create_storage_dir'))
@@ -1812,6 +1813,7 @@ def file_areas_admin():
             else:
                 fa = FileArea(
                     tag=tag, name=name or tag,
+                    description=description,
                     storage_path=storage_path or None,
                     network_id=net_id,
                     is_active=True, is_subscribed=True)

@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.3`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.4`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.4 — Terminal admin tool scrolling fix; file area descriptions restored; drop file guidance clarified (September 2026)
+
+Fixed the `anetbbs-cfg` terminal admin tool's editing forms (for example, editing or managing a door game) having no scrolling at all once a form had more fields than fit on a short terminal — content past the visible rows, including the Save/Cancel row itself, simply never rendered, with no way to reach it on a fixed-size SSH session. Its list screens already scrolled correctly; the same scroll-into-view behavior has now been added to every form and menu screen too.
+
+Restored the ability to set a description for each file area from Admin → File Areas. The field was still present in the database and already shown to callers browsing the web file area listing, but had dropped out of the admin page's own create and edit forms, so a sysop had no way left to actually enter or change one.
+
+Reviewed the guidance shown next to the Drop File Type field on the door game admin page, against the real DOOR32.SYS specification and this project's own OpenDoors-based door games. The original note was accurate as far as it went, but has been clarified: RDQ3, ANetCHESS, and ANetCRAFT are unaffected by the caveat described there, since each already carries its own fix for the exact sentinel involved, and only CHAIN.TXT and BBSDEV.DRP currently report a caller's real terminal size — the other drop file types, DOOR32.SYS included, have no such field in their own spec at all.
 
 ## v1.1.3 — Sysop-controlled password recovery; MSP directory in the terminal; MRC mentions fixed in every theme (September 2026)
 

@@ -158,16 +158,36 @@ def _wrap_help_line(line, width):
 
 def run_menu(stdscr, title, items, footer="[Up/Down] Move  [Enter] Select  [Esc] Back"):
     """items: list of (key, label) tuples. Returns the selected key, or
-    None if the user backed out."""
+    None if the user backed out.
+
+    Scrolls the same way run_list()/run_form() do -- no fixed menu here
+    happens to overflow the standard 80x24 today, but this is the exact
+    same "drawn at a fixed row with no bounds check" shape that made
+    run_form() silently swallow anything past row 24 (real bug fixed
+    2026-09-27), so it's fixed here too rather than left as a latent
+    trap for the next menu that grows past ~20 items."""
     idx = 0
+    top = 0
     stdscr.keypad(True)
     safe_curs_set(0)
     while True:
+        h, _w = stdscr.getmaxyx()
+        visible_h = max(1, (h - 2) - 2 + 1)   # rows 2..h-2, footer on h-1
+        if idx < top:
+            top = idx
+        if idx >= top + visible_h:
+            top = idx - visible_h + 1
+        top = max(0, min(top, max(0, len(items) - visible_h)))
+
         stdscr.erase()
         draw_header(stdscr, title)
-        for i, (_key, label) in enumerate(items):
+        for row_i, (_key, label) in enumerate(items[top: top + visible_h]):
+            i = top + row_i
             attr = _attr(2, curses.A_REVERSE) if i == idx else 0
-            _safe_addstr(stdscr, 2 + i, 4, label, attr)
+            _safe_addstr(stdscr, 2 + row_i, 4, label, attr)
+        if len(items) > visible_h:
+            _safe_addstr(stdscr, 0, max(0, _w - 12), f"[{idx + 1}/{len(items)}]",
+                         _attr(1, curses.A_REVERSE))
         draw_footer(stdscr, footer)
         stdscr.refresh()
         ch = stdscr.getch()
@@ -251,38 +271,101 @@ def run_form(stdscr, title, fields, values, help_lines=None,
     data = dict(values)
     nav_items = list(fields) + [_ACTION_SAVE, _ACTION_CANCEL]
     idx = 0
+    top = 0  # scroll offset, in CONTENT rows (not nav-item index)
     safe_curs_set(0)
     label_w = max(len(f["label"]) for f in fields) + 2
-    while True:
-        stdscr.erase()
-        draw_header(stdscr, title)
-        y = 2
-        for i, f in enumerate(fields):
-            attr = _attr(2, curses.A_REVERSE) if i == idx else 0
-            val = data.get(f["key"])
-            if f["kind"] == "bool":
-                shown = "[X]" if val else "[ ]"
-            elif val is None:
-                shown = "(none)"
-            else:
-                shown = str(val)
-            _safe_addstr(stdscr, y, 2, f["label"].ljust(label_w) + ": ", attr)
-            _safe_addstr(stdscr, y, 2 + label_w + 2, shown, attr)
-            y += 1
-        y += 1
-        for action_i, action in enumerate((_ACTION_SAVE, _ACTION_CANCEL)):
-            i = len(fields) + action_i
-            attr = _attr(2, curses.A_REVERSE) if i == idx else _attr(3, curses.A_BOLD)
-            _safe_addstr(stdscr, y, 2, action["label"], attr)
-            y += 1
+
+    def _build_rows(width):
+        """Flattens fields + blank separators + Save/Cancel + help_lines
+        into one linear content list, one entry per screen row. Real bug
+        found live (2026-09-27, reported: editing/managing a door game
+        made the lower fields and the Save button itself unreachable
+        over SSH at the standard 80x24 -- this form has enough
+        conditional fields, especially for door games, to run past row
+        24 with no way to scroll to them at all): every OTHER screen in
+        this module (run_list) already scrolls; this one drew every
+        field/action/help row at a fixed absolute y with no bounds
+        check against the real terminal height, so anything past the
+        bottom just silently never rendered -- including Save itself.
+        Returns (rows, nav_row_of) where nav_row_of maps a nav_items
+        index (a field index, or len(fields)/len(fields)+1 for Save/
+        Cancel) to its row index within `rows`, so the caller can keep
+        whichever item is currently selected scrolled into view."""
+        rows = []
+        nav_row_of = {}
+        for i in range(len(fields)):
+            nav_row_of[i] = len(rows)
+            rows.append(('field', i))
+        rows.append(('blank',))
+        for action_i in range(2):
+            nav_row_of[len(fields) + action_i] = len(rows)
+            rows.append(('action', action_i))
         if help_lines:
-            y += 1
-            _h, _w = stdscr.getmaxyx()
-            help_width = max(10, _w - 4)
+            rows.append(('blank',))
+            help_width = max(10, width - 4)
             for line in help_lines:
                 for wrapped_line in _wrap_help_line(line, help_width):
-                    _safe_addstr(stdscr, y, 2, wrapped_line, _attr(3, curses.A_DIM))
-                    y += 1
+                    rows.append(('help', wrapped_line))
+        return rows, nav_row_of
+
+    while True:
+        h, w = stdscr.getmaxyx()
+        content_top = 2
+        content_bottom = h - 2       # last row before the footer
+        visible_h = max(1, content_bottom - content_top + 1)
+
+        rows, nav_row_of = _build_rows(w)
+        total = len(rows)
+        sel_row = nav_row_of[idx]
+
+        # Keep the selected nav item (field or Save/Cancel) scrolled
+        # into view -- identical clamping logic to run_list()'s own
+        # top/body_h handling just above, applied to content rows
+        # instead of table rows.
+        if sel_row < top:
+            top = sel_row
+        if sel_row >= top + visible_h:
+            top = sel_row - visible_h + 1
+        top = max(0, min(top, max(0, total - visible_h)))
+
+        stdscr.erase()
+        draw_header(stdscr, title)
+        for screen_i in range(visible_h):
+            row_i = top + screen_i
+            if row_i >= total:
+                break
+            entry = rows[row_i]
+            y = content_top + screen_i
+            if entry[0] == 'blank':
+                continue
+            elif entry[0] == 'field':
+                i = entry[1]
+                f = fields[i]
+                attr = _attr(2, curses.A_REVERSE) if i == idx else 0
+                val = data.get(f["key"])
+                if f["kind"] == "bool":
+                    shown = "[X]" if val else "[ ]"
+                elif val is None:
+                    shown = "(none)"
+                else:
+                    shown = str(val)
+                _safe_addstr(stdscr, y, 2, f["label"].ljust(label_w) + ": ", attr)
+                _safe_addstr(stdscr, y, 2 + label_w + 2, shown, attr)
+            elif entry[0] == 'action':
+                action_i = entry[1]
+                action = (_ACTION_SAVE, _ACTION_CANCEL)[action_i]
+                nav_i = len(fields) + action_i
+                attr = _attr(2, curses.A_REVERSE) if nav_i == idx else _attr(3, curses.A_BOLD)
+                _safe_addstr(stdscr, y, 2, action["label"], attr)
+            elif entry[0] == 'help':
+                _safe_addstr(stdscr, y, 2, entry[1], _attr(3, curses.A_DIM))
+
+        # Scroll position indicator -- the only hint (besides the arrow
+        # keys just working) that there's more content above/below.
+        if total > visible_h:
+            _safe_addstr(stdscr, 0, max(0, w - 12), f"[{sel_row + 1}/{total}]",
+                         _attr(1, curses.A_REVERSE))
+
         draw_footer(stdscr, footer)
         stdscr.refresh()
 
@@ -312,7 +395,10 @@ def run_form(stdscr, title, fields, values, help_lines=None,
                 data[key] = choices[i]
             elif kind in ("text", "text_nullable", "int", "int_nullable") and \
                     ch in (10, 13, curses.KEY_ENTER):
-                fy = 2 + idx
+                # On-screen row for the currently selected field, using
+                # the SAME scroll offset just drawn with above -- not
+                # the old fixed "2 + idx", which assumed no scrolling.
+                fy = content_top + (sel_row - top)
                 fx = 2 + label_w + 2
                 fw = curses.COLS - fx - 2
                 new = _edit_line(stdscr, fy, fx, fw, "" if data.get(key) is None else str(data.get(key)))
