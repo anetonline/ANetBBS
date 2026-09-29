@@ -247,6 +247,18 @@
             <div class="col-md-6">
                 {{ form.command_line_args.label(class="form-label") }}
                 {{ form.command_line_args(class="form-control") }}
+                <small class="text-muted">Real bug found live: if you pass the drop file path on
+                the command line (e.g. to satisfy OpenDoors' own <code>-D</code> flag), it
+                <strong>must</strong> be a separate token from the flag &mdash;
+                <code>-D %f</code> (with a space) works, but <code>-D%f</code> (no space)
+                silently fails and the door hangs waiting on a dropfile it never finds.
+                OpenDoors' command-line parser does an exact match against just
+                <code>D</code> after stripping one leading dash/slash, so a combined
+                <code>-D&lt;path&gt;</code> token never matches at all &mdash; confirmed directly
+                against OpenDoors' own <code>ODGetCommandLineParameter()</code>, not guessed.
+                This isn't specific to <code>-D</code>: every OpenDoors flag (<code>-N</code>,
+                <code>-P</code>, <code>-B</code>, <code>-L</code>, etc.) needs the same
+                space-separated form.</small>
             </div>
             <div class="col-md-3">
                 {{ form.drop_file_type.label(class="form-label") }}

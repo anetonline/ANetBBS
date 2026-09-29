@@ -759,8 +759,18 @@ def write_drop_file(user, game, node_number, minutes_remaining=60,
     elif drop_type == 'door32.sys':
         # Native Linux PTY doors need comm_handle=-1 (Mystic STDIO convention)
         # so the door kit uses stdin/stdout instead of fpSend/fpRecv on a PTY fd.
+        # Real bug found live (2026-09-29, "door32.sys doesn't work for
+        # some"): this only special-cased 'door_native', but door_mystic,
+        # door_mystic_mps, and door_synchronet are launched through the
+        # exact same PTY-forking mechanism in door_runner.py (there is no
+        # real socket handle to hand any of them either) -- they were
+        # silently falling through to the DOS/FOSSIL default instead,
+        # telling those doors to look for a COM1/FOSSIL interface that
+        # doesn't exist in this architecture.
         game_type = getattr(game, 'game_type', '') or ''
-        ch = -1 if game_type == 'door_native' else None
+        ch = (-1 if game_type in ('door_native', 'door_mystic',
+                                   'door_mystic_mps', 'door_synchronet')
+              else None)
         generate_door32(user, node_number, minutes_remaining, bbs_name, output_path,
                         comm_handle=ch)
     elif drop_type == 'chain.txt':

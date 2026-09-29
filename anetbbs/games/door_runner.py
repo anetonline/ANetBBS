@@ -441,6 +441,20 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
     Sysops can write `working_directory=%P` for "this node's temp dir"
     or `command_line_args=%f` to feed the drop-file path on the command
     line, the same way Synchronet's xtrn.cnf works.
+
+    Real bug found live (2026-09-29, "door hangs, never responds"):
+    `command_line_args` gets whitespace-split into argv tokens (below),
+    so a value like `-D%f` (no space) expands to ONE combined token
+    (e.g. `-D/path/to/DOOR32.SYS`), not two. OpenDoors' own command-line
+    parser (ODCmdLn.c's ODGetCommandLineParameter()) strips exactly one
+    leading dash/slash then does an EXACT stricmp against just "D" --
+    a combined `-D<path>` token never matches, so the flag is silently
+    ignored and OpenDoors falls back to blind directory auto-detection
+    instead of the real dropfile path, with no error of any kind.
+    `-D %f` (a real space) is required so whitespace-splitting produces
+    the two separate tokens `-D` and the expanded path. This isn't
+    specific to `-D`: every OpenDoors flag (`-N`, `-P`, `-B`, `-L`, etc.)
+    needs the same space-separated form.
     """
     def _xp(value):
         """Expand BBS tokens in a string value if a context is provided."""

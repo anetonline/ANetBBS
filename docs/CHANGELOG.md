@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.10`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.11`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.11 — DOOR32.SYS fix for more native door types; command-line dropfile-path guidance (September 2026)
+
+Fixed DOOR32.SYS not working for some native door games: the fallback that tells a door to use stdin/stdout instead of a real socket handle (there is no real socket under this BBS's process-launch model) was only being applied to one of four door types that all share the exact same launch mechanism. It now applies to all four.
+
+Documented a real gap found while investigating a different reported hang: passing a drop file's path on a door's command line requires the flag and the path to be two separate arguments (`-D %f`, with a space) — writing them as one combined argument (`-D%f`) causes the door's own command-line parser to silently ignore the flag entirely and fall back to guessing at a drop file instead, with no error of any kind. Added guidance directly in the affected admin form field, and in the code, so this doesn't cost the next person a multi-hour debugging session the way it did this time.
 
 ## v1.1.10 — CI test fix, no functional change (September 2026)
 
