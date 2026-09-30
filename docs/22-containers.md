@@ -380,6 +380,15 @@ the BBS, they just won't work:
 - **DOSBox / Mystic BBS / Node.js door games** — none of these runtimes
   are bundled in the image. `GAMES_ENABLED` stays on; DOS/Mystic/Node
   door types specifically report themselves unavailable.
+- **Bundled `door_native` vendor binaries (ANetDRAW, ANetSIMS, etc.)**
+  — `.dockerignore` excludes the whole `vendor/` tree from the image
+  build context, same as `doors/`. The bundled-door seed's own
+  `must_exist` gate already handles this gracefully (no Game row gets
+  created if the binary genuinely isn't there, same as any other
+  missing bundled door) — a sysop wanting one of these in a container
+  deployment registers it manually against a binary they've mounted in
+  themselves, same as any other external door (see
+  [14 — Door games](14-door-games.md)).
 - **ClamAV virus scanning** — shells out to a local `clamscan` binary,
   not bundled in the image, and there's no ClamAV-daemon-over-TCP
   client implemented yet for a sidecar-container setup.

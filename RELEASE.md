@@ -1,3 +1,7 @@
+# ANetBBS v1.1.20 — CI test fix, no functional change (September 2026)
+
+v1.1.19's new ANetDRAW bundled-door tests checked for the real vendored binaries directly, which don't exist inside the Docker CI build (`.dockerignore` excludes the whole `vendor/` tree from the image, same as `doors/` — a pre-existing, deliberate limitation, see `docs/22-containers.md`). Those tests now skip gracefully in that environment instead of failing, the same way every other test in this repo that depends on an environment-specific asset already does.
+
 # ANetBBS v1.1.19 — ANetDRAW: sysop menu + web terminal fixes (September 2026)
 
 Fixed two real gaps found testing v1.1.18's bundled ANetDRAW live:

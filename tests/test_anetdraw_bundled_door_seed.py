@@ -11,10 +11,19 @@ this (still correct -- a sysop who deletes the bundled row and points
 a DIFFERENT slug at their own build still gets the ordinary door path,
 just not the auto-seed).
 
-Unlike every other *_door_seed.py test in this repo, this one's
-`must_exist` check DOES find a real file checked into this exact
-sandbox (vendor/games/anetdraw/anetdraw-x64 and -arm64 were copied in
-alongside this feature) -- no skip-if-missing needed.
+The binaries are real files checked into this repo (vendor/games/
+anetdraw/anetdraw-x64 and -arm64), so AnetdrawBundledDoorSeedTests
+below normally needs no skip-if-missing guard, UNLIKE every other
+*_door_seed.py test here -- except inside the Docker CI build
+specifically: real gap found live (2026-09-30, GitHub Actions run
+#374/#375) -- .dockerignore excludes the whole vendor/ tree from the
+image (matches docs/22-containers.md's "not supported inside
+containers yet" list, alongside doors/), so these files genuinely
+aren't present at /app/vendor/... inside that container even though
+they're correctly committed to git. Skip (not fail) there, same
+"can't test what genuinely isn't there" reasoning
+test_anetbbs_cfg_door_seed.py already uses for its own environment-
+dependent asset.
 """
 import os
 import sys
@@ -26,6 +35,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+_ANETDRAW_X64 = REPO_ROOT / 'vendor' / 'games' / 'anetdraw' / 'anetdraw-x64'
+_ANETDRAW_ARM64 = REPO_ROOT / 'vendor' / 'games' / 'anetdraw' / 'anetdraw-arm64'
 
 
 def _fresh_app(db_path):
@@ -61,6 +72,10 @@ class AnetdrawBinaryNameTests(unittest.TestCase):
             self.assertEqual(_anetdraw_binary_name(), 'anetdraw-x64')
 
 
+@unittest.skipUnless(_ANETDRAW_X64.is_file() and _ANETDRAW_ARM64.is_file(),
+                     'requires the real vendored ANetDRAW binaries -- not '
+                     'present inside the Docker CI image (.dockerignore '
+                     'excludes vendor/, see docs/22-containers.md)')
 class AnetdrawBundledDoorSeedTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

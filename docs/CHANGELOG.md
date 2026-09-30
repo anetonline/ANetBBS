@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.19`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.20`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.20 — CI test fix, no functional change (September 2026)
+
+v1.1.19's new ANetDRAW bundled-door tests checked for the real vendored binaries directly, which don't exist inside the Docker CI build (`.dockerignore` excludes the whole `vendor/` tree from the image, same as `doors/` — a pre-existing, deliberate limitation, see `docs/22-containers.md`). Those tests now skip gracefully in that environment instead of failing, the same way every other test in this repo that depends on an environment-specific asset already does.
 
 ## v1.1.19 — ANetDRAW: sysop menu + web terminal fixes (September 2026)
 
