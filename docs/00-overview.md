@@ -112,7 +112,7 @@ once.
 - [29 — Watch It Live (public no-login activity page)](29-watch-live.md)
 - [30 — Postcards (shareable ANSI/PETSCII art)](30-postcards.md)
 - [31 — Auto-social-posting queue (Bluesky/Mastodon)](31-social-posting.md)
-- [32 — `anetbbs-monitor` (live node monitor, SSH/console)](32-node-monitor.md)
+- [32 — `anetbbs-monitor` (sysop console dashboard: nodes, stats, logs)](32-node-monitor.md)
 - [33 — Presence alerts (real-time "X just logged in/out")](33-presence-alerts.md)
 - [34 — JAM message base export (for classic door games)](34-jam-export.md)
 - [35 — The mods directory (customization that survives updates)](35-mods-directory.md)

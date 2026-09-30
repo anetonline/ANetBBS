@@ -1,3 +1,9 @@
+# ANetBBS v1.1.14 — anetbbs-monitor: cfg-launch crash fix, visual redesign (September 2026)
+
+Fixed a crash in `anetbbs-monitor`'s one-key `anetbbs-cfg` launch (added in v1.1.12): it shelled out to a `python -m anetbbs.cfg.app` subprocess, which re-resolves Python's module search path from scratch in the child process and inserts the caller's current directory first — if that directory happens to look like an `anetbbs` path, the wrong thing can get imported instead of the real installed package, crashing with a confusing `ImportError`. It now calls the same code directly in the already-running process instead, which needs no new path resolution at all.
+
+Gave `anetbbs-monitor`'s dashboard a real visual pass: the activity stats panel is now a proper bordered box with today's figures picked out in color against the totals, a live/idle status indicator on the title bar, and colored hotkey letters in the footer.
+
 # ANetBBS v1.1.13 — sysop core-override loader disconnect-handling fix (September 2026)
 
 Fixed a logging/reliability gap in the sysop core-override loader (`data/mods/core/<name>.py`, used for things like a customized login menu): a caller disconnecting mid-render was being mislabeled as a broken override and logged as an error with a full traceback, then a fallback attempt was made against the same already-dead connection. A normal disconnect during an override now propagates and unwinds the session cleanly, the same way it already does everywhere else in the codebase — a genuinely broken override file (missing function, syntax error, runtime exception unrelated to the connection) still degrades to the stock screen as before.

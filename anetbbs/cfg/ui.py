@@ -75,11 +75,19 @@ def init_colors(theme='dark'):
         curses.init_pair(2, curses.COLOR_WHITE, curses.COLOR_BLUE)   # selected row
         curses.init_pair(3, curses.COLOR_BLUE, bg)                   # hints/help
         curses.init_pair(4, curses.COLOR_RED, bg)                    # errors
+        curses.init_pair(5, curses.COLOR_GREEN, bg)                  # good/online/positive
+        curses.init_pair(6, curses.COLOR_MAGENTA, bg)                # section labels/accents
+        curses.init_pair(7, curses.COLOR_BLUE, bg)                   # box-drawing borders
+        curses.init_pair(8, curses.COLOR_GREEN, curses.COLOR_BLUE)   # status dot on the header bar
     else:
         curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)   # header/footer bars
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)   # selected row
         curses.init_pair(3, curses.COLOR_YELLOW, bg)                 # hints/help
         curses.init_pair(4, curses.COLOR_RED, bg)                    # errors
+        curses.init_pair(5, curses.COLOR_GREEN, bg)                  # good/online/positive
+        curses.init_pair(6, curses.COLOR_MAGENTA, bg)                # section labels/accents
+        curses.init_pair(7, curses.COLOR_CYAN, bg)                   # box-drawing borders
+        curses.init_pair(8, curses.COLOR_GREEN, curses.COLOR_BLUE)   # status dot on the header bar
 
 
 def _attr(pair, fallback=0):

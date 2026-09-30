@@ -372,5 +372,30 @@ class WebDownloadActivityLoggingTests(unittest.TestCase):
                                  'shared-link downloader is always anonymous')
 
 
+class LaunchCfgTests(unittest.TestCase):
+    """Real bug found live (2026-09-30): _launch_cfg() originally
+    shelled out to `[sys.executable, '-m', 'anetbbs.cfg.app']`, which
+    re-resolves sys.path in the child process from scratch -- if the
+    caller's cwd happens to look like an `anetbbs` path (e.g. the
+    install dir itself), Python's namespace-package fallback can
+    resolve `anetbbs` to the wrong directory entirely, crashing with
+    "cannot import name '__version__' from 'anetbbs' (unknown
+    location)". The fix calls anetbbs.cfg.app.main() directly in this
+    same process instead, so no new sys.path resolution ever happens."""
+
+    def test_launch_cfg_calls_cfg_main_in_process_not_subprocess(self):
+        from unittest.mock import patch, MagicMock
+        from anetbbs.monitor.app import _launch_cfg
+
+        fake_stdscr = MagicMock()
+        with patch('anetbbs.cfg.app.main') as mock_main, \
+             patch('curses.endwin'), \
+             patch('curses.doupdate'), \
+             patch('anetbbs.monitor.app.safe_curs_set'):
+            _launch_cfg(fake_stdscr)
+        mock_main.assert_called_once_with()
+        fake_stdscr.clear.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()

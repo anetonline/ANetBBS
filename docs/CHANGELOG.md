@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.13`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.14`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.14 — anetbbs-monitor: cfg-launch crash fix, visual redesign (September 2026)
+
+Fixed a crash in `anetbbs-monitor`'s one-key `anetbbs-cfg` launch (added in v1.1.12): it shelled out to a `python -m anetbbs.cfg.app` subprocess, which re-resolves Python's module search path from scratch in the child process and inserts the caller's current directory first — if that directory happens to look like an `anetbbs` path, the wrong thing can get imported instead of the real installed package, crashing with a confusing `ImportError`. It now calls the same code directly in the already-running process instead, which needs no new path resolution at all.
+
+Gave `anetbbs-monitor`'s dashboard a real visual pass: the activity stats panel is now a proper bordered box with today's figures picked out in color against the totals, a live/idle status indicator on the title bar, and colored hotkey letters in the footer.
 
 ## v1.1.13 — sysop core-override loader disconnect-handling fix (September 2026)
 

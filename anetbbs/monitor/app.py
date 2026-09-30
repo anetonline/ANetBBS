@@ -54,7 +54,6 @@ in-BBS Node Monitor have this exact same gap today.
 """
 import curses
 import os
-import subprocess
 import sys
 from datetime import datetime, timedelta
 
@@ -77,13 +76,13 @@ ONLINE_CUTOFF_MINUTES = 5
 REFRESH_MS = 1000
 
 # Reserved screen rows around the scrollable node list: header, column
-# header, a separator before the stats panel, the stats panel itself
-# (STATS_ROWS lines), and the footer/hint bar. Kept as named constants
-# so _draw()'s row-position math and the "how many node rows actually
-# fit" calc in _run() can't drift apart from hand-editing one but not
-# the other.
-STATS_ROWS = 4
-RESERVED_ROWS = 2 + 1 + STATS_ROWS + 1  # header+colhdr, sep, stats, footer
+# header, the boxed stats panel (STATS_ROWS lines -- a top border, 3
+# content lines, a bottom border), and the footer/hint bar. Kept as
+# named constants so _draw()'s row-position math and the "how many
+# node rows actually fit" calc in _run() can't drift apart from
+# hand-editing one but not the other.
+STATS_ROWS = 5
+RESERVED_ROWS = 2 + STATS_ROWS + 1  # header+colhdr, boxed stats panel, footer
 
 
 def _bbs_nodes():
@@ -360,6 +359,18 @@ def _draw(stdscr, nodes, total_slots, sel, stats, db_error=None):
         header = f" {TITLE} :: DB ERROR: {db_error} -- showing last known state "
     _addstr(stdscr, 0, 0, header.ljust(w - 1),
             _attr(4 if db_error else 1, curses.A_REVERSE | curses.A_BOLD))
+    if not db_error:
+        # A colored status dot right after the leading space -- solid
+        # green when at least one node is live, blending into the bar
+        # (plain white-on-blue, pair 1) when the board is quiet -- gives
+        # an at-a-glance "is anything happening" read without parsing
+        # the online count text. Pair 8 is dedicated to this (green
+        # foreground pinned to the header bar's own blue background)
+        # rather than reusing pair 5 + A_REVERSE, which would fight
+        # with the header row's own already-reversed white-on-blue bar.
+        dot = '●' if online else '○'  # ● / ○
+        dot_attr = _attr(8, curses.A_BOLD) if online else _attr(1, curses.A_REVERSE)
+        _addstr(stdscr, 0, 0, dot, dot_attr)
 
     col_header = _fmt_row('Slot', 'User', 'Proto', 'Peer', 'Action', 'Since', 'Idle')
     _addstr(stdscr, 1, 0, col_header, curses.A_BOLD)
@@ -399,38 +410,99 @@ def _draw(stdscr, nodes, total_slots, sel, stats, db_error=None):
                 attr = _attr(3)
         _addstr(stdscr, y, 0, line, attr)
 
-    # Stats panel: separator, then Today/Total/Uploads/Downloads in a
-    # simple two-column layout -- fixed-position labeled fields the
-    # same way the header/footer are drawn, not a new widget
-    # abstraction (matches this module's existing style, per the
-    # approved plan).
-    sep_row = list_end_row
-    stats_row0 = sep_row + 1
-    _addstr(stdscr, sep_row, 0, '─' * (w - 1), _attr(3))
-    if stats is not None:
-        _addstr(stdscr, stats_row0, 0,
-                f"Today:  Logons {stats['logons_today']:<4} "
-                f"Time {_fmt_hms(stats['time_today']):<9} "
-                f"New Users {stats['new_users_today']:<4} "
-                f"Posts {stats['posts_today']:<4} "
-                f"E-mail {stats['email_today']:<4}", curses.A_BOLD)
-        _addstr(stdscr, stats_row0 + 1, 0,
-                f"Total:  Logons {stats['logons_total']:<4} "
-                f"Time {_fmt_hms(stats['time_total']):<9} "
-                f"New Users {stats['new_users_total']:<4} "
-                f"Posts {stats['posts_total']:<4} "
-                f"E-mail {stats['email_total']:<4}")
-        _addstr(stdscr, stats_row0 + 2, 0,
-                f"Uploads today:   {stats['uploads_today_files']} files, "
-                f"{_fmt_bytes(stats['uploads_today_bytes'])}")
-        _addstr(stdscr, stats_row0 + 3, 0,
-                f"Downloads today: {stats['downloads_today']} files")
-    else:
-        _addstr(stdscr, stats_row0, 0, "(stats unavailable -- DB error above)", _attr(4))
+    # Stats panel: a boxed "Activity" panel (top border with an
+    # embedded label, 3 content lines, bottom border) -- Today's
+    # numbers in green (the "happening right now" figures), Total's in
+    # the border's own cyan/blue (lifetime/historical, deliberately
+    # less emphasized), with unicode up/down triangles marking
+    # uploads/downloads. Box-drawing is already confirmed safe on this
+    # tool's terminals -- the plain '─' separator this replaces was
+    # already rendering correctly live -- and this is an SSH-shell
+    # console tool, not a CP437 BBS terminal session, so UTF-8 is the
+    # safe assumption here.
+    box_row0 = list_end_row
+    inner_w = max(0, w - 3)  # width between the two vertical bars
 
-    footer = f" {_menu_hint_line()}  ::  yellow=AFK  red=not heartbeating >{STALE_WARNING_SECONDS}s "
-    _addstr(stdscr, h - 1, 0, footer.ljust(w - 1), _attr(1, curses.A_REVERSE))
+    def _box_top(y):
+        label = ' Activity '
+        left = '┌─'  # ┌─
+        fill_len = max(0, w - 1 - len(left) - len(label) - 1)
+        line = (left + label + ('─' * fill_len) + '┐')[:w - 1]
+        _addstr(stdscr, y, 0, line, _attr(7))
+
+    def _box_bottom(y):
+        line = ('└' + ('─' * max(0, w - 3)) + '┘')[:w - 1]
+        _addstr(stdscr, y, 0, line, _attr(7))
+
+    def _box_line(y, segments):
+        """segments: [(text, attr), ...] drawn left-to-right inside the
+        box, space-padded out to inner_w before the right border."""
+        _addstr(stdscr, y, 0, '│', _attr(7))
+        x, used = 1, 0
+        for text, attr in segments:
+            _addstr(stdscr, y, x, text, attr)
+            x += len(text)
+            used += len(text)
+        pad = max(0, inner_w - used)
+        if pad:
+            _addstr(stdscr, y, x, ' ' * pad)
+        _addstr(stdscr, y, w - 2, '│', _attr(7))
+
+    _box_top(box_row0)
+    if stats is not None:
+        _box_line(box_row0 + 1, [
+            (' Today   ', _attr(6, curses.A_BOLD)),
+            (f"Logons {stats['logons_today']:<4} ", _attr(5, curses.A_BOLD)),
+            (f"Time {_fmt_hms(stats['time_today']):<9} ", _attr(5, curses.A_BOLD)),
+            (f"New {stats['new_users_today']:<4} ", _attr(5, curses.A_BOLD)),
+            (f"Posts {stats['posts_today']:<4} ", _attr(5, curses.A_BOLD)),
+            (f"Mail {stats['email_today']:<4}", _attr(5, curses.A_BOLD)),
+        ])
+        _box_line(box_row0 + 2, [
+            (' Total   ', _attr(6, curses.A_BOLD)),
+            (f"Logons {stats['logons_total']:<4} ", _attr(7)),
+            (f"Time {_fmt_hms(stats['time_total']):<9} ", _attr(7)),
+            (f"New {stats['new_users_total']:<4} ", _attr(7)),
+            (f"Posts {stats['posts_total']:<4} ", _attr(7)),
+            (f"Mail {stats['email_total']:<4}", _attr(7)),
+        ])
+        _box_line(box_row0 + 3, [
+            (' ▲ Uploads ', _attr(5, curses.A_BOLD)),
+            (f"{stats['uploads_today_files']} files, "
+             f"{_fmt_bytes(stats['uploads_today_bytes'])}    ", 0),
+            ('▼ Downloads ', _attr(6, curses.A_BOLD)),
+            (f"{stats['downloads_today']} files", 0),
+        ])
+    else:
+        _box_line(box_row0 + 1, [(' (stats unavailable -- DB error above)', _attr(4))])
+        _box_line(box_row0 + 2, [('', 0)])
+        _box_line(box_row0 + 3, [('', 0)])
+    _box_bottom(box_row0 + 4)
+
+    _draw_footer(stdscr, h - 1, w)
     stdscr.refresh()
+
+
+def _draw_footer(stdscr, y, w):
+    """Draws the same text _menu_hint_line() returns (so
+    _hotkey_hit_test's column math -- computed against that plain
+    string -- stays valid), but segment-by-segment so each hotkey
+    letter gets its own bright color against the bar instead of the
+    whole footer being one flat reverse-video block."""
+    bar_attr = _attr(1, curses.A_REVERSE)
+    _addstr(stdscr, y, 0, ' '.ljust(w - 1), bar_attr)
+    x = 1
+    for key, label in MENU_HOTKEYS:
+        _addstr(stdscr, y, x, '[', bar_attr)
+        x += 1
+        _addstr(stdscr, y, x, key, _attr(8, curses.A_REVERSE | curses.A_BOLD))
+        x += 1
+        _addstr(stdscr, y, x, f']{label}', bar_attr)
+        x += 1 + len(label)
+        _addstr(stdscr, y, x, '  ', bar_attr)
+        x += 2
+    tail = f":: yellow=AFK  red=not heartbeating >{STALE_WARNING_SECONDS}s "
+    _addstr(stdscr, y, x, tail, bar_attr)
 
 
 def _default_log_path(app):
@@ -519,15 +591,34 @@ def _view_log(stdscr, app):
 
 def _launch_cfg(stdscr):
     """Hands the real terminal off to anetbbs-cfg and cleanly resumes
-    this screen on return. Uses the same interpreter (sys.executable)
-    rather than relying on the anetbbs-cfg console-script being on
-    PATH -- this process is already running under whatever venv/
-    interpreter has anetbbs installed, so `-m anetbbs.cfg.app` is
-    guaranteed to resolve the same package this process itself came
-    from."""
+    this screen on return.
+
+    Real bug found live (2026-09-30): this originally shelled out to
+    `[sys.executable, '-m', 'anetbbs.cfg.app']` on the theory that
+    reusing sys.executable was "guaranteed" to resolve the same
+    package this process itself came from. That's wrong -- `-m`
+    re-resolves sys.path from scratch in the child process, inserting
+    the child's OWN current working directory ahead of everything
+    else. If that cwd happens to contain anything shaped like an
+    `anetbbs` path segment (e.g. the install directory itself sitting
+    at ~/anetbbs), Python's namespace-package fallback can resolve
+    `anetbbs` to that unrelated directory instead of the real
+    installed package, crashing with a confusing "cannot import name
+    '__version__' from 'anetbbs' (unknown location)" ImportError --
+    unrelated to whatever this process already has loaded.
+
+    Since `anetbbs.cfg.app` is already importable right here (this
+    process already imported `anetbbs` successfully to get this far),
+    calling its main() directly in-process sidesteps the whole
+    problem -- no new sys.path resolution happens at all. main() is a
+    plain function (only `if __name__ == "__main__"` calls sys.exit),
+    and curses.wrapper() inside it does its own init/teardown safely
+    nested after our own curses.endwin() below.
+    """
     curses.endwin()
     try:
-        subprocess.call([sys.executable, '-m', 'anetbbs.cfg.app'])
+        from anetbbs.cfg.app import main as _cfg_main
+        _cfg_main()
     finally:
         # Re-enter curses mode and force a full redraw -- stdscr itself
         # is still the same window object curses.wrapper() gave us, it

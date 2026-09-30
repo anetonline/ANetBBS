@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.1.13`, September 2026)
+**Status: stable** (`v1.1.14`, September 2026)
 
 A modern multi-node BBS for the classic FidoNet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -29,8 +29,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:8080`).
 
 ```
-tar xzf ANetBBS-v1.1.13.tar.gz
-cd ANetBBS-v1.1.13
+tar xzf ANetBBS-v1.1.14.tar.gz
+cd ANetBBS-v1.1.14
 sudo bash install.sh
 ```
 
@@ -50,8 +50,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.1.13.tar.gz
-cd ANetBBS-v1.1.13
+tar xzf ANetBBS-v1.1.14.tar.gz
+cd ANetBBS-v1.1.14
 sudo bash update.sh
 ```
 
@@ -84,7 +84,7 @@ docker compose -f docker/compose/docker-compose.yml up -d
 ```
 
 `.env` already points at `ghcr.io/anetonline/anetbbs:latest` by
-default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.13`
+default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.14`
 (or whatever release you want). Testing a local change instead of a
 published image? `docker build -f docker/Dockerfile -t anetbbs:local .`,
 then set `ANETBBS_IMAGE=anetbbs` / `ANETBBS_IMAGE_TAG=local` in `.env`.
@@ -280,11 +280,13 @@ what each command actually does, and troubleshooting).
   settings — no browser required. `python -m anetbbs.cfg` from a
   checkout, or
   `anetbbs-cfg` once installed.
-- `anetbbs-monitor` — live, auto-refreshing node monitor (uMonitor /
-  nodespy style): who's connected, on what protocol, from where, doing
-  what, with a kick action, refreshing every second in a terminal — no
-  browser required. `python -m anetbbs.monitor.app` from a checkout, or
-  `anetbbs-monitor` once installed.
+- `anetbbs-monitor` — a console-only sysop dashboard (uMonitor /
+  nodespy style): a live, auto-refreshing node list (who's connected,
+  on what protocol, from where, doing what, with a kick action), a
+  Today/Total activity stats panel, a scrollable `bbs.log` viewer,
+  one-key access to `anetbbs-cfg`, a light/dark theme toggle, and
+  mouse support — no browser required. `python -m anetbbs.monitor.app`
+  from a checkout, or `anetbbs-monitor` once installed.
 
 ## Documentation
 
@@ -302,7 +304,7 @@ what each command actually does, and troubleshooting).
 - [`docs/25-petscii.md`](docs/25-petscii.md) — PETSCII (C64/128) terminal support
 - [`docs/26-synchronet-json-rpc-doors.md`](docs/26-synchronet-json-rpc-doors.md) — 17 confirmed-working Synchronet door games (download/setup)
 - [`docs/28-anetbbs-cfg.md`](docs/28-anetbbs-cfg.md) — `anetbbs-cfg`, the SSH/console terminal config tool
-- [`docs/32-node-monitor.md`](docs/32-node-monitor.md) — `anetbbs-monitor`, the SSH/console live node monitor
+- [`docs/32-node-monitor.md`](docs/32-node-monitor.md) — `anetbbs-monitor`, the console-only sysop dashboard (nodes, stats, logs, theme)
 - [`docs/34-jam-export.md`](docs/34-jam-export.md) — JAM message base export for classic door games
 - [`docs/35-mods-directory.md`](docs/35-mods-directory.md) — customizing art/scripts/login logic so changes survive updates
 
