@@ -2816,6 +2816,23 @@ class BBSMenuUI:
             await self.session.read_line("\r\nPress Enter...")
             return
 
+        # Real gap found live (2026-09-29, building anetbbs-monitor's stats
+        # panel): 'file_download' is listed in UserActivity's own docstring
+        # as a common activity_type value but was never actually written
+        # anywhere. Logged here (transfer about to start), matching the
+        # web download routes' own "count before serving" convention
+        # (file_areas.py's own comment: right so the count is correct
+        # even if the caller aborts mid-transfer), not gated on the
+        # eventual `ok` result below.
+        from anetbbs.models import db, UserActivity
+        with _app().app_context():
+            db.session.add(UserActivity(
+                user_id=self.session.user.get('id'),
+                activity_type='file_download',
+                details=f'{name} via {protocol}',
+                service=self.session.user.get('service') or 'telnet'))
+            db.session.commit()
+
         await self.session.write(
             f"\r\n{FG['grn']}Starting {protocol.upper()} send of {name} ...{RESET}\r\n"
             f"Begin your terminal's {FG['wht']}receive{RESET} now.\r\n\r\n")

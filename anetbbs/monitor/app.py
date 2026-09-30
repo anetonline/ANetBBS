@@ -4,10 +4,11 @@ Usage:
     python -m anetbbs.monitor
     anetbbs-monitor               (once installed via setup.py console_scripts)
 
-A live, auto-refreshing view of every BBS node -- who's connected, on
-what protocol, from where, and what they're currently doing -- the CLI
-equivalent of Synchronet's uMonitor / Mystic's nodespy, run directly on
-a shell (SSH into the box, no browser needed).
+A live, auto-refreshing dashboard for the whole BBS -- who's connected,
+on what protocol, from where, and what they're currently doing, plus
+Today/Total activity stats, a log viewer, and one-key access to
+anetbbs-cfg -- the CLI equivalent of Synchronet's uMonitor / Mystic's
+nodespy, run directly on a shell (SSH into the box, no browser needed).
 
 This is a new FRONT END, not new tracking: ANetBBS already runs a real
 classic multinode architecture. core/session.py acquires a fixed slot
@@ -18,7 +19,13 @@ last_seen -- the exact same data web/control.py's NodeSpy panel
 (nodespy_json) and the in-BBS terminal Node Monitor
 (features/bbs_ui.py:_sysop_node_monitor) already read and, for kick,
 write. This module is the third reader/writer of that same table, not
-a fourth kind of tracking.
+a fourth kind of tracking. The Today/Total stats panel is the same
+story: every field maps to a real, already-tracked column (CallerLog,
+User, Post, EchomailMessage, PrivateMessage, InstantMessage,
+FileUpload, UserActivity) -- see fetch_stats()'s own docstring for the
+one real gap found and fixed while building this (file_download events
+were never actually logged anywhere despite being a documented
+UserActivity.activity_type value).
 
 Deliberately duplicates the 5-minute online cutoff and the kick
 mutation shape (kick_requested/kick_reason + a UserActivity audit row)
@@ -47,11 +54,12 @@ in-BBS Node Monitor have this exact same gap today.
 """
 import curses
 import os
+import subprocess
 import sys
 from datetime import datetime, timedelta
 
 from anetbbs.cfg.db_bootstrap import create_minimal_app
-from anetbbs.cfg.ui import safe_curs_set, init_colors, prompt_text
+from anetbbs.cfg.ui import safe_curs_set, init_colors, prompt_text, show_message
 
 TITLE = "ANetBBS Node Monitor"
 
@@ -67,6 +75,15 @@ ONLINE_CUTOFF_MINUTES = 5
 # reason to redraw itself; a live monitor is the whole reason this file
 # exists rather than being a new anetbbs-cfg section.
 REFRESH_MS = 1000
+
+# Reserved screen rows around the scrollable node list: header, column
+# header, a separator before the stats panel, the stats panel itself
+# (STATS_ROWS lines), and the footer/hint bar. Kept as named constants
+# so _draw()'s row-position math and the "how many node rows actually
+# fit" calc in _run() can't drift apart from hand-editing one but not
+# the other.
+STATS_ROWS = 4
+RESERVED_ROWS = 2 + 1 + STATS_ROWS + 1  # header+colhdr, sep, stats, footer
 
 
 def _bbs_nodes():
@@ -106,6 +123,87 @@ def fetch_live_nodes():
     return {r.slot: r for r in rows}
 
 
+def fetch_stats():
+    """Today/Total activity stats for the dashboard panel. Every field
+    maps to a real, already-tracked column -- no new tracking needed,
+    confirmed by reading models.py directly rather than assumed:
+
+      Logons / Time    -- CallerLog.started_at/duration_seconds
+      New Users        -- User.created_at
+      Posts            -- Post + EchomailMessage (outbound only -- see
+                           below for why inbound/imported FTN traffic
+                           is deliberately excluded)
+      E-mail           -- PrivateMessage + InstantMessage
+      Uploads today    -- FileUpload.created_at (count + summed bytes)
+      Downloads today  -- UserActivity(activity_type='file_download')
+
+    Posts counts EchomailMessage.direction == 'outbound' only, not
+    every row: EchomailMessage.created_at also covers messages this BBS
+    merely *received* from the network (imported FTN traffic), which
+    isn't this BBS's own posting activity and would inflate the number
+    for any install with heavy inbound echomail -- outbound is the
+    correct filter to match what "Posts" actually means here.
+
+    Real gap found and fixed while building this panel: 'file_download'
+    is listed in UserActivity's own docstring as a common activity_type
+    value but was never actually written anywhere -- FileUpload.
+    download_count / SharedFileLink.download_count are lifetime
+    cumulative counters incremented in place, with no per-event
+    timestamped row, so there was previously no way to compute a real
+    per-day download count at all. Fixed at the three real download
+    call sites (web/files.py, web/file_areas.py, features/bbs_ui.py's
+    terminal ZMODEM path) rather than worked around here.
+    """
+    from anetbbs.models import (
+        db, CallerLog, User, Post, EchomailMessage, PrivateMessage,
+        InstantMessage, FileUpload, UserActivity)
+    from sqlalchemy import func
+
+    today_start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+
+    logons_today = CallerLog.query.filter(CallerLog.started_at >= today_start).count()
+    logons_total = CallerLog.query.count()
+    time_today = (db.session.query(func.sum(CallerLog.duration_seconds))
+                  .filter(CallerLog.started_at >= today_start).scalar() or 0)
+    time_total = db.session.query(func.sum(CallerLog.duration_seconds)).scalar() or 0
+
+    new_users_today = User.query.filter(User.created_at >= today_start).count()
+    new_users_total = User.query.count()
+
+    posts_today = (Post.query.filter(Post.created_at >= today_start).count()
+                   + EchomailMessage.query.filter(
+                       EchomailMessage.direction == 'outbound',
+                       EchomailMessage.created_at >= today_start).count())
+    posts_total = (Post.query.count()
+                   + EchomailMessage.query.filter_by(direction='outbound').count())
+
+    email_today = (PrivateMessage.query.filter(
+                       PrivateMessage.created_at >= today_start).count()
+                   + InstantMessage.query.filter(
+                       InstantMessage.received_at >= today_start).count())
+    email_total = PrivateMessage.query.count() + InstantMessage.query.count()
+
+    upload_rows_today = FileUpload.query.filter(
+        FileUpload.created_at >= today_start).all()
+    uploads_today_files = len(upload_rows_today)
+    uploads_today_bytes = sum(r.file_size or 0 for r in upload_rows_today)
+
+    downloads_today = UserActivity.query.filter(
+        UserActivity.activity_type == 'file_download',
+        UserActivity.created_at >= today_start).count()
+
+    return {
+        'logons_today': logons_today, 'logons_total': logons_total,
+        'time_today': int(time_today), 'time_total': int(time_total),
+        'new_users_today': new_users_today, 'new_users_total': new_users_total,
+        'posts_today': posts_today, 'posts_total': posts_total,
+        'email_today': email_today, 'email_total': email_total,
+        'uploads_today_files': uploads_today_files,
+        'uploads_today_bytes': uploads_today_bytes,
+        'downloads_today': downloads_today,
+    }
+
+
 def kick_node(slot, reason):
     """Sets the same kick_requested/kick_reason flag NodeSpy's web kick
     button and the in-BBS Node Monitor set -- picked up by
@@ -139,6 +237,46 @@ def _fmt_delta(td):
     return f"{mins}:{s:02d}"
 
 
+def _fmt_hms(total_seconds):
+    """Same shape as _fmt_delta but takes a raw second count (the stats
+    panel's summed CallerLog.duration_seconds), not a timedelta."""
+    secs = max(0, int(total_seconds))
+    hours, rem = divmod(secs, 3600)
+    mins, s = divmod(rem, 60)
+    return f"{hours}:{mins:02d}:{s:02d}"
+
+
+def _fmt_bytes(n):
+    n = max(0, int(n))
+    for unit in ('bytes', 'KB', 'MB', 'GB'):
+        if n < 1024 or unit == 'GB':
+            return f"{n:,} {unit}" if unit == 'bytes' else f"{n:.1f} {unit}"
+        n /= 1024.0
+    return f"{n:.1f} GB"
+
+
+def _theme_state_path(app):
+    return os.path.join(app.config['DATA_DIR'], 'monitor_theme.txt')
+
+
+def _load_theme(app):
+    try:
+        with open(_theme_state_path(app)) as f:
+            theme = f.read().strip()
+        return theme if theme in ('dark', 'light') else 'dark'
+    except OSError:
+        return 'dark'
+
+
+def _save_theme(app, theme):
+    try:
+        os.makedirs(app.config['DATA_DIR'], exist_ok=True)
+        with open(_theme_state_path(app), 'w') as f:
+            f.write(theme)
+    except OSError:
+        pass  # cosmetic persistence only -- never worth crashing over
+
+
 def _attr(pair, extra=0):
     if curses.has_colors():
         return curses.color_pair(pair) | extra
@@ -159,7 +297,52 @@ def _addstr(win, y, x, text, attr=0):
         pass
 
 
-def _draw(stdscr, nodes, total_slots, sel, db_error=None):
+# Column widths as named constants, shared by the header and every row,
+# so the two can't drift out of alignment the way two independently
+# hand-formatted f-strings can. USER/PROTO/PEER/ACTION widths are sized
+# for real values seen live: PROTO must fit "petscii40"/"petscii80" (9
+# chars, per models.PresenceEvent's own protocol column comment) not
+# just "telnet"/"rlogin" (6); ACTION must fit phrases like "Away From
+# Keyboard (screensaver)" (33 chars, core/session.py's own AFK label)
+# without truncating mid-word.
+W_SLOT, W_USER, W_PROTO, W_PEER, W_ACTION, W_TIME = 4, 15, 10, 20, 34, 8
+
+
+def _fmt_row(slot_s, user_s, proto_s, peer_s, action_s, since_s, idle_s):
+    return (f"  {slot_s:>{W_SLOT}}  {user_s:<{W_USER}} {proto_s:<{W_PROTO}} "
+            f"{peer_s:<{W_PEER}} {action_s:<{W_ACTION}} {since_s:>{W_TIME}} {idle_s:>{W_TIME}}")
+
+
+# Menu hint bar hotkeys, in display order -- shared by the header hint
+# line and mouse-click hit-testing (_hotkey_hit_test below) so a click
+# on a label always maps to the exact same key the label itself names,
+# rather than keeping two independently-hand-maintained lists in sync.
+MENU_HOTKEYS = [
+    ('C', 'Cfg'), ('L', 'Logs'), ('T', 'Theme'),
+    ('K', 'Kick'), ('R', 'Refresh'), ('Q', 'Quit'),
+]
+
+
+def _menu_hint_line():
+    return '  '.join(f"[{key}]{label}" for key, label in MENU_HOTKEYS)
+
+
+def _hotkey_hit_test(x, line_text):
+    """Given a click x-position on the row _menu_hint_line() was drawn
+    into (starting at column 0), return the hotkey letter it landed on,
+    or None. Walks the same MENU_HOTKEYS list the hint line itself was
+    built from, so the two can never disagree about where a label is."""
+    pos = 0
+    for key, label in MENU_HOTKEYS:
+        token = f"[{key}]{label}"
+        end = pos + len(token)
+        if pos <= x < end:
+            return key
+        pos = end + 2  # the '  ' separator _menu_hint_line() joins with
+    return None
+
+
+def _draw(stdscr, nodes, total_slots, sel, stats, db_error=None):
     stdscr.erase()
     h, w = stdscr.getmaxyx()
     online = len(nodes)
@@ -178,27 +361,15 @@ def _draw(stdscr, nodes, total_slots, sel, db_error=None):
     _addstr(stdscr, 0, 0, header.ljust(w - 1),
             _attr(4 if db_error else 1, curses.A_REVERSE | curses.A_BOLD))
 
-    # Column widths as named constants, shared by the header and every row,
-    # so the two can't drift out of alignment the way two independently
-    # hand-formatted f-strings can. USER/PROTO/PEER/ACTION widths are sized
-    # for real values seen live: PROTO must fit "petscii40"/"petscii80" (9
-    # chars, per models.PresenceEvent's own protocol column comment) not
-    # just "telnet"/"rlogin" (6); ACTION must fit phrases like "Away From
-    # Keyboard (screensaver)" (33 chars, core/session.py's own AFK label)
-    # without truncating mid-word.
-    W_SLOT, W_USER, W_PROTO, W_PEER, W_ACTION, W_TIME = 4, 15, 10, 20, 34, 8
-
-    def _fmt_row(slot_s, user_s, proto_s, peer_s, action_s, since_s, idle_s):
-        return (f"  {slot_s:>{W_SLOT}}  {user_s:<{W_USER}} {proto_s:<{W_PROTO}} "
-                f"{peer_s:<{W_PEER}} {action_s:<{W_ACTION}} {since_s:>{W_TIME}} {idle_s:>{W_TIME}}")
-
     col_header = _fmt_row('Slot', 'User', 'Proto', 'Peer', 'Action', 'Since', 'Idle')
     _addstr(stdscr, 1, 0, col_header, curses.A_BOLD)
 
-    visible = max(0, h - 3)
+    visible = max(0, h - RESERVED_ROWS - 2)  # -2 for header + column header
+    list_end_row = 2
     for i in range(min(total_slots, visible)):
         slot = i + 1
         y = 2 + i
+        list_end_row = y + 1
         row = nodes.get(slot)
         attr = _attr(2) if i == sel else 0
         if row is None:
@@ -228,10 +399,142 @@ def _draw(stdscr, nodes, total_slots, sel, db_error=None):
                 attr = _attr(3)
         _addstr(stdscr, y, 0, line, attr)
 
-    footer = (" [Up/Down] Select  [K] Kick  [R] Refresh  [Q] Quit  "
-              f"::  yellow=AFK  red=not heartbeating >{STALE_WARNING_SECONDS}s ")
+    # Stats panel: separator, then Today/Total/Uploads/Downloads in a
+    # simple two-column layout -- fixed-position labeled fields the
+    # same way the header/footer are drawn, not a new widget
+    # abstraction (matches this module's existing style, per the
+    # approved plan).
+    sep_row = list_end_row
+    stats_row0 = sep_row + 1
+    _addstr(stdscr, sep_row, 0, '─' * (w - 1), _attr(3))
+    if stats is not None:
+        _addstr(stdscr, stats_row0, 0,
+                f"Today:  Logons {stats['logons_today']:<4} "
+                f"Time {_fmt_hms(stats['time_today']):<9} "
+                f"New Users {stats['new_users_today']:<4} "
+                f"Posts {stats['posts_today']:<4} "
+                f"E-mail {stats['email_today']:<4}", curses.A_BOLD)
+        _addstr(stdscr, stats_row0 + 1, 0,
+                f"Total:  Logons {stats['logons_total']:<4} "
+                f"Time {_fmt_hms(stats['time_total']):<9} "
+                f"New Users {stats['new_users_total']:<4} "
+                f"Posts {stats['posts_total']:<4} "
+                f"E-mail {stats['email_total']:<4}")
+        _addstr(stdscr, stats_row0 + 2, 0,
+                f"Uploads today:   {stats['uploads_today_files']} files, "
+                f"{_fmt_bytes(stats['uploads_today_bytes'])}")
+        _addstr(stdscr, stats_row0 + 3, 0,
+                f"Downloads today: {stats['downloads_today']} files")
+    else:
+        _addstr(stdscr, stats_row0, 0, "(stats unavailable -- DB error above)", _attr(4))
+
+    footer = f" {_menu_hint_line()}  ::  yellow=AFK  red=not heartbeating >{STALE_WARNING_SECONDS}s "
     _addstr(stdscr, h - 1, 0, footer.ljust(w - 1), _attr(1, curses.A_REVERSE))
     stdscr.refresh()
+
+
+def _default_log_path(app):
+    from anetbbs.config import get_config
+    return getattr(get_config(), 'LOG_FILE', None) or os.path.join(
+        app.config.get('BASE_DIR', '.'), 'bbs.log')
+
+
+def tail_lines(log_path, target_lines=4000, chunk_size=65536):
+    """Read the last ~target_lines lines of log_path, seeking backwards
+    in chunk_size-byte chunks -- never the whole file into memory. Real
+    lesson already learned once in this exact codebase (v1.0.54): an
+    unbounded readlines() on a multi-GB bbs.log is a genuine OOM risk on
+    a live server, not a theoretical one. Pure function (no curses),
+    kept separate from _view_log's interactive loop so the seek-from-end
+    correctness is directly unit-testable.
+
+    Returns a list of decoded lines (most recent last), or raises
+    OSError if the file can't be opened -- caller's job to catch it.
+    """
+    size = os.path.getsize(log_path)
+    with open(log_path, 'rb') as f:
+        pos = size
+        buf = b''
+        while pos > 0 and buf.count(b'\n') < target_lines:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            buf = f.read(read_size) + buf
+        text = buf.decode('utf-8', errors='replace')
+        return text.splitlines()
+
+
+def _view_log(stdscr, app):
+    """Scrollable pager over the real bbs.log, opened at the END (most
+    recent entries) -- see tail_lines()'s own docstring for the actual
+    seek-from-end file reading this is built on."""
+    log_path = _default_log_path(app)
+    try:
+        lines = tail_lines(log_path)
+    except OSError as exc:
+        show_message(stdscr, f"Could not open log: {exc}", error=True)
+        return
+
+    if not lines:
+        show_message(stdscr, "Log is empty.")
+        return
+
+    safe_curs_set(0)
+    h, w = stdscr.getmaxyx()
+    body_h = max(1, h - 2)
+    top = max(0, len(lines) - body_h)
+    while True:
+        stdscr.erase()
+        h, w = stdscr.getmaxyx()
+        body_h = max(1, h - 2)
+        _addstr(stdscr, 0, 0,
+                f" bbs.log :: lines {top + 1}-{min(len(lines), top + body_h)} of {len(lines)} "
+                .ljust(w - 1), _attr(1, curses.A_REVERSE))
+        for i in range(body_h):
+            idx = top + i
+            if idx >= len(lines):
+                break
+            _addstr(stdscr, 1 + i, 0, lines[idx])
+        _addstr(stdscr, h - 1, 0,
+                " [Up/Down/PgUp/PgDn] Scroll  [G] End  [Home] Start  [Q/Esc] Back "
+                .ljust(w - 1), _attr(1, curses.A_REVERSE))
+        stdscr.refresh()
+        ch = stdscr.getch()
+        max_top = max(0, len(lines) - body_h)
+        if ch in (ord('q'), ord('Q'), 27):
+            return
+        elif ch == curses.KEY_UP:
+            top = max(0, top - 1)
+        elif ch == curses.KEY_DOWN:
+            top = min(max_top, top + 1)
+        elif ch == curses.KEY_PPAGE:
+            top = max(0, top - body_h)
+        elif ch == curses.KEY_NPAGE:
+            top = min(max_top, top + body_h)
+        elif ch in (ord('g'), ord('G')):
+            top = max_top
+        elif ch == curses.KEY_HOME:
+            top = 0
+
+
+def _launch_cfg(stdscr):
+    """Hands the real terminal off to anetbbs-cfg and cleanly resumes
+    this screen on return. Uses the same interpreter (sys.executable)
+    rather than relying on the anetbbs-cfg console-script being on
+    PATH -- this process is already running under whatever venv/
+    interpreter has anetbbs installed, so `-m anetbbs.cfg.app` is
+    guaranteed to resolve the same package this process itself came
+    from."""
+    curses.endwin()
+    try:
+        subprocess.call([sys.executable, '-m', 'anetbbs.cfg.app'])
+    finally:
+        # Re-enter curses mode and force a full redraw -- stdscr itself
+        # is still the same window object curses.wrapper() gave us, it
+        # just needs the terminal put back into curses mode.
+        stdscr.clear()
+        safe_curs_set(0)
+        curses.doupdate()
 
 
 def _run(stdscr, app):
@@ -250,15 +553,27 @@ def _run(stdscr, app):
     per poll for exactly this reason -- this just brings the monitor in
     line with that established pattern instead of introducing a new one.
     """
+    theme = _load_theme(app)
     safe_curs_set(0)
     try:
-        init_colors()
+        init_colors(theme)
+    except curses.error:
+        pass
+    # Mouse support (2026-09-29): real, standard ncurses capability --
+    # works over any client that does xterm-style mouse reporting
+    # (SyncTerm, most modern terminals). A client that doesn't simply
+    # never sends KEY_MOUSE; keyboard-only use is entirely unaffected,
+    # which is the correct fallback, not a bug to chase.
+    try:
+        curses.mousemask(curses.ALL_MOUSE_EVENTS)
     except curses.error:
         pass
     stdscr.timeout(REFRESH_MS)
     sel = 0
     flash = None
     nodes = {}
+    stats = None
+    stats_tick = 0
     while True:
         # A transient DB error (e.g. "database is locked" during a
         # write-heavy moment elsewhere) must not crash the whole curses
@@ -270,15 +585,21 @@ def _run(stdscr, app):
         try:
             with app.app_context():
                 nodes = fetch_live_nodes()
+                # Stats change slowly (per-day aggregates) -- recompute
+                # every 5th tick (~5s) rather than every single 1s
+                # redraw, to avoid re-running several COUNT/SUM queries
+                # a sysop will never actually see change that fast.
+                if stats is None or stats_tick % 5 == 0:
+                    stats = fetch_stats()
         except Exception as exc:
             db_error = str(exc)[:120] or type(exc).__name__
+        stats_tick += 1
         total_slots = _bbs_nodes()
         h, _w = stdscr.getmaxyx()
-        visible = max(1, min(total_slots, max(0, h - 3)))
+        visible = max(1, min(total_slots, max(0, h - RESERVED_ROWS - 2)))
         sel = max(0, min(sel, visible - 1))
-        _draw(stdscr, nodes, total_slots, sel, db_error=db_error)
+        _draw(stdscr, nodes, total_slots, sel, stats, db_error=db_error)
         if flash:
-            from anetbbs.cfg.ui import show_message
             show_message(stdscr, flash)
             flash = None
             continue
@@ -286,6 +607,20 @@ def _run(stdscr, app):
         ch = stdscr.getch()
         if ch in (-1,):
             continue  # refresh timeout -- redraw with fresh data
+        if ch == curses.KEY_MOUSE:
+            try:
+                _mid, mx, my, _mz, _bstate = curses.getmouse()
+            except curses.error:
+                continue
+            if my == h - 1:
+                key = _hotkey_hit_test(mx - 1, _menu_hint_line())  # -1: footer has a leading space
+                if key:
+                    ch = ord(key.lower())
+            elif 2 <= my < 2 + visible:
+                sel = my - 2
+                continue
+            else:
+                continue
         if ch in (ord('q'), ord('Q'), 27):
             return
         if ch in (ord('r'), ord('R'),):
@@ -294,6 +629,25 @@ def _run(stdscr, app):
             sel = max(0, sel - 1)
         elif ch == curses.KEY_DOWN:
             sel = min(visible - 1, sel + 1)
+        elif ch in (ord('c'), ord('C')):
+            _launch_cfg(stdscr)
+            try:
+                init_colors(theme)
+            except curses.error:
+                pass
+            try:
+                curses.mousemask(curses.ALL_MOUSE_EVENTS)
+            except curses.error:
+                pass
+        elif ch in (ord('l'), ord('L')):
+            _view_log(stdscr, app)
+        elif ch in (ord('t'), ord('T')):
+            theme = 'light' if theme == 'dark' else 'dark'
+            try:
+                init_colors(theme)
+            except curses.error:
+                pass
+            _save_theme(app, theme)
         elif ch in (ord('k'), ord('K')):
             slot = sel + 1
             if slot in nodes:

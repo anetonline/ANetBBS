@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.11`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.13`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.13 — sysop core-override loader disconnect-handling fix (September 2026)
+
+Fixed a logging/reliability gap in the sysop core-override loader (`data/mods/core/<name>.py`, used for things like a customized login menu): a caller disconnecting mid-render was being mislabeled as a broken override and logged as an error with a full traceback, then a fallback attempt was made against the same already-dead connection. A normal disconnect during an override now propagates and unwinds the session cleanly, the same way it already does everywhere else in the codebase — a genuinely broken override file (missing function, syntax error, runtime exception unrelated to the connection) still degrades to the stock screen as before.
+
+## v1.1.12 — anetbbs-monitor dashboard rework (September 2026)
+
+`anetbbs-monitor` is now a real dashboard, not just a live node list: a Today/Total activity stats panel (logons, connect time, new users, posts, e-mail, uploads, downloads), a scrollable log viewer for `bbs.log` that never loads the whole file into memory, one-key access to `anetbbs-cfg` without leaving the tool, a light/dark theme toggle (shared with `anetbbs-cfg`, so a choice made in one carries over to the other), and mouse support for selecting nodes and pressing hotkeys on terminals that support it. The live node list and kick functionality are unchanged.
+
+Found and fixed a real gap while building the new stats panel: `file_download` has been a documented `UserActivity` event type for a while, but nothing anywhere actually logged one — the only download tracking that existed was a lifetime cumulative counter with no per-day breakdown. All three real download paths (web file downloads, shared file links, and terminal ZMODEM/YMODEM/XMODEM) now log it correctly.
 
 ## v1.1.11 — DOOR32.SYS fix for more native door types; command-line dropfile-path guidance (September 2026)
 

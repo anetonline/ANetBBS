@@ -51,7 +51,12 @@ def _safe_addstr(win, y, x, text, attr=0):
         pass
 
 
-def init_colors():
+def init_colors(theme='dark'):
+    """theme='dark' (default, original palette) or 'light' -- added for
+    anetbbs-monitor's theme toggle (2026-09-29). Shared by anetbbs-cfg
+    and anetbbs-monitor (the latter can now launch the former directly),
+    so a theme choice made in one carries over to the other rather than
+    needing two independent palettes to stay in sync by hand."""
     if not curses.has_colors():
         return
     curses.start_color()
@@ -60,10 +65,21 @@ def init_colors():
         bg = -1
     except curses.error:
         bg = curses.COLOR_BLACK
-    curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)   # header/footer bars
-    curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)   # selected row
-    curses.init_pair(3, curses.COLOR_YELLOW, bg)                 # hints/help
-    curses.init_pair(4, curses.COLOR_RED, bg)                    # errors
+    if theme == 'light':
+        # Real terminal light backgrounds are usually white/light-gray,
+        # not something curses' 8-color palette can address directly --
+        # approximate with black-on-white bars and dark-ish foreground
+        # text colors, which reads correctly against a light terminal
+        # background/theme the same way a light GUI theme would.
+        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)   # header/footer bars (unchanged -- still readable on light bg)
+        curses.init_pair(2, curses.COLOR_WHITE, curses.COLOR_BLUE)   # selected row
+        curses.init_pair(3, curses.COLOR_BLUE, bg)                   # hints/help
+        curses.init_pair(4, curses.COLOR_RED, bg)                    # errors
+    else:
+        curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)   # header/footer bars
+        curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)   # selected row
+        curses.init_pair(3, curses.COLOR_YELLOW, bg)                 # hints/help
+        curses.init_pair(4, curses.COLOR_RED, bg)                    # errors
 
 
 def _attr(pair, fallback=0):

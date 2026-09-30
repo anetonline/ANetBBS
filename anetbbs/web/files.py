@@ -13,7 +13,7 @@ from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileRequired
 from werkzeug.utils import secure_filename
 
-from ..models import db, FileUpload, FileArea
+from ..models import db, FileUpload, FileArea, UserActivity
 from ..features.archive_meta import extract_archive_description
 from ..features.access_control import evaluate_access
 from .list_pagination import ListPagination
@@ -252,6 +252,18 @@ def download(file_id):
 
     # Increment download count
     upload_obj.download_count = (upload_obj.download_count or 0) + 1
+    # Real gap found live (2026-09-29, building anetbbs-monitor's stats
+    # panel): 'file_download' is listed in UserActivity's own docstring
+    # as a common activity_type value but was never actually written
+    # anywhere -- download_count above is a lifetime cumulative counter
+    # with no per-event timestamped row, so there was no way to compute
+    # a real "downloads today" number. This is the only new write needed
+    # to make that field live up to its own documented convention.
+    db.session.add(UserActivity(
+        user_id=(current_user.id if current_user.is_authenticated else None),
+        activity_type='file_download',
+        details=f'file_upload_id={upload_obj.id}: {upload_obj.original_filename}',
+        service='web'))
     db.session.commit()
     consume_quota(current_user, upload_obj.file_size or 0)
 

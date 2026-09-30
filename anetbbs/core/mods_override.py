@@ -67,6 +67,7 @@ async def call_core_override(mod_name: str, func_name: str, stock_fn, *args):
     whole BBS to see it take effect, matching how the mods/text/ ANSI
     overrides already behave.
     """
+    from .session import CarrierLost
     try:
         override_path = _override_path(mod_name)
         if os.path.isfile(override_path):
@@ -80,6 +81,19 @@ async def call_core_override(mod_name: str, func_name: str, stock_fn, *args):
             logger.warning(
                 "data/mods/core/%s.py exists but has no %s() -- "
                 "falling back to the stock version", mod_name, func_name)
+    except (CarrierLost, ConnectionError):
+        # Real gap found live (2026-09-29): a caller disconnecting while
+        # an override was running (e.g. mid read_line()) is a normal,
+        # expected event -- every other call site in this codebase lets
+        # it propagate and unwind the session cleanly. This blanket
+        # except Exception previously caught it too, mislabeled it as
+        # "failed to load/run" (a scary, misleading ERROR + full
+        # traceback logged for what's just a dead connection -- flooded
+        # the log at roughly one per port-scanner/bot hit), and then
+        # tried stock_fn() anyway, which would immediately hit the same
+        # dead connection again. Let it propagate instead, matching the
+        # rest of this codebase's disconnect handling.
+        raise
     except Exception:
         logger.exception(
             "data/mods/core/%s.py failed to load/run -- falling back "

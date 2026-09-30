@@ -136,6 +136,20 @@ class BbsUiFileQuotaTests(unittest.TestCase):
             self.assertIsNotNone(row)
             self.assertEqual(row.bytes_used_today, 100)
 
+        # Real gap found live (2026-09-29, building anetbbs-monitor's stats
+        # panel): 'file_download' was documented in UserActivity's own
+        # docstring as a common activity_type but never actually written
+        # anywhere -- this is the terminal ZMODEM/YMODEM/XMODEM download
+        # path's half of the fix.
+        with self.app.app_context():
+            from anetbbs.models import UserActivity
+            activity = UserActivity.query.filter_by(
+                activity_type='file_download').first()
+            self.assertIsNotNone(
+                activity, 'a successful terminal download must log a '
+                'file_download UserActivity row')
+            self.assertEqual(activity.user_id, user_dict['id'])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -884,6 +884,19 @@ def fetch_shared(token):
     link.download_count = (link.download_count or 0) + 1
     link.last_accessed_at = datetime.datetime.utcnow()
     link.last_accessed_ip = _client_ip()
+    # Real gap found live (2026-09-29, building anetbbs-monitor's stats
+    # panel): 'file_download' is listed in UserActivity's own docstring
+    # as a common activity_type value but was never actually written
+    # anywhere -- download_count is a lifetime cumulative counter with
+    # no per-event timestamped row, so there was no way to compute a
+    # real "downloads today" number. user_id is None (the downloader
+    # here is always anonymous by design -- see the quota comment above
+    # attributing usage to the share's creator instead).
+    from ..models import UserActivity
+    db.session.add(UserActivity(
+        user_id=None, activity_type='file_download',
+        details=f'shared_file_link_id={link.id}: {link.filename}',
+        service='web'))
     db.session.commit()
     if creator is not None:
         consume_quota(creator, file_size)

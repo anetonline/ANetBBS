@@ -76,6 +76,39 @@ class CallCoreOverrideTests(unittest.TestCase):
             call_core_override('login_menu', 'render_login_menu', self._stock))
         self.assertEqual(result, 'STOCK')
 
+    def test_carrier_lost_propagates_instead_of_falling_back_to_stock(self):
+        """Real bug found live (2026-09-29): a caller disconnecting
+        while an override was running (e.g. mid read_line()) is a
+        normal, expected event -- every other call site in this
+        codebase lets it propagate and unwind the session cleanly. The
+        old blanket `except Exception` caught it too, mislabeled it as
+        "failed to load/run" (a scary ERROR + full traceback for what's
+        just a dead connection -- flooded bbs.log at roughly one per
+        port-scanner/bot hit against a live server), then tried
+        stock_fn() anyway, which would immediately hit the same dead
+        connection again. Must propagate instead."""
+        from anetbbs.core.session import CarrierLost
+        self._write_override('login_menu', (
+            "async def render_login_menu(*a):\n"
+            "    from anetbbs.core.session import CarrierLost\n"
+            "    raise CarrierLost('connection reset')\n"
+        ))
+        with self.assertRaises(CarrierLost):
+            asyncio.run(
+                call_core_override('login_menu', 'render_login_menu', self._stock))
+
+    def test_plain_connection_error_also_propagates(self):
+        """CarrierLost is a ConnectionError subclass, but a bare
+        ConnectionResetError/BrokenPipeError from inside session.write()
+        must be treated the same way, not just CarrierLost specifically."""
+        self._write_override('login_menu', (
+            "async def render_login_menu(*a):\n"
+            "    raise ConnectionResetError('reset by peer')\n"
+        ))
+        with self.assertRaises(ConnectionResetError):
+            asyncio.run(
+                call_core_override('login_menu', 'render_login_menu', self._stock))
+
     def test_stock_not_invoked_when_override_succeeds(self):
         # Guards against the "eagerly-built coroutine never awaited"
         # class of bug -- stock_fn must be a zero-arg callable the
