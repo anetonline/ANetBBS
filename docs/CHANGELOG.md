@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.14`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.15`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.15 — anetbbs-monitor: fixed missing /usr/local/bin/ shortcut (September 2026)
+
+Fixed a real gap that left `anetbbs-monitor` reporting "command not found" for every sysop, on both fresh installs and existing ones running `update.sh`: the internal list of console scripts that get a `/usr/local/bin/` shortcut (so a sysop doesn't need the venv's own path on their shell's `PATH`) was missing `anetbbs-monitor` entirely — it was added after that list was last updated for `anetbbs-cfg`'s equivalent gap. `install.sh` also never called this mechanism on a fresh install at all (only `update.sh` and the separate installer wizard did) and now does.
 
 ## v1.1.14 — anetbbs-monitor: cfg-launch crash fix, visual redesign (September 2026)
 

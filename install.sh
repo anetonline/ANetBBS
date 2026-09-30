@@ -1366,6 +1366,23 @@ fi
 # Fix ownership again after pip install (pip may have created files as root)
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"
 
+# The interactive sysop console tools (anetbbs-cfg, anetbbs-monitor,
+# etc.) only exist inside $VENV_DIR/bin -- real gap found live:
+# SERVICE_USER is a no-shell system account (useradd -s
+# /usr/sbin/nologin above), so it's never the account a sysop actually
+# logs in as to run these, and no real login account's PATH includes
+# the venv by default. update.sh already self-heals this on every
+# update via anetbbs-symlinks (installer/symlinks.py's ensure_symlinks,
+# symlinking the venv's console scripts into /usr/local/bin, already on
+# every login user's PATH on every mainstream distro) -- a fresh
+# install.sh run never called it at all, so a sysop's very first
+# "anetbbs-monitor" on a brand new install was "command not found"
+# with no clue the tool was sitting right there in the venv.
+if [[ -x "$VENV_DIR/bin/anetbbs-symlinks" ]]; then
+    info "Linking sysop console tools onto PATH..."
+    "$VENV_DIR/bin/anetbbs-symlinks" "$INSTALL_DIR" 2>&1 | while read -r line; do info "  $line"; done
+fi
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 7: GENERATE CONFIGURATION
 # ═══════════════════════════════════════════════════════���═══════════════════════

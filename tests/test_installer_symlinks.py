@@ -27,6 +27,15 @@ class WrappersListTests(unittest.TestCase):
     def test_anetbbs_cfg_is_registered(self):
         self.assertIn("anetbbs-cfg", WRAPPERS)
 
+    def test_anetbbs_monitor_is_registered(self):
+        # Same bug class recurring: anetbbs-monitor (added in v1.1.12)
+        # was never added to WRAPPERS either, so even a sysop who ran
+        # update.sh (which does call ensure_symlinks(), unlike
+        # install.sh before this fix) never got a working
+        # /usr/local/bin/anetbbs-monitor shortcut -- confirmed live on
+        # a fresh Raspberry Pi install (2026-09-30).
+        self.assertIn("anetbbs-monitor", WRAPPERS)
+
     def test_no_duplicate_entries(self):
         self.assertEqual(len(WRAPPERS), len(set(WRAPPERS)))
 

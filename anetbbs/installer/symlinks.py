@@ -12,7 +12,7 @@ from pathlib import Path
 
 WRAPPERS = ('anetbbs', 'anetbbs-web', 'anetbbs-install',
             'anetbbs-upgrade', 'anetbbs-symlinks', 'anetbbs-cleanup',
-            'anetbbs-cfg')
+            'anetbbs-cfg', 'anetbbs-monitor')
 
 
 def main():

@@ -1,3 +1,7 @@
+# ANetBBS v1.1.15 — anetbbs-monitor: fixed missing /usr/local/bin/ shortcut (September 2026)
+
+Fixed a real gap that left `anetbbs-monitor` reporting "command not found" for every sysop, on both fresh installs and existing ones running `update.sh`: the internal list of console scripts that get a `/usr/local/bin/` shortcut (so a sysop doesn't need the venv's own path on their shell's `PATH`) was missing `anetbbs-monitor` entirely — it was added after that list was last updated for `anetbbs-cfg`'s equivalent gap. `install.sh` also never called this mechanism on a fresh install at all (only `update.sh` and the separate installer wizard did) and now does.
+
 # ANetBBS v1.1.14 — anetbbs-monitor: cfg-launch crash fix, visual redesign (September 2026)
 
 Fixed a crash in `anetbbs-monitor`'s one-key `anetbbs-cfg` launch (added in v1.1.12): it shelled out to a `python -m anetbbs.cfg.app` subprocess, which re-resolves Python's module search path from scratch in the child process and inserts the caller's current directory first — if that directory happens to look like an `anetbbs` path, the wrong thing can get imported instead of the real installed package, crashing with a confusing `ImportError`. It now calls the same code directly in the already-running process instead, which needs no new path resolution at all.
