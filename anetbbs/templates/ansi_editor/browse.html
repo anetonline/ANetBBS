@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Browse ANSI files{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-folder2-open"></i> Browse ANSI files on disk</h1>
+    <p>Real <code>.ans</code> files under each configured directory (set via
+        <code>ANSI_EDITOR_BROWSE_DIRS</code>) — separate from, and in addition
+        to, the art library above.</p>
+</div>
+
+{% if art_id %}
+<div class="alert alert-info">
+    Saving <strong>this piece</strong> to disk — pick a directory and filename below.
+</div>
+{% endif %}
+
+{% for root in roots %}
+<div class="card mb-3">
+    <div class="card-header"><code>{{ root.label }}</code></div>
+    <div class="card-body">
+        {% if art_id %}
+        <form method="post" action="{{ url_for('ansi_editor.save_to_disk', art_id=art_id) }}"
+              class="row g-2 align-items-end mb-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="root" value="{{ root.label }}">
+            <div class="col-md-8">
+                <label class="form-label small">Save as (filename)</label>
+                <input type="text" name="filename" class="form-control form-control-sm"
+                       placeholder="e.g. matrix.ans">
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-save"></i> Save here
+                </button>
+            </div>
+        </form>
+        {% endif %}
+
+        {% if root.files %}
+        <table class="table table-sm table-hover mb-0">
+            <tbody>
+            {% for f in root.files %}
+                <tr>
+                    <td><code>{{ f }}</code></td>
+                    <td class="text-end">
+                        <form method="post" action="{{ url_for('ansi_editor.open_from_disk') }}"
+                              style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="root" value="{{ root.label }}">
+                            <input type="hidden" name="filename" value="{{ f }}">
+                            <button class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-folder2-open"></i> Open
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-muted small">No .ans files here yet.</div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="text-muted">No browse directories configured.</div>
+{% endfor %}
+
+<a href="{{ url_for('ansi_editor.index') }}" class="btn btn-link btn-sm">← Library</a>
+{% endblock %}

@@ -5439,6 +5439,25 @@ def _session_is_ssh(session):
     return getattr(getattr(session, 'presence', None), 'protocol', None) == 'ssh'
 
 
+def _anetdraw_available():
+    """True if a Game row with slug 'anetdraw' exists and is active --
+    normally the bundled ANetDRAW seed (web_app.py's BUNDLED_DOORS,
+    which auto-detects the right binary for this machine's
+    architecture and seeds the row on first boot with no sysop action
+    needed), but a sysop's own manual door_native setup under the same
+    slug works identically (see docs/14-door-games.md).
+
+    Pulled out as its own pure-ish function (one query, no session
+    needed) -- same reasoning as _session_is_ssh() above -- so
+    _sysop_menu's "does the ANetDRAW shortcut even show up" gating is
+    independently unit-testable against a real throwaway DB, without a
+    full session/lightbar-UI mock.
+    """
+    from anetbbs.models import Game
+    with _app().app_context():
+        return Game.query.filter_by(slug='anetdraw', is_active=True).first() is not None
+
+
 async def _sysop_menu(self):
     """Top-level sysop menu entry point.
 
@@ -5497,6 +5516,15 @@ async def _stock_sysop_menu(self):
     # _sysop_cfg_tool()'s own docstring for the second, defensive check.
     if _session_is_ssh(self.session):
         categories.append(('X', 'Config Tool (SSH)', self.sysop_cfg_tool))
+
+    # ANetDRAW (github.com/anetonline/ANetDRAW) is bundled -- see
+    # web_app.py's BUNDLED_DOORS and docs/14-door-games.md. Any
+    # protocol -- unlike the config tool above, ANetDRAW isn't
+    # security-sensitive (it's a caller-facing art tool; ANetBBS
+    # admins just get a direct shortcut to it here instead of hunting
+    # through the Games list).
+    if _anetdraw_available():
+        categories.append(('D', 'ANetDRAW', self.sysop_anetdraw))
 
     async def render_header():
         await self.session.write(banner('Sysop Tools', ui_width(self.session)))
@@ -5579,6 +5607,53 @@ async def _sysop_cfg_tool(self):
         await self.session.write(f"\r\nError launching config tool: {exc}\r\n")
         await self.session.read_line("\r\nPress Enter...")
 BBSMenuUI.sysop_cfg_tool = _sysop_cfg_tool
+
+
+async def _sysop_anetdraw(self):
+    """Direct Sysop Tools shortcut into ANetDRAW (a separate project,
+    github.com/anetonline/ANetDRAW, but bundled -- see web_app.py's
+    BUNDLED_DOORS and docs/14-door-games.md). Bridged over the same PTY
+    machinery every door_native game uses (play_door_game_telnet), the
+    same pattern _sysop_cfg_tool() above uses for anetbbs-cfg.
+
+    No protocol restriction (unlike the config tool) -- ANetDRAW is a
+    caller-facing art tool, not sensitive sysop config, so telnet is
+    fine. _sysop_menu() only adds the hotkey that reaches this function
+    when a Game row (slug='anetdraw') already exists and is active;
+    this function re-checks independently so a direct call can't launch
+    a door that was never actually configured.
+    """
+    from flask import Flask
+    from anetbbs.config import get_config
+    from anetbbs.models import db, Game
+    from ..games.door_runner import play_door_game_telnet
+    from .db_scope import transient_app_context
+
+    app = Flask(__name__)
+    app.config.from_object(get_config(os.environ.get('FLASK_ENV', 'production')))
+    db.init_app(app)
+
+    with transient_app_context(app):
+        g = Game.query.filter_by(slug='anetdraw', is_active=True).first()
+        if g is None:
+            await self.session.write(
+                "\r\nANetDRAW isn't set up on this install -- add it "
+                "under Games as a door_native game with slug "
+                "'anetdraw' (see docs/14-door-games.md).\r\n")
+            await self.session.read_line("Press Enter...")
+            return
+
+    try:
+        await play_door_game_telnet(
+            game=g,
+            user=self.session.user,
+            session=self.session,
+        )
+    except Exception as exc:
+        logger.exception('ANetDRAW launch error: %s', exc)
+        await self.session.write(f"\r\nError launching ANetDRAW: {exc}\r\n")
+        await self.session.read_line("\r\nPress Enter...")
+BBSMenuUI.sysop_anetdraw = _sysop_anetdraw
 
 
 async def _sysop_users(self):

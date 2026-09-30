@@ -95,13 +95,23 @@
         <button class="btn btn-sm btn-outline-light tool-btn" data-tool="eraser" title="Eraser"><i class="bi bi-eraser"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" data-tool="line" title="Line"><i class="bi bi-slash-lg"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" data-tool="rect" title="Rectangle"><i class="bi bi-square"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" data-tool="ellipse" title="Ellipse"><i class="bi bi-circle"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" data-tool="fill" title="Fill"><i class="bi bi-paint-bucket"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" data-tool="shade" title="Shading brush -- drag to build up density (blank -> &#9617; -> &#9618; -> &#9619; -> &#9608;)"><i class="bi bi-brush"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" data-tool="colorize" title="Colorize -- recolor a cell without changing its character"><i class="bi bi-palette"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" data-tool="text" title="Text typing"><i class="bi bi-fonts"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" data-tool="select" title="Select rectangle"><i class="bi bi-bounding-box"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" id="btnCopy" title="Copy selection (Ctrl+C)"><i class="bi bi-clipboard"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" id="btnPaste" title="Paste (Ctrl+V)"><i class="bi bi-clipboard-check"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" id="btnFlipH" title="Flip selection horizontally"><i class="bi bi-symmetry-vertical"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" id="btnFlipV" title="Flip selection vertically"><i class="bi bi-symmetry-horizontal"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" id="btnSwapColors" title="Swap foreground/background colors in the selection (or whole canvas if nothing selected)"><i class="bi bi-arrow-left-right"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" id="btnReplaceColor" title="Replace one foreground color with another, in the selection (or whole canvas if nothing selected)"><i class="bi bi-eyedropper"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" id="btnCenter" title="Center the selection's content horizontally on the canvas"><i class="bi bi-distribute-horizontal"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" id="btnInsertRow" title="Insert a blank row at the cursor (rows below shift down; the bottom row is dropped)"><i class="bi bi-arrow-bar-down"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" id="btnDeleteRow" title="Delete the row at the cursor (rows below shift up)"><i class="bi bi-arrow-bar-up"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" id="btnInsertCol" title="Insert a blank column at the cursor (columns to the right shift right; the rightmost column is dropped)"><i class="bi bi-arrow-bar-right"></i></button>
+        <button class="btn btn-sm btn-outline-light tool-btn" id="btnDeleteCol" title="Delete the column at the cursor (columns to the right shift left)"><i class="bi bi-arrow-bar-left"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" data-tool="eyedrop" title="Eyedropper (click to grab a cell's char + colors)"><i class="bi bi-droplet"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" id="btnZoomIn" title="Zoom in"><i class="bi bi-zoom-in"></i></button>
         <button class="btn btn-sm btn-outline-light tool-btn" id="btnZoomOut" title="Zoom out"><i class="bi bi-zoom-out"></i></button>
@@ -111,6 +121,21 @@
             <button class="btn btn-sm btn-outline-light tool-btn brush-btn active" data-brush="1">1×1</button>
             <button class="btn btn-sm btn-outline-light tool-btn brush-btn" data-brush="2">2×2</button>
             <button class="btn btn-sm btn-outline-light tool-btn brush-btn" data-brush="3">3×3</button>
+        </div>
+
+        <h6 class="mt-3">MODES</h6>
+        <div class="form-check form-check-sm">
+            <input class="form-check-input" type="checkbox" id="mirrorMode">
+            <label class="form-check-label small text-light" for="mirrorMode">
+                Mirror (left/right)
+            </label>
+        </div>
+        <div class="form-check form-check-sm">
+            <input class="form-check-input" type="checkbox" id="halfBlockMode">
+            <label class="form-check-label small text-light" for="halfBlockMode"
+                   title="Pencil/eraser paint the top or bottom half of a cell independently, doubling vertical resolution">
+                Half-block pixels
+            </label>
         </div>
 
         <h6 class="mt-3">FOREGROUND</h6>
@@ -123,6 +148,21 @@
             <div id="curCharPreview" style="font-family:monospace;font-size:24px;width:32px;height:32px;background:#000;color:#fff;text-align:center;line-height:32px;border:1px solid #333;">█</div>
             <small class="text-muted">code <span id="curCharCode">219</span></small>
         </div>
+
+        <h6 class="mt-3">THEDRAW FONTS</h6>
+        <div class="mb-1">
+            <input type="text" id="tdfSearch" class="form-control form-control-sm"
+                   placeholder="Search fonts...">
+        </div>
+        <div id="tdfFontList" style="max-height:120px;overflow-y:auto;background:#000;border:1px solid #333;font-size:0.8rem;"></div>
+        <div class="mt-1">
+            <input type="text" id="tdfText" class="form-control form-control-sm"
+                   placeholder="Banner text" maxlength="200">
+        </div>
+        <div id="tdfPreview" style="background:#000;padding:4px;margin-top:4px;overflow-x:auto;white-space:pre;font-family:monospace;line-height:1;min-height:1.2em;"></div>
+        <button id="btnTdfInsert" class="btn btn-sm btn-outline-light w-100 mt-1" disabled>
+            <i class="bi bi-fonts"></i> Insert at cursor
+        </button>
 
         <h6 class="mt-3">CHARACTER PALETTE</h6>
         <div class="charset" id="charset"></div>
@@ -248,7 +288,7 @@
         cursorPos.textContent = `row ${cursorR} col ${cursorC}`;
     }
 
-    function paint(r, c, ch) {
+    function paint(r, c, ch, _isMirrorPass) {
         // Apply across the brush footprint
         const off = Math.floor(brushSize / 2);
         for (let dr = 0; dr < brushSize; dr++) {
@@ -263,6 +303,15 @@
                 cell.c = newCh; cell.fg = curFg; cell.bg = curBg;
                 drawCell(i);
             }
+        }
+        // Mirror mode: also paint the horizontally-opposite column, one
+        // level of recursion only (_isMirrorPass guards against ever
+        // mirroring a mirror pass) -- skipped when c is already the
+        // center column of an odd width, which would otherwise repaint
+        // the exact same cell(s) redundantly.
+        if (!_isMirrorPass && document.getElementById('mirrorMode').checked) {
+            const mc = W - 1 - c;
+            if (mc !== c) paint(r, mc, ch, true);
         }
         dirty = true;
         document.getElementById('saveStatus').textContent = 'unsaved';
@@ -302,6 +351,132 @@
         for (let r = top; r <= bot; r++) {
             paint(r, lft); paint(r, rgt);
         }
+    }
+
+    // Pure point sampler for an ellipse bounded by r0/c0..r1/c1 (no DOM,
+    // no `cells` access) -- angle-sampled rather than a classic integer
+    // midpoint algorithm, which needs separate per-region handling to
+    // get right; sampling by angle is simple and correct for any aspect
+    // ratio, with a dense-enough step (relative to the larger radius)
+    // to avoid gaps around the perimeter. Split out from drawEllipse()
+    // below so it's independently testable under plain Node, the same
+    // way this file's splitForWire()-style functions already are (see
+    // tests/test_mrc_web_multiline_split_parity.py for the established
+    // pattern this follows).
+    function ellipsePoints(r0, c0, r1, c1) {
+        const cx = (c0 + c1) / 2, cy = (r0 + r1) / 2;
+        const rx = Math.max(1, Math.abs(c1 - c0) / 2);
+        const ry = Math.max(1, Math.abs(r1 - r0) / 2);
+        const plotted = new Set();
+        const steps = Math.max(16, Math.ceil(2 * Math.PI * Math.max(rx, ry)));
+        for (let i = 0; i < steps; i++) {
+            const t = (i / steps) * 2 * Math.PI;
+            const r = Math.round(cy + ry * Math.sin(t));
+            const c = Math.round(cx + rx * Math.cos(t));
+            plotted.add(r + ',' + c);
+        }
+        return plotted;
+    }
+
+    function drawEllipse(r0, c0, r1, c1, ch) {
+        // Terminal cells aren't square (roughly 10x18 here), but
+        // working in row/col space rather than compensating for that
+        // keeps this consistent with every other shape tool -- a
+        // caller who wants a visually round ellipse just drags a
+        // wider-than-tall box, same as ANetDRAW.
+        for (const key of ellipsePoints(r0, c0, r1, c1)) {
+            const [r, c] = key.split(',').map(Number);
+            paint(r, c, ch);
+        }
+    }
+
+    // Shading brush: each stroke over the same cell advances one step
+    // denser (blank -> light -> medium -> dark -> solid), matching
+    // ANetDRAW's shading brush. Reads the EXISTING character to decide
+    // the next step, so repeated strokes over the same spot build up
+    // density rather than just stamping one fixed glyph.
+    const SHADE_SEQUENCE = [' ', '░', '▒', '▓', '█'];
+    function nextShadeChar(curChar) {
+        const idx = SHADE_SEQUENCE.indexOf(curChar);
+        return SHADE_SEQUENCE[Math.min(SHADE_SEQUENCE.length - 1, (idx < 0 ? 0 : idx) + 1)];
+    }
+    function shadeBrush(r, c) {
+        if (r < 0 || r >= H || c < 0 || c >= W) return;
+        const off = Math.floor(brushSize / 2);
+        for (let dr = 0; dr < brushSize; dr++) {
+            for (let dc = 0; dc < brushSize; dc++) {
+                const tr = r + dr - off, tc = c + dc - off;
+                if (tr < 0 || tr >= H || tc < 0 || tc >= W) continue;
+                const i = tr * W + tc;
+                cells[i] = { c: nextShadeChar(cells[i].c), fg: curFg, bg: curBg };
+                drawCell(i);
+            }
+        }
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    // Colorize: recolors a cell (fg/bg only) without touching its
+    // character -- "Colorize, which recolors without redrawing" per
+    // ANetDRAW's own feature list.
+    function colorizeCell(r, c) {
+        if (r < 0 || r >= H || c < 0 || c >= W) return;
+        const off = Math.floor(brushSize / 2);
+        for (let dr = 0; dr < brushSize; dr++) {
+            for (let dc = 0; dc < brushSize; dc++) {
+                const tr = r + dr - off, tc = c + dc - off;
+                if (tr < 0 || tr >= H || tc < 0 || tc >= W) continue;
+                const i = tr * W + tc;
+                const cell = cells[i];
+                if (cell.fg === curFg && cell.bg === curBg) continue;
+                cell.fg = curFg; cell.bg = curBg;
+                drawCell(i);
+            }
+        }
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    // Half-block pixel mode: a cell holds two independently-colored
+    // "pixels" (top/bottom) via the upper/lower half-block characters
+    // (U+2580/U+2584) and its existing fg/bg pair -- no new per-cell
+    // fields needed, this is exactly what those two characters already
+    // encode. Always WRITES using U+2580 (upper half block, fg=top
+    // color/bg=bottom color) for any two-toned cell, and only emits a
+    // solid U+2588 when both halves end up the same color -- but READS
+    // U+2584 too (bg=top/fg=bottom), so a cell already using the lower
+    // variant (e.g. hand-picked from the character palette, or loaded
+    // from existing art) still reports its real colors correctly.
+    function halfBlockColors(cell) {
+        if (cell.c === '▀') return { top: cell.fg, bottom: cell.bg };   // ▀
+        if (cell.c === '▄') return { top: cell.bg, bottom: cell.fg };   // ▄
+        if (cell.c === '█') return { top: cell.fg, bottom: cell.fg };   // █
+        return { top: cell.bg, bottom: cell.bg };  // anything else: treat as its bg, both halves
+    }
+
+    // Pure: given a cell's current state, which half was painted, and
+    // the new color, returns the new {c, fg, bg} -- no DOM/`cells`
+    // access, split out for the same reason ellipsePoints() is.
+    function computeHalfBlockCell(cell, which, color) {
+        const cur = halfBlockColors(cell);
+        const top = which === 'top' ? color : cur.top;
+        const bottom = which === 'bottom' ? color : cur.bottom;
+        if (top === bottom) return { c: '█', fg: top, bg: cell.bg };
+        return { c: '▀', fg: top, bg: bottom };
+    }
+
+    function paintHalfBlock(r, c, which, color) {
+        if (r < 0 || r >= H || c < 0 || c >= W) return;
+        const i = r * W + c;
+        cells[i] = computeHalfBlockCell(cells[i], which, color);
+        drawCell(i);
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    function cellHalfAtEvent(e, cellEl) {
+        const rect = cellEl.getBoundingClientRect();
+        return (e.clientY - rect.top) < rect.height / 2 ? 'top' : 'bottom';
     }
 
     function clearSelection() {
@@ -351,6 +526,28 @@
         document.getElementById('saveStatus').textContent = 'unsaved';
     }
 
+    // Pastes a TDF font render ({width,height,cells}, from /fonts/
+    // render) at rTop/cLeft -- like pasteAt() above, but a TDF cell can
+    // be null (transparent: no glyph reaches that spot), which must
+    // leave the existing grid content showing through rather than
+    // being overwritten with a blank, matching TheDraw's own behavior.
+    function insertTdfResult(rTop, cLeft, result) {
+        pushHistory();
+        for (let r = 0; r < result.height; r++) {
+            for (let c = 0; c < result.width; c++) {
+                const src = result.cells[r * result.width + c];
+                if (!src) continue;  // transparent
+                const tr = rTop + r, tc = cLeft + c;
+                if (tr < 0 || tr >= H || tc < 0 || tc >= W) continue;
+                const i = tr * W + tc;
+                cells[i] = { c: src.c, fg: src.fg, bg: src.bg };
+                drawCell(i);
+            }
+        }
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
     function flipSelectionHorizontal() {
         if (!selRect) return;
         pushHistory();
@@ -385,6 +582,158 @@
         document.getElementById('saveStatus').textContent = 'unsaved';
     }
 
+    function activeRegion() {
+        // Every block op below works on the current selection, or the
+        // whole canvas when nothing is selected -- matches how the
+        // reference editor's block tools behave with no active
+        // selection (operate on everything rather than doing nothing).
+        return selRect || { r0: 0, c0: 0, r1: H - 1, c1: W - 1 };
+    }
+
+    // Pure: new {c,fg,bg} with fg/bg swapped. bg is masked to 0-7 (this
+    // editor's background palette only has 8 entries -- see _BG_CODES
+    // in ansi_editor.py) so swapping a bright (8-15) fg into bg can't
+    // produce an out-of-range value.
+    function swapFgBg(cell) {
+        return { c: cell.c, fg: cell.bg & 0x0F, bg: cell.fg & 0x07 };
+    }
+
+    function swapColorsInSelection() {
+        const region = activeRegion();
+        pushHistory();
+        for (let r = region.r0; r <= region.r1; r++) {
+            for (let c = region.c0; c <= region.c1; c++) {
+                const i = r * W + c;
+                cells[i] = swapFgBg(cells[i]);
+                drawCell(i);
+            }
+        }
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    // Pure: new {c,fg,bg} with fg recolored from fromFg to toFg,
+    // untouched otherwise. Non-matching cells return the SAME object
+    // reference (not a copy) so a caller can cheaply skip a redraw.
+    function replaceFgColor(cell, fromFg, toFg) {
+        if ((cell.fg & 0x0F) !== fromFg) return cell;
+        return { c: cell.c, fg: toFg, bg: cell.bg };
+    }
+
+    function replaceColorInSelection() {
+        const fromStr = prompt('Replace which foreground color? (0-15)', '');
+        if (fromStr === null) return;
+        const fromFg = parseInt(fromStr, 10);
+        if (isNaN(fromFg) || fromFg < 0 || fromFg > 15) {
+            alert('Enter a color number from 0 to 15.');
+            return;
+        }
+        const region = activeRegion();
+        pushHistory();
+        for (let r = region.r0; r <= region.r1; r++) {
+            for (let c = region.c0; c <= region.c1; c++) {
+                const i = r * W + c;
+                const next = replaceFgColor(cells[i], fromFg, curFg);
+                if (next !== cells[i]) { cells[i] = next; drawCell(i); }
+            }
+        }
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    // Pure: given the leftmost/rightmost occupied columns (inclusive)
+    // within a region of width regionWidth, and the region's own
+    // starting column c0 on the canvas, returns the column shift
+    // needed to center that occupied span within the region. Zero
+    // width occupied span (nothing but blanks) or an already-centered
+    // span both correctly return 0.
+    function computeCenterShift(occupiedMinCol, occupiedMaxCol, c0, regionWidth) {
+        if (occupiedMaxCol < occupiedMinCol) return 0;  // nothing occupied
+        const spanWidth = occupiedMaxCol - occupiedMinCol + 1;
+        const wantMinCol = c0 + Math.floor((regionWidth - spanWidth) / 2);
+        return wantMinCol - occupiedMinCol;
+    }
+
+    function centerSelection() {
+        const region = activeRegion();
+        const regionWidth = region.c1 - region.c0 + 1;
+        let occMin = region.c1 + 1, occMax = region.c0 - 1;
+        for (let r = region.r0; r <= region.r1; r++) {
+            for (let c = region.c0; c <= region.c1; c++) {
+                if (cells[r * W + c].c !== ' ') {
+                    if (c < occMin) occMin = c;
+                    if (c > occMax) occMax = c;
+                }
+            }
+        }
+        const shift = computeCenterShift(occMin, occMax, region.c0, regionWidth);
+        if (shift === 0) return;
+        pushHistory();
+        for (let r = region.r0; r <= region.r1; r++) {
+            const rowCopy = [];
+            for (let c = region.c0; c <= region.c1; c++) rowCopy.push(cells[r * W + c]);
+            for (let c = region.c0; c <= region.c1; c++) {
+                const srcCol = c - shift;
+                const i = r * W + c;
+                cells[i] = (srcCol >= region.c0 && srcCol <= region.c1)
+                    ? rowCopy[srcCol - region.c0] : { c: ' ', fg: 7, bg: 0 };
+                drawCell(i);
+            }
+        }
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    // Insert/delete a row or column at the cursor position -- shifts
+    // everything past it by one, and either drops (delete) or
+    // fabricates (insert) the row/column that falls off the far edge.
+    // The canvas itself never resizes; this is a "ripple" operation
+    // within the existing W×H, matching how a fixed-size terminal
+    // screen's content actually behaves when you push text up or over.
+    function insertRowAt(row) {
+        pushHistory();
+        for (let r = H - 1; r > row; r--) {
+            for (let c = 0; c < W; c++) cells[r * W + c] = { ...cells[(r - 1) * W + c] };
+        }
+        for (let c = 0; c < W; c++) cells[row * W + c] = { c: ' ', fg: 7, bg: 0 };
+        for (let i = 0; i < cells.length; i++) drawCell(i);
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    function deleteRowAt(row) {
+        pushHistory();
+        for (let r = row; r < H - 1; r++) {
+            for (let c = 0; c < W; c++) cells[r * W + c] = { ...cells[(r + 1) * W + c] };
+        }
+        for (let c = 0; c < W; c++) cells[(H - 1) * W + c] = { c: ' ', fg: 7, bg: 0 };
+        for (let i = 0; i < cells.length; i++) drawCell(i);
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    function insertColAt(col) {
+        pushHistory();
+        for (let r = 0; r < H; r++) {
+            for (let c = W - 1; c > col; c--) cells[r * W + c] = { ...cells[r * W + c - 1] };
+            cells[r * W + col] = { c: ' ', fg: 7, bg: 0 };
+        }
+        for (let i = 0; i < cells.length; i++) drawCell(i);
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    function deleteColAt(col) {
+        pushHistory();
+        for (let r = 0; r < H; r++) {
+            for (let c = col; c < W - 1; c++) cells[r * W + c] = { ...cells[r * W + c + 1] };
+            cells[r * W + (W - 1)] = { c: ' ', fg: 7, bg: 0 };
+        }
+        for (let i = 0; i < cells.length; i++) drawCell(i);
+        dirty = true;
+        document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
     function fillFlood(r, c) {
         if (r < 0 || r >= H || c < 0 || c >= W) return;
         const i = r * W + c;
@@ -409,11 +758,23 @@
         const r = parseInt(cell.dataset.r, 10);
         const c = parseInt(cell.dataset.c, 10);
         cursorR = r; cursorC = c; updateCursorMark();
-        if (tool === 'pencil') { paint(r, c); mouseDown = true; }
+        const halfMode = document.getElementById('halfBlockMode').checked;
+        if (tool === 'pencil' && halfMode) {
+            paintHalfBlock(r, c, cellHalfAtEvent(e, cell), curFg);
+            mouseDown = true;
+        }
+        else if (tool === 'eraser' && halfMode) {
+            paintHalfBlock(r, c, cellHalfAtEvent(e, cell), curBg);
+            mouseDown = true;
+        }
+        else if (tool === 'pencil') { paint(r, c); mouseDown = true; }
         else if (tool === 'eraser') { erase(r, c); mouseDown = true; }
+        else if (tool === 'shade') { shadeBrush(r, c); mouseDown = true; }
+        else if (tool === 'colorize') { colorizeCell(r, c); mouseDown = true; }
         else if (tool === 'fill') { fillFlood(r, c); }
         else if (tool === 'line') { lineStart = [r, c]; }
         else if (tool === 'rect') { lineStart = [r, c]; }
+        else if (tool === 'ellipse') { lineStart = [r, c]; }
         else if (tool === 'select') { selStart = [r, c]; clearSelection(); }
         else if (tool === 'eyedrop') {
             const cell = cells[r * W + c];
@@ -427,11 +788,12 @@
     });
     grid.addEventListener('mouseup', e => {
         const cell = e.target.closest('.cell');
-        if (cell && (tool === 'line' || tool === 'rect') && lineStart) {
+        if (cell && (tool === 'line' || tool === 'rect' || tool === 'ellipse') && lineStart) {
             const r = parseInt(cell.dataset.r, 10);
             const c = parseInt(cell.dataset.c, 10);
             if (tool === 'line') drawLine(lineStart[0], lineStart[1], r, c);
             else if (tool === 'rect') drawRect(lineStart[0], lineStart[1], r, c);
+            else if (tool === 'ellipse') drawEllipse(lineStart[0], lineStart[1], r, c);
             lineStart = null;
         }
         if (cell && tool === 'select' && selStart) {
@@ -452,8 +814,13 @@
         if (mouseDown) {
             const r = parseInt(cell.dataset.r, 10);
             const c = parseInt(cell.dataset.c, 10);
-            if (tool === 'pencil') paint(r, c);
+            const halfMode = document.getElementById('halfBlockMode').checked;
+            if (tool === 'pencil' && halfMode) paintHalfBlock(r, c, cellHalfAtEvent(e, cell), curFg);
+            else if (tool === 'eraser' && halfMode) paintHalfBlock(r, c, cellHalfAtEvent(e, cell), curBg);
+            else if (tool === 'pencil') paint(r, c);
             else if (tool === 'eraser') erase(r, c);
+            else if (tool === 'shade') shadeBrush(r, c);
+            else if (tool === 'colorize') colorizeCell(r, c);
         }
     });
     document.addEventListener('mouseup', () => { mouseDown = false; });
@@ -617,6 +984,98 @@
     });
     document.getElementById('btnFlipH').addEventListener('click', flipSelectionHorizontal);
     document.getElementById('btnFlipV').addEventListener('click', flipSelectionVertical);
+    document.getElementById('btnSwapColors').addEventListener('click', swapColorsInSelection);
+    document.getElementById('btnReplaceColor').addEventListener('click', replaceColorInSelection);
+    document.getElementById('btnCenter').addEventListener('click', centerSelection);
+    document.getElementById('btnInsertRow').addEventListener('click', () => insertRowAt(cursorR));
+    document.getElementById('btnDeleteRow').addEventListener('click', () => deleteRowAt(cursorR));
+    document.getElementById('btnInsertCol').addEventListener('click', () => insertColAt(cursorC));
+    document.getElementById('btnDeleteCol').addEventListener('click', () => deleteColAt(cursorC));
+
+    // ---- TheDraw (.TDF) font picker: list, search, live preview, insert ----
+    (function() {
+        let fonts = [];        // [{index, name, type}, ...] from /fonts
+        let selected = null;   // currently-picked font entry
+        let lastResult = null; // most recent /fonts/render response
+        let previewTimer = null;
+        const listEl = document.getElementById('tdfFontList');
+        const searchEl = document.getElementById('tdfSearch');
+        const textEl = document.getElementById('tdfText');
+        const previewEl = document.getElementById('tdfPreview');
+        const insertBtn = document.getElementById('btnTdfInsert');
+
+        function renderList(filter) {
+            const q = (filter || '').toLowerCase();
+            const matches = q ? fonts.filter(f => f.name.toLowerCase().includes(q)) : fonts;
+            listEl.innerHTML = '';
+            // Cap rendered rows -- a 3,716-font pack with no filter
+            // would otherwise build that many DOM nodes on every
+            // keystroke; the search box narrows it down fast.
+            matches.slice(0, 300).forEach(f => {
+                const row = document.createElement('div');
+                row.textContent = f.name;
+                row.style.cssText = 'padding:2px 4px;cursor:pointer;color:#0f0;';
+                row.addEventListener('click', () => {
+                    selected = f;
+                    Array.from(listEl.children).forEach(el => el.style.background = '');
+                    row.style.background = '#333';
+                    requestPreview();
+                });
+                listEl.appendChild(row);
+            });
+        }
+
+        function requestPreview() {
+            if (!selected || !textEl.value) {
+                previewEl.textContent = '';
+                lastResult = null;
+                insertBtn.disabled = true;
+                return;
+            }
+            const url = `{{ url_for('ansi_editor.render_font_preview') }}` +
+                        `?index=${selected.index}&text=${encodeURIComponent(textEl.value)}` +
+                        `&fg=${curFg}&bg=${curBg}`;
+            fetch(url).then(r => r.json()).then(result => {
+                if (result.error || !result.cells) {
+                    previewEl.textContent = result.error || '(no output)';
+                    lastResult = null;
+                    insertBtn.disabled = true;
+                    return;
+                }
+                lastResult = result;
+                insertBtn.disabled = false;
+                const lines = [];
+                for (let r = 0; r < result.height; r++) {
+                    let line = '';
+                    for (let c = 0; c < result.width; c++) {
+                        const cell = result.cells[r * result.width + c];
+                        line += cell ? cell.c : ' ';
+                    }
+                    lines.push(line);
+                }
+                previewEl.textContent = lines.join('\n');
+            }).catch(() => {
+                previewEl.textContent = '(preview failed)';
+                lastResult = null;
+                insertBtn.disabled = true;
+            });
+        }
+
+        searchEl.addEventListener('input', () => renderList(searchEl.value));
+        textEl.addEventListener('input', () => {
+            clearTimeout(previewTimer);
+            previewTimer = setTimeout(requestPreview, 250);  // debounce
+        });
+        insertBtn.addEventListener('click', () => {
+            if (!lastResult) return;
+            insertTdfResult(cursorR, cursorC, lastResult);
+        });
+
+        fetch(`{{ url_for('ansi_editor.list_fonts') }}`).then(r => r.json()).then(data => {
+            fonts = data || [];
+            renderList('');
+        }).catch(() => { listEl.textContent = '(font list unavailable)'; });
+    })();
 
     // Zoom — scales cell width/height/font via CSS variables.
     let zoom = 1;

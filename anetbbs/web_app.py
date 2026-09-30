@@ -13,6 +13,7 @@ import eventlet
 eventlet.monkey_patch()
 
 import os
+import platform
 import sys
 import secrets
 import logging
@@ -1509,6 +1510,21 @@ def _backfill_binkp_node_network_id(app, engine, _sa):
         app.logger.warning('Could not backfill binkp_nodes.network_id: %s', exc)
 
 
+def _anetdraw_binary_name():
+    """Which of vendor/games/anetdraw/'s two static binaries matches
+    this install's actual machine -- the live server is x86-64, a
+    Raspberry Pi is aarch64, and the release tarball ships both so
+    either one self-selects the right binary with no sysop action.
+    Defaults to the x64 build for anything else (there is no third
+    variant to fall back to; an unrecognized/exotic architecture just
+    won't find its file and the bundled-door must_exist gate above
+    correctly skips seeding it, same as any other missing binary)."""
+    machine = platform.machine().lower()
+    if machine in ('aarch64', 'arm64'):
+        return 'anetdraw-arm64'
+    return 'anetdraw-x64'
+
+
 def _create_default_data():
     """Create default boards and admin user if they don't exist"""
     from .models import (Board, User, Game, GameCategory, SecurityQuestion,
@@ -2137,6 +2153,48 @@ def _create_default_data():
                 os.path.join(vendor_dir, 'anetsims', 'door32.sys'),
             'sort_order': 60,
             'must_exist': os.path.join(vendor_dir, 'anetsims', 'anetsims'),
+        },
+        {
+            # ANetDRAW -- a separate project (github.com/anetonline/
+            # ANetDRAW), but Jerry's own, and bundled here the same way
+            # anetsims is: static Linux binaries ship inside vendor/
+            # games/anetdraw/, one per architecture (the live server is
+            # x86-64, a Pi is aarch64) -- _anetdraw_binary_name() below
+            # picks the right one for whatever machine this install
+            # actually boots on. See docs/14-door-games.md.
+            #
+            # Real gap found live on a Pi (2026-09-30): door32.sys has
+            # no screen-size fields, so OpenDoors auto-detects the
+            # terminal size via a DSR cursor-position query-and-wait --
+            # confirmed working over a real raw-mode PTY (any byte of
+            # input unblocks it), but over ANetBBS's own web terminal
+            # (xterm.js via a websocket relay) it produced a black
+            # screen, reproduced live. bbsdev.drp sidesteps this
+            # entirely -- it declares width/height explicitly in the
+            # drop file itself, so OpenDoors never needs to query
+            # anything. No -D argument needed for this drop file type
+            # either: door_runner.py sets BBSDEV_DRP in the door's own
+            # environment to the real path (per BBSDEV.DRP's own spec,
+            # "the door MUST read it directly from its environment"),
+            # which OpenDoors reads before any command-line parsing.
+            'name': 'ANetDRAW',
+            'slug': 'anetdraw',
+            'description': 'ANetDRAW — ANSI/ASCII art editor: mouse, '
+                           'TheDraw fonts, blocks, image import, ZMODEM, '
+                           'gallery, shared wall.',
+            'category': 'other',
+            'icon': 'bi-palette2',
+            'game_type': 'door_native',
+            'executable_path':
+                os.path.join(vendor_dir, 'anetdraw', _anetdraw_binary_name()),
+            'working_directory':
+                os.path.join(vendor_dir, 'anetdraw'),
+            'drop_file_type': 'bbsdev.drp',
+            'drop_file_path': '%PBBSDEV.DRP',
+            'command_line_args': '--sysop-level 200',
+            'sort_order': 65,
+            'must_exist':
+                os.path.join(vendor_dir, 'anetdraw', _anetdraw_binary_name()),
         },
         {
             # anetbbs-cfg, the standalone curses full-screen sysop config

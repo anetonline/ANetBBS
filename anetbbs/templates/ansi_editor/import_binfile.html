@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Import .BIN / .XBin{% endblock %}
+
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-upload"></i> Import .BIN / .XBin File</h1>
+    <p>Upload a raw <code>.bin</code> or <code>.xb</code>/<code>.xbin</code> file.
+       Format is picked from the filename extension. A plain <code>.bin</code>
+       has no way to declare its own width — set it below (80 is the
+       near-universal convention); an XBin file's real width/height come
+       from its own header and the field below is ignored for it.</p>
+</div>
+
+<form method="post" enctype="multipart/form-data" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+        <div class="row g-2 mb-3">
+            <div class="col-md-6">
+                <label class="form-label">.bin / .xb / .xbin file</label>
+                <input type="file" name="bin_file" class="form-control" required
+                       accept=".bin,.xb,.xbin">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Width (.bin only, default 80)</label>
+                <input type="number" name="width" class="form-control" value="80" min="20" max="132">
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Name (optional)</label>
+            <input type="text" name="name" class="form-control" placeholder="(filename used if blank)">
+        </div>
+        <button class="btn btn-primary"><i class="bi bi-upload"></i> Import &amp; Edit</button>
+        <a href="{{ url_for('ansi_editor.index') }}" class="btn btn-link">Cancel</a>
+    </div>
+</form>
+{% endblock %}

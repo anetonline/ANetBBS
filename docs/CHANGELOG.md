@@ -1,11 +1,40 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.15`** (September 2026). This file covers `v1.0.0`
+Current release: **`v1.1.19`** (September 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.19 — ANetDRAW: sysop menu + web terminal fixes (September 2026)
+
+Fixed two real gaps found testing v1.1.18's bundled ANetDRAW live:
+
+- The terminal Sysop Tools `[D] ANetDRAW` shortcut never actually appeared on a real install. It had only been added to a hardcoded fallback menu that's never reached once an install has migrated to the admin-editable Sysop Tools menu (which is every real install) — it's now part of that actual seeded menu data instead, backfilled automatically onto existing installs the same way every other addition to this menu already self-heals on upgrade.
+- ANetDRAW showed a black screen when launched from ANetBBS's web terminal specifically (terminal/SSH access worked correctly). Root cause: the `door32.sys` drop file format has no screen-size fields, so OpenDoors queries the terminal for its size and waits for a reply — which a real terminal answers, but the web terminal (xterm.js via a websocket relay) does not. Switched the bundled default to `bbsdev.drp`, which declares the screen size explicitly and needs no such query.
+
+## v1.1.18 — ANetDRAW is now bundled (September 2026)
+
+ANetDRAW now ships inside ANetBBS's own release tarball — static Linux binaries for both x86-64 and Raspberry Pi (aarch64), with the correct one auto-selected for whatever the install is actually running on. A `door_native` Game row is seeded automatically on first boot, active and ready to play from `/games/`, the same way the bundled `anetsims` door already works — no manual setup needed, and the terminal Sysop Tools `[D] ANetDRAW` shortcut (added in v1.1.16) now appears immediately as a result. A sysop who wants a different build can still register their own copy under the same slug, same as before.
+
+## v1.1.17 — Web ANSI editor: blocks, file formats, TheDraw fonts (September 2026)
+
+Continues the web ANSI editor's build-out toward ANetDRAW feature parity, on top of v1.1.16's new tools and file browser:
+
+- **Block operations**: swap foreground/background colors, replace one color with another, center a selection's content horizontally on the canvas, and insert/delete rows and columns — added alongside the existing flip/copy/paste.
+- **More file formats**: `.bin` and `.xb` (XBin) now both import and export, with real support for reading RLE-compressed XBin files; PCBoard `@X`, Renegade/Mystic pipe codes, and Synchronet Ctrl-A color codes are available as new export formats; a PNG download option was also added, reusing the existing renderer postcards already use.
+- **TheDraw (.TDF) font support**: a searchable font picker with a live banner-text preview, supporting all three real TDF font types (outline, with the full 19 outline styles; block; and color). No font pack ships with ANetBBS — point the new `TDF_FONTS_DIR` setting at one, the same way ANetDRAW's own font pack works.
+
+See `docs/36-ansi-editor.md` for setup details (`ANSI_EDITOR_BROWSE_DIRS`, `TDF_FONTS_DIR`) and `docs/14-door-games.md` for the ANetDRAW terminal shortcut from v1.1.16.
+
+## v1.1.16 — ANetDRAW terminal shortcut; web ANSI editor tool/file upgrades (September 2026)
+
+Added a direct terminal Sysop Tools shortcut for ANetDRAW, a separate ANSI/ASCII art editor project — once a sysop has installed it and registered it as a `door_native` Game (slug `anetdraw`), a one-key launch appears in the Sysop Tools menu, over any protocol. See `docs/14-door-games.md`'s new worked example for setup.
+
+Grew the built-in web ANSI editor's toolset toward feature parity with ANetDRAW: an ellipse tool, a shading brush (density builds up with repeated strokes), a colorize tool (recolors without touching the character underneath), half-block pixel mode (doubles vertical resolution using a cell's existing character/color pair), and a mirror-drawing mode. Also added a file browser (Open from disk / Save to disk) for real `.ans` files under configurable directories, alongside the existing art library — defaults to `data/text` and `data/mods/txt`, changeable via a new setting.
+
+Also fixed a completeness gap in the editor's SAUCE metadata: the font-name field was always left blank even though the editor always knows the answer (everything it renders is CP437) — now correctly declares "IBM VGA", matching what other SAUCE-reading art tools expect.
 
 ## v1.1.15 — anetbbs-monitor: fixed missing /usr/local/bin/ shortcut (September 2026)
 

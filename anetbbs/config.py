@@ -333,6 +333,32 @@ class Config:
     FILE_BULLETINS_DIR = os.environ.get(
         'FILE_BULLETINS_DIR', os.path.join(BASE_DIR, 'data', 'text', 'bulletins'))
 
+    # Web ANSI editor's file-browser (Open from disk / Save to disk),
+    # separate from the DB-backed AnsiArt library -- real .ans files a
+    # sysop can also reach directly on disk (or hand to another door/
+    # tool). Defaults to the two places art commonly already lives in
+    # this codebase's own conventions: {DATA_DIR}/text (matches
+    # FILE_BULLETINS_DIR's sibling directory and general text-file
+    # convention) and {DATA_DIR}/mods/txt (the sysop override tree,
+    # docs/35-mods-directory.md). "label:path" pairs, semicolon-
+    # separated, so a sysop can point it at an entirely different
+    # directory too, or add a third one, without a code change.
+    ANSI_EDITOR_BROWSE_DIRS = os.environ.get(
+        'ANSI_EDITOR_BROWSE_DIRS',
+        f"text:{os.path.join(BASE_DIR, 'data', 'text')};"
+        f"mods/txt:{os.path.join(BASE_DIR, 'data', 'mods', 'txt')}")
+
+    # Web ANSI editor's TheDraw (.TDF) font browser -- a sysop drops a
+    # font pack (e.g. ANetDRAW's own 3,716-font download) here, or
+    # points this at wherever they already keep one (an existing
+    # ANetDRAW/Synchronet install's own tdfonts/ directory, say).
+    # Empty by default -- no font pack ships with ANetBBS itself (like
+    # ANetDRAW, it's a separate download the sysop fetches on their
+    # own), so the font picker simply shows nothing until a sysop sets
+    # this.
+    TDF_FONTS_DIR = os.environ.get(
+        'TDF_FONTS_DIR', os.path.join(BASE_DIR, 'data', 'tdf-fonts'))
+
     # Security — country blocking via ip-api.com (free, no registration).
     # Comma-separated ISO 3166-1 alpha-2 codes to block (e.g. CN,RU,KP).
     # Leave blank to disable. Lookup results are cached in-memory for 1 hour.

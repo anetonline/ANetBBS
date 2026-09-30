@@ -116,6 +116,7 @@ once.
 - [33 — Presence alerts (real-time "X just logged in/out")](33-presence-alerts.md)
 - [34 — JAM message base export (for classic door games)](34-jam-export.md)
 - [35 — The mods directory (customization that survives updates)](35-mods-directory.md)
+- [36 — Web ANSI editor (file browser, BIN/XBin/PCBoard/Renegade/Synchronet formats, TheDraw fonts)](36-ansi-editor.md)
 
 ### Reference
 

@@ -272,6 +272,23 @@ async def _act_sysop_cfg_tool(ui, args):
         return None
     await ui.session.write(_CLR); await ui.sysop_cfg_tool(); return None
 
+async def _act_sysop_anetdraw(ui, args):
+    """Real gap found live (2026-09-30): _stock_sysop_menu()'s own
+    categories list (bbs_ui.py) only ever gets reached on a fresh/
+    unmigrated install with no 'sysop_tools' BbsMenu row yet -- any
+    already-seeded install (which is every real one by now) takes the
+    data-driven picker above instead, via _act_sysop()'s
+    _picker_goto_or_stock() routing, which never looks at that Python
+    list at all. Adding '[D] ANetDRAW' to _stock_sysop_menu() alone
+    was therefore invisible in practice. This is the actual item real
+    installs see. No availability check here, same reasoning as
+    _act_sysop_cfg_tool() above -- ui.sysop_anetdraw()
+    (bbs_ui.py's _sysop_anetdraw()) already refuses gracefully with an
+    on-screen message when the Game row isn't there."""
+    if not await _require_sysop(ui):
+        return None
+    await ui.session.write(_CLR); await ui.sysop_anetdraw(); return None
+
 
 async def _act_chat(ui, args):
     await ui.session.write(_CLR)
@@ -736,6 +753,7 @@ _ACTIONS = {
     'sysop_node_monitor': _act_sysop_node_monitor,
     'sysop_status': _act_sysop_status,
     'sysop_cfg_tool': _act_sysop_cfg_tool,
+    'sysop_anetdraw': _act_sysop_anetdraw,
 }
 
 
@@ -1229,6 +1247,17 @@ DEFAULT_MENUS = [
             {'hotkey': 'C', 'label': 'Caller Log', 'action_type': 'sysop_callers', 'min_access': 100, 'sort_order': 120},
             {'hotkey': 'M', 'label': 'Node Monitor', 'action_type': 'sysop_node_monitor', 'min_access': 100, 'sort_order': 130},
             {'hotkey': 'S', 'label': 'Server Status', 'action_type': 'sysop_status', 'min_access': 100, 'sort_order': 140},
+            # Always present, same reasoning as Config Tool (SSH)
+            # below -- ui.sysop_anetdraw() (bbs_ui.py's
+            # _sysop_anetdraw()) already refuses gracefully with an
+            # on-screen message when ANetDRAW isn't actually installed
+            # (a Game row with slug 'anetdraw' doesn't exist), so
+            # showing it unconditionally and letting the action's own
+            # existing check handle that is consistent with every
+            # other admin-editable item here relying on its action's
+            # own gating, rather than this static seed trying to
+            # dynamically query Game availability itself.
+            {'hotkey': 'D', 'label': 'ANetDRAW', 'action_type': 'sysop_anetdraw', 'min_access': 100, 'sort_order': 145},
             # Unlike the hardcoded stock picker (which only ADDS this
             # item for an SSH session), this default item is always
             # present -- ui.sysop_cfg_tool() (bbs_ui.py's
@@ -1468,6 +1497,7 @@ ACTION_TYPE_CHOICES = [
     ('sysop_node_monitor', 'Sysop: Node Monitor (for an admin-editable sysop_tools sub-menu, admin only)'),
     ('sysop_status', 'Sysop: Server Status (for an admin-editable sysop_tools sub-menu, admin only)'),
     ('sysop_cfg_tool', 'Sysop: anetbbs-cfg tool, SSH only (for an admin-editable sysop_tools sub-menu, admin only)'),
+    ('sysop_anetdraw', 'Sysop: Launch ANetDRAW (for an admin-editable sysop_tools sub-menu, admin only)'),
     ('page', 'Page sysop'),
     ('dialout', 'Dial-out menu'),
     ('logoff', 'End session'),

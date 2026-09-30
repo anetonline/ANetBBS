@@ -14,10 +14,31 @@
     <a href="{{ url_for('ansi_editor.raw_ansi', art_id=art.id) }}" class="btn btn-outline-secondary btn-sm">
         <i class="bi bi-download"></i> .ans
     </a>
+    <a href="{{ url_for('ansi_editor.raw_png', art_id=art.id) }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-image"></i> .png
+    </a>
+    <div class="dropdown d-inline">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+            <i class="bi bi-download"></i> More formats
+        </button>
+        <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
+            <li><a class="dropdown-item" href="{{ url_for('ansi_editor.raw_bin', art_id=art.id) }}">.bin (raw char+attribute)</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('ansi_editor.raw_xbin', art_id=art.id) }}">.xb (XBin)</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('ansi_editor.raw_pcboard', art_id=art.id) }}">.pcb (PCBoard @X codes)</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('ansi_editor.raw_pipe', art_id=art.id) }}">.ren (Renegade/Mystic pipe codes)</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('ansi_editor.raw_synchronet', art_id=art.id) }}">.syn (Synchronet Ctrl-A codes)</a></li>
+        </ul>
+    </div>
     <form method="post" action="{{ url_for('ansi_editor.duplicate', art_id=art.id) }}" style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn btn-outline-secondary btn-sm"><i class="bi bi-files"></i> Duplicate</button>
     </form>
+    <a href="{{ url_for('ansi_editor.browse', art_id=art.id) }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-save"></i> Save to disk
+    </a>
+    <a href="{{ url_for('ansi_editor.browse') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-folder2-open"></i> Open from disk
+    </a>
     <a href="{{ url_for('ansi_editor.index') }}" class="btn btn-link btn-sm">← Library</a>
 </div>
 

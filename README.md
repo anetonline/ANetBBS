@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.1.15`, September 2026)
+**Status: stable** (`v1.1.19`, September 2026)
 
 A modern multi-node BBS for the classic FidoNet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -29,8 +29,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:8080`).
 
 ```
-tar xzf ANetBBS-v1.1.15.tar.gz
-cd ANetBBS-v1.1.15
+tar xzf ANetBBS-v1.1.19.tar.gz
+cd ANetBBS-v1.1.19
 sudo bash install.sh
 ```
 
@@ -50,8 +50,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.1.15.tar.gz
-cd ANetBBS-v1.1.15
+tar xzf ANetBBS-v1.1.19.tar.gz
+cd ANetBBS-v1.1.19
 sudo bash update.sh
 ```
 
@@ -84,7 +84,7 @@ docker compose -f docker/compose/docker-compose.yml up -d
 ```
 
 `.env` already points at `ghcr.io/anetonline/anetbbs:latest` by
-default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.15`
+default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.19`
 (or whatever release you want). Testing a local change instead of a
 published image? `docker build -f docker/Dockerfile -t anetbbs:local .`,
 then set `ANETBBS_IMAGE=anetbbs` / `ANETBBS_IMAGE_TAG=local` in `.env`.
@@ -307,6 +307,7 @@ what each command actually does, and troubleshooting).
 - [`docs/32-node-monitor.md`](docs/32-node-monitor.md) — `anetbbs-monitor`, the console-only sysop dashboard (nodes, stats, logs, theme)
 - [`docs/34-jam-export.md`](docs/34-jam-export.md) — JAM message base export for classic door games
 - [`docs/35-mods-directory.md`](docs/35-mods-directory.md) — customizing art/scripts/login logic so changes survive updates
+- [`docs/36-ansi-editor.md`](docs/36-ansi-editor.md) — web ANSI editor's file browser, extra export formats, TheDraw font picker
 
 ## License
 

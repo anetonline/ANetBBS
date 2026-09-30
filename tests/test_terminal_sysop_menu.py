@@ -78,6 +78,13 @@ class SysopMenuWiringTests(unittest.TestCase):
         from anetbbs.features.bbs_ui import BBSMenuUI
         self.assertTrue(callable(getattr(BBSMenuUI, 'sysop_cfg_tool', None)))
 
+    def test_sysop_anetdraw_method_exists(self):
+        # Also conditionally added (an active Game row with slug
+        # 'anetdraw' must exist) -- see AnetdrawAvailableTests and
+        # SysopAnetdrawGatingTests below.
+        from anetbbs.features.bbs_ui import BBSMenuUI
+        self.assertTrue(callable(getattr(BBSMenuUI, 'sysop_anetdraw', None)))
+
     def test_sub_screen_helpers_exist(self):
         # Screens reachable only from inside a category (not directly off
         # the top-level menu) -- also worth guarding against shadowing.
@@ -294,6 +301,105 @@ class SysopCfgToolGatingTests(unittest.TestCase):
         asyncio.run(BBSMenuUI.sysop_cfg_tool(fake_self))
         joined = ''.join(fake_self.session.written)
         self.assertIn('SSH', joined)
+
+
+class AnetdrawAvailableTests(unittest.TestCase):
+    """_anetdraw_available() -- decides whether _sysop_menu's ANetDRAW
+    shortcut even shows up. As of the ANetDRAW bundling change
+    (web_app.py's BUNDLED_DOORS), a fresh app already has an active
+    'anetdraw' Game row seeded automatically whenever the vendored
+    binary for this machine's architecture exists -- see
+    tests/test_anetdraw_bundled_door_seed.py for that seeding logic
+    itself. This class tests _anetdraw_available()'s own query logic
+    in isolation, so setUp() clears whatever _create_default_data()
+    seeded first, establishing a known, controlled starting point for
+    each scenario below rather than depending on it."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.app = _fresh_app(str(Path(self._tmp.name) / 'anetdraw_avail.db'))
+        from anetbbs.models import db, Game
+        with self.app.app_context():
+            Game.query.filter_by(slug='anetdraw').delete()
+            db.session.commit()
+
+    def test_false_when_no_game_row_at_all(self):
+        from anetbbs.features.bbs_ui import _anetdraw_available
+        with self.app.app_context():
+            self.assertFalse(_anetdraw_available())
+
+    def test_true_when_active_game_row_exists(self):
+        from anetbbs.features.bbs_ui import _anetdraw_available
+        from anetbbs.models import db, Game
+        with self.app.app_context():
+            db.session.add(Game(name='ANetDRAW', slug='anetdraw',
+                                game_type='door_native', is_active=True))
+            db.session.commit()
+            self.assertTrue(_anetdraw_available())
+
+    def test_false_when_game_row_is_inactive(self):
+        # A sysop who disabled the door shouldn't still see a shortcut
+        # that tries to launch it.
+        from anetbbs.features.bbs_ui import _anetdraw_available
+        from anetbbs.models import db, Game
+        with self.app.app_context():
+            db.session.add(Game(name='ANetDRAW', slug='anetdraw',
+                                game_type='door_native', is_active=False))
+            db.session.commit()
+            self.assertFalse(_anetdraw_available())
+
+    def test_false_when_different_slug(self):
+        # A sysop who registered it under some other slug still gets an
+        # ordinary door (playable from /games/) -- just not the direct
+        # Sysop Tools shortcut, which specifically looks for 'anetdraw'.
+        from anetbbs.features.bbs_ui import _anetdraw_available
+        from anetbbs.models import db, Game
+        with self.app.app_context():
+            db.session.add(Game(name='ANetDRAW', slug='my-art-tool',
+                                game_type='door_native', is_active=True))
+            db.session.commit()
+            self.assertFalse(_anetdraw_available())
+
+
+class SysopAnetdrawGatingTests(unittest.TestCase):
+    """_sysop_anetdraw's OWN defensive re-check -- confirms it refuses
+    to attempt a launch when no active 'anetdraw' Game row exists,
+    independent of _sysop_menu's own categories-list gating (covered
+    separately above via AnetdrawAvailableTests). Same two-layer shape
+    as SysopCfgToolGatingTests above. setUp() clears the bundled seed
+    row first (see AnetdrawAvailableTests' own docstring) so "missing
+    row" is a real, deliberately-arranged scenario, not just wrong
+    about the app's actual starting state."""
+
+    class _FakeSession:
+        def __init__(self):
+            self.written = []
+
+        async def write(self, data):
+            self.written.append(data)
+
+        async def read_line(self, prompt=''):
+            return ''
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        app = _fresh_app(str(Path(self._tmp.name) / 'anetdraw_gate.db'))
+        from anetbbs.models import db, Game
+        with app.app_context():
+            Game.query.filter_by(slug='anetdraw').delete()
+            db.session.commit()
+
+    def test_missing_game_row_is_refused_before_any_launch_attempt(self):
+        import asyncio
+        from anetbbs.features.bbs_ui import BBSMenuUI
+
+        fake_self = types.SimpleNamespace(session=self._FakeSession())
+        asyncio.run(BBSMenuUI.sysop_anetdraw(fake_self))
+        joined = ''.join(fake_self.session.written)
+        self.assertIn("isn't set up", joined)
+        self.assertIn('anetdraw', joined)
 
 
 if __name__ == '__main__':

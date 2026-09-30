@@ -344,6 +344,59 @@ A second caller's launch on node 4 gets E: = `node4/`. Their DOOR.SYS
 is in their node4 dir; they don't see node3's. Save state and lock
 files (LORD.NOD) live there too — clean separation.
 
+## ANetDRAW — bundled, plays out of the box
+
+[ANetDRAW](https://github.com/anetonline/ANetDRAW) is a separate
+project (like RDQ3 and ANetCHESS), but — unlike those — its static
+Linux binaries **do ship inside ANetBBS's own release tarball**
+(`vendor/games/anetdraw/anetdraw-x64` and `anetdraw-arm64`), and a
+`Game` row (slug `anetdraw`, `door_native`) is seeded automatically on
+first boot, active by default, the same way `anetsims` already is —
+`_anetdraw_binary_name()` in `web_app.py` picks the right binary for
+whatever the install is actually running on (x86-64 live server, or an
+aarch64 Raspberry Pi) with no sysop action needed. Just open `/games/`
+→ **ANetDRAW** to draw — text/font/line/box/fill/shading tools, mouse
+support, TheDraw fonts, block ops, image import, ZMODEM, a gallery and
+a live shared wall.
+
+The terminal Sysop Tools menu (any protocol) also gets a direct
+`[D] ANetDRAW` shortcut for free, once that Game row exists and is
+active — no need to go through the general Games list. This is driven
+purely by the Game row's presence (`bbs_ui.py`'s
+`_anetdraw_available()` looks for slug `anetdraw`), so it works
+identically whether the row came from the bundled seed above or a
+sysop's own manual setup.
+
+**Want a newer/different ANetDRAW build than what shipped in this
+release** (or to point at TheDraw fonts — see
+[36 — Web ANSI editor](36-ansi-editor.md) for the *web* editor's own,
+separate font picker), or you're running on a platform the bundled
+binaries don't cover? Register it as an ordinary door_native game
+yourself, same as any other:
+
+- Name: `ANetDRAW`
+- **Slug: `anetdraw`** — reuse this exact slug to keep the Sysop Tools
+  shortcut; a sysop's own row with this slug simply takes over from
+  the bundled one (matching how any other bundled door's fields
+  self-correct on upgrade, see the `BUNDLED_DOORS` loop in
+  `web_app.py`).
+- Game type: `door_native`
+- Executable / Working directory: wherever you unpacked it
+- Drop file type: `bbsdev.drp` — **not** `door32.sys`: real gap found
+  live (2026-09-30) testing on a Raspberry Pi. door32.sys has no
+  screen-size fields, so OpenDoors auto-detects the terminal size via
+  a DSR cursor-position query-and-wait; that works fine over a real
+  terminal (SyncTerm, SSH) but produced a black screen over ANetBBS's
+  own web terminal (xterm.js via a websocket relay). bbsdev.drp
+  declares width/height explicitly, so OpenDoors never needs to query
+  anything — confirmed working over both terminal and web.
+- Drop file path: `%PBBSDEV.DRP`
+- Command line arguments: `--sysop-level 200` (gives ANetBBS admins
+  its sysop file browser, per ANetDRAW's own `docs/SYSOP_GUIDE.md` —
+  no `-D <path>` needed for bbsdev.drp: door_runner.py sets the
+  `BBSDEV_DRP` environment variable to the real path instead, which
+  OpenDoors reads directly per that drop file format's own spec)
+
 ## Worked example: a Synchronet `.js` door
 
 For a stock Synchronet door pack (e.g., a clone of Synchronet's

@@ -129,7 +129,7 @@ class ActionTypeChoicesConsistencyTests(unittest.TestCase):
                      'sysop_login_modules', 'sysop_notifications',
                      'sysop_registry', 'sysop_callers',
                      'sysop_node_monitor', 'sysop_status',
-                     'sysop_cfg_tool'):
+                     'sysop_cfg_tool', 'sysop_anetdraw'):
             self.assertIn(name, _ACTIONS)
 
 
@@ -330,6 +330,7 @@ class SysopLeafActionTests(unittest.TestCase):
         'sysop_node_monitor': 'sysop_node_monitor',
         'sysop_status': 'sysop_status',
         'sysop_cfg_tool': 'sysop_cfg_tool',
+        'sysop_anetdraw': 'sysop_anetdraw',
     }
 
     def test_each_action_calls_its_matching_bound_method_when_admin(self):
@@ -440,6 +441,86 @@ class EndToEndAdminEditableChatMenuTests(unittest.TestCase):
         self.assertNotIn('IRC Chat', out,
                          'the sysop removed IRC from their custom menu; '
                          'the stock hardcoded picker must not appear instead')
+
+
+class SeedDefaultMenusBackfillsAnetdrawTests(unittest.TestCase):
+    """Real live bug found (2026-09-30): _stock_sysop_menu()'s own
+    categories list in bbs_ui.py only ever runs on a fresh/unmigrated
+    install with no 'sysop_tools' BbsMenu row yet -- every real,
+    already-migrated install (confirmed live on Jerry's Pi) takes the
+    data-driven picker instead, via _act_sysop()'s
+    _picker_goto_or_stock() routing, which reads DEFAULT_MENUS'
+    seeded items, not that Python list. Adding '[D] ANetDRAW' to
+    _stock_sysop_menu() alone was therefore invisible on any real
+    install. This test proves the actual fix: seed_default_menus()'s
+    existing "top up missing default items on an existing menu"
+    backfill (already used for every prior sysop_tools addition)
+    correctly adds the sysop_anetdraw item to a menu that predates it
+    -- the exact scenario an already-deployed install upgrading into
+    this fix goes through.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+        cls._tmp_db = str(Path(__file__).resolve().parent / '.anetdraw_menu_backfill_test.db')
+        if os.path.exists(cls._tmp_db):
+            os.remove(cls._tmp_db)
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = f'sqlite:///{cls._tmp_db}'
+        os.environ['FLASK_ENV'] = 'testing'
+
+        from anetbbs.web_app import create_app
+        # create_app() already calls seed_default_menus() once, seeding
+        # the CURRENT DEFAULT_MENUS (including sysop_anetdraw) -- delete
+        # that one item below to simulate an install that predates this
+        # fix, then re-run the backfill exactly as a real upgrade would.
+        cls.app = create_app('testing')
+        cls.app.config['TESTING'] = True
+
+    @classmethod
+    def tearDownClass(cls):
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+        for suffix in ('', '-wal', '-shm'):
+            path = cls._tmp_db + suffix
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_backfill_adds_missing_anetdraw_item_to_existing_menu(self):
+        from anetbbs.features.menu_engine import seed_default_menus
+        from anetbbs.models import db, BbsMenu, BbsMenuItem
+
+        with self.app.app_context():
+            menu = BbsMenu.query.filter_by(name='sysop_tools').first()
+            self.assertIsNotNone(menu, 'sysop_tools must already be seeded by create_app()')
+
+            # Simulate a pre-fix install: remove the item entirely.
+            BbsMenuItem.query.filter_by(
+                menu_id=menu.id, action_type='sysop_anetdraw').delete()
+            db.session.commit()
+            self.assertIsNone(
+                BbsMenuItem.query.filter_by(
+                    menu_id=menu.id, action_type='sysop_anetdraw').first())
+
+            backfilled = seed_default_menus()
+            self.assertGreaterEqual(backfilled, 1)
+
+            item = BbsMenuItem.query.filter_by(
+                menu_id=menu.id, action_type='sysop_anetdraw').first()
+            self.assertIsNotNone(item, 'sysop_anetdraw item was not backfilled')
+            self.assertEqual(item.hotkey.upper(), 'D')
+            self.assertEqual(item.label, 'ANetDRAW')
+
+    def test_backfill_is_idempotent_no_duplicate_on_second_run(self):
+        from anetbbs.features.menu_engine import seed_default_menus
+        from anetbbs.models import BbsMenu, BbsMenuItem
+
+        with self.app.app_context():
+            menu = BbsMenu.query.filter_by(name='sysop_tools').first()
+            seed_default_menus()  # item already present from the previous test
+            seed_default_menus()  # must not add a second copy
+            items = BbsMenuItem.query.filter_by(
+                menu_id=menu.id, action_type='sysop_anetdraw').all()
+            self.assertEqual(len(items), 1)
 
 
 if __name__ == '__main__':
