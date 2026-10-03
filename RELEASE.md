@@ -1,3 +1,7 @@
+# ANetBBS v1.1.22 — CI test fix, no functional change (October 2026)
+
+A test added alongside v1.1.21's MRC sticky-DM feature (`tests/test_mrc_terminal_mentions.py`) asserted a mention-count digit sequence was absent from an entire rendered status-bar buffer that also renders a live clock — a CI run during the 15:00-15:59 hour made the clock's own "15:xx" trip the check, unrelated to mentions at all. The assertion now scopes to the one screen element actually under test, the same way every other test asserting against a captured multi-field render already should.
+
 # ANetBBS v1.1.21 — MRC sticky DM; new optional Enhanced Client add-on (October 2026)
 
 Terminal MRC chat gained `/set pin <user>` ("sticky DM"), matching a feature already on the web MRC client: once pinned, plain typed messages go to that user as a direct message instead of broadcasting to the room, with a status-line indicator showing it's active, until `/set pin off`. A one-off `/t`/`/msg` to someone else still overrides it for that one message. Deliberately not saved across reconnects, matching the web client's own behavior exactly. See `docs/27-mrc-chat.md`.

@@ -1,11 +1,22 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.21`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.22`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.22 — CI test fix, no functional change (October 2026)
+
+A test added alongside v1.1.21's MRC sticky-DM feature
+(`tests/test_mrc_terminal_mentions.py`) asserted a mention-count digit
+sequence was absent from an entire rendered status-bar buffer that also
+renders a live clock — a CI run during the 15:00-15:59 hour made the
+clock's own "15:xx" trip the check, unrelated to mentions at all. The
+assertion now scopes to the one screen element actually under test,
+the same way every other test asserting against a captured multi-field
+render already should.
 
 ## v1.1.21 — MRC sticky DM; new optional Enhanced Client add-on (October 2026)
 

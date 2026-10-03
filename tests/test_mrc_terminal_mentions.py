@@ -41,6 +41,7 @@
 See anetbbs/features/mrc_chat.py.
 """
 import asyncio
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -718,6 +719,27 @@ class MysticThemeMentionsTests(unittest.TestCase):
     fake/mocked layout -- confirms the actual shipped MENTIONS element
     coordinates each theme declares actually get written to."""
 
+    def _element_text(self, joined, layout, name):
+        """Pulls out exactly what _place() wrote for ONE named element
+        (its own declared x/y coordinates), not a blanket substring
+        search of the whole rendered buffer. Real flaky-CI failure
+        found live (2026-10-03): asserting '15' is absent from the
+        WHOLE buffer broke the instant a CI run happened to land during
+        the 15:00-15:59 UTC hour, because _place('CLOCK', ...) renders
+        the live wall-clock time elsewhere on the same screen (e.g.
+        '15:53') -- coincidentally containing the same digits the
+        mention-count-truncation bug would have produced, with nothing
+        to do with mentions at all. Scoping the assertion to MENTIONS'
+        own coordinates makes this immune to the clock, latency,
+        chatters count, or any other element ever colliding on digits."""
+        el = layout.element(name)
+        x, y = el[0], el[1]
+        m = re.search(
+            rf'\x1b\[{y};{x}H\x1b\[[0-9;]*m([^\x1b]*)\x1b\[0m', joined)
+        self.assertIsNotNone(
+            m, f'{name} element not found at ({x},{y}) in rendered output')
+        return m.group(1).strip()
+
     def _chat_with_mystic_layout(self, palette_name, mention_count):
         from mrc.mystic_client.theme_layout import load_theme_layout
         chat = _make_chat('StingRay')
@@ -747,15 +769,16 @@ class MysticThemeMentionsTests(unittest.TestCase):
             chat = self._chat_with_mystic_layout(name, mention_count=3)
             _run(chat._mystic_draw_status())
             joined = ''.join(chat.session.written)
-            self.assertIn('03', joined,
-                          f'{name}: mention count 3 never written to screen')
+            text = self._element_text(joined, chat._mystic_layout, 'MENTIONS')
+            self.assertEqual(text, '03',
+                             f'{name}: mention count 3 never written to screen')
 
     def test_mention_count_over_99_is_capped_not_truncated_wrong(self):
         chat = self._chat_with_mystic_layout('original', mention_count=150)
         _run(chat._mystic_draw_status())
         joined = ''.join(chat.session.written)
-        self.assertIn('99', joined)
-        self.assertNotIn('15', joined,
+        text = self._element_text(joined, chat._mystic_layout, 'MENTIONS')
+        self.assertEqual(text, '99',
                          'a 3-digit count must cap at 99, not truncate to '
                          'the first 2 digits (which would silently show '
                          'the wrong, much smaller number)')
@@ -768,7 +791,8 @@ class MysticThemeMentionsTests(unittest.TestCase):
         chat = self._chat_with_mystic_layout('original', mention_count=0)
         _run(chat._mystic_draw_status())
         joined = ''.join(chat.session.written)
-        self.assertIn('00', joined)
+        text = self._element_text(joined, chat._mystic_layout, 'MENTIONS')
+        self.assertEqual(text, '00')
 
 
 if __name__ == '__main__':
