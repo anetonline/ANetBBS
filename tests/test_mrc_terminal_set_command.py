@@ -364,5 +364,151 @@ class PaletteTests(unittest.TestCase):
         self.assertEqual(chat._palette_name, '2leet4u')
 
 
+class PinDmTests(unittest.TestCase):
+    """/set pin <user> -- "sticky DM", the terminal equivalent of the
+    web client's click-a-name-to-stick-DM feature (Jerry's ask,
+    2026-10-03: a user requested this for the terminal MRC client
+    after seeing it on the web one). Deliberately NOT persisted via
+    set_prefs (see _pin_target's own docstring in mrc_chat.py) -- every
+    test here also confirms no wire traffic goes out for on/off, which
+    is the actual evidence of that, not just a comment claiming it."""
+
+    def test_pin_no_args_shows_usage_and_current_state(self):
+        chat = _make_chat()
+        _run(chat._handle_slash('/set pin'))
+        self.assertEqual(chat.sent, [])
+        joined = '\n'.join(chat.session.written)
+        self.assertIn('Usage', joined)
+        self.assertIn('currently: off', joined)
+
+    def test_pin_on_sets_target_no_wire_traffic(self):
+        chat = _make_chat()
+        _run(chat._handle_slash('/set pin NightOwl'))
+        self.assertEqual(chat._pin_target, 'NightOwl')
+        self.assertEqual(chat.sent, [],
+                         'pin must not be persisted via set_prefs -- see its own docstring')
+        joined = '\n'.join(chat.session.written)
+        self.assertIn('NightOwl', joined)
+
+    def test_pin_no_args_after_set_shows_current_target(self):
+        chat = _make_chat()
+        _run(chat._handle_slash('/set pin NightOwl'))
+        chat.session.written.clear()
+        _run(chat._handle_slash('/set pin'))
+        joined = '\n'.join(chat.session.written)
+        self.assertIn('-> NightOwl', joined)
+
+    def test_pin_off_clears_target_no_wire_traffic(self):
+        chat = _make_chat()
+        _run(chat._handle_slash('/set pin NightOwl'))
+        _run(chat._handle_slash('/set pin off'))
+        self.assertEqual(chat._pin_target, '')
+        self.assertEqual(chat.sent, [])
+
+    def test_pin_off_when_already_off_shows_notice_no_crash(self):
+        chat = _make_chat()
+        _run(chat._handle_slash('/set pin off'))
+        self.assertEqual(chat._pin_target, '')
+        joined = '\n'.join(chat.session.written)
+        self.assertIn('already off', joined)
+
+    def test_pin_is_case_sensitive_passthrough_like_slash_t(self):
+        """No validation against _known_users -- matches /msg's/
+        /t's own existing behavior (they pass the target straight
+        through too; the bridge is what reports an unknown user)."""
+        chat = _make_chat()
+        chat._known_users = {'alice'}
+        _run(chat._handle_slash('/set pin SomeoneNotOnline'))
+        self.assertEqual(chat._pin_target, 'SomeoneNotOnline')
+
+    def test_set_list_shows_pin_state(self):
+        chat = _make_chat()
+        _run(chat._handle_slash('/set pin NightOwl'))
+        chat.session.written.clear()
+        _run(chat._handle_slash('/set list'))
+        joined = '\n'.join(chat.session.written)
+        self.assertIn('-> NightOwl', joined)
+
+    def test_set_help_mentions_pin(self):
+        chat = _make_chat()
+        _run(chat._handle_slash('/set help'))
+        joined = '\n'.join(chat.session.written)
+        self.assertIn('pin', joined)
+
+
+class PinDmRoutingTests(unittest.TestCase):
+    """The actual point of the feature: once pinned, a PLAIN typed
+    line (no leading '/') goes out as a direct_message to the pinned
+    target instead of a send_message room broadcast -- driven through
+    the real _chat_loop(), same fixture shape as
+    test_mrc_terminal_input_history.py's ChatLoopHistoryAppendTests."""
+
+    def test_plain_message_routes_as_dm_when_pinned(self):
+        chat = _make_chat()
+        chat._pin_target = 'NightOwl'
+        chat._connected = True
+        lines = iter(['hey there', None])
+
+        async def fake_read_chat_line():
+            return next(lines)
+        chat._read_chat_line = fake_read_chat_line
+
+        _run(chat._chat_loop())
+
+        self.assertEqual(len(chat.sent), 1)
+        self.assertEqual(chat.sent[0]['type'], 'direct_message')
+        self.assertEqual(chat.sent[0]['to_user'], 'NightOwl')
+        self.assertEqual(chat.sent[0]['message'], 'hey there')
+
+    def test_plain_message_broadcasts_normally_when_not_pinned(self):
+        chat = _make_chat()
+        chat._connected = True
+        lines = iter(['hey there', None])
+
+        async def fake_read_chat_line():
+            return next(lines)
+        chat._read_chat_line = fake_read_chat_line
+
+        _run(chat._chat_loop())
+
+        self.assertEqual(len(chat.sent), 1)
+        self.assertEqual(chat.sent[0]['type'], 'send_message')
+
+    def test_slash_command_bypasses_pin_even_when_active(self):
+        """A literal /t othertarget message must still go to
+        othertarget, not get silently overridden by an active pin --
+        only lines with NO leading slash are affected."""
+        chat = _make_chat()
+        chat._pin_target = 'NightOwl'
+        chat._connected = True
+        lines = iter(['/t SomeoneElse hi there', None])
+
+        async def fake_read_chat_line():
+            return next(lines)
+        chat._read_chat_line = fake_read_chat_line
+
+        _run(chat._chat_loop())
+
+        self.assertEqual(len(chat.sent), 1)
+        self.assertEqual(chat.sent[0]['type'], 'direct_message')
+        self.assertEqual(chat.sent[0]['to_user'], 'SomeoneElse')
+
+    def test_pin_persists_across_multiple_plain_messages_in_same_session(self):
+        chat = _make_chat()
+        chat._pin_target = 'NightOwl'
+        chat._connected = True
+        lines = iter(['first', 'second', None])
+
+        async def fake_read_chat_line():
+            return next(lines)
+        chat._read_chat_line = fake_read_chat_line
+
+        _run(chat._chat_loop())
+
+        self.assertEqual(len(chat.sent), 2)
+        self.assertTrue(all(m['type'] == 'direct_message' for m in chat.sent))
+        self.assertTrue(all(m['to_user'] == 'NightOwl' for m in chat.sent))
+
+
 if __name__ == '__main__':
     unittest.main()

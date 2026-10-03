@@ -119,6 +119,17 @@ class Config:
     PETSCII80_HOST = os.environ.get('PETSCII80_HOST', '0.0.0.0')
     PETSCII80_PORT = int(os.environ.get('PETSCII80_PORT', '6401'))
 
+    # ANetBBS Enhanced Client -- a browser-based, mouse-driven, auto-
+    # graphical client just for ANetBBS (Canvas + WebSocket). TEST
+    # VERSION ONLY as of this flag's introduction: disabled by default,
+    # not yet pushed/deployed -- see anetbbs/core/enhanced_server.py.
+    # Purely additive, same opt-in convention as PETSCII above; every
+    # existing client (telnet/SSH/rlogin/PETSCII/SyncTerm/NetRunner/
+    # MagiTerm) is completely unaffected whether this is on or off.
+    ENHANCED_ENABLED = os.environ.get('ENHANCED_ENABLED', 'false').lower() == 'true'
+    ENHANCED_HOST = os.environ.get('ENHANCED_HOST', '0.0.0.0')
+    ENHANCED_PORT = int(os.environ.get('ENHANCED_PORT', '6402'))
+
     # FTP Server — serves the file areas. Anonymous access is read-only and
     # limited to FileAreas with is_active=True AND is_sysop_only=False.
     # Authenticated users can upload to areas whose upload_permission lets

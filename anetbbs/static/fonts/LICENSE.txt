@@ -27,3 +27,32 @@ Under the following terms:
                  provide a link to the license, and indicate if changes were made.
   ShareAlike   — If you remix, transform, or build upon the material, you must
                  distribute your contributions under the same CC BY-SA 4.0 license.
+
+Flexi_IBM_VGA_False.ttf / Flexi_IBM_VGA_False.woff
+-----------------------------------------------------
+Scalable TrueType IBM VGA font, from the "Flexi IBM VGA Fonts v2.0" pack
+(the same Ultimate Oldschool PC Font Pack family as the Ac437 font
+above, same author, same license). Used by the ANetBBS Enhanced
+Client (anetbbs/enhanced_client/index.html) in place of the bitmap-
+derived Ac437 font for a bolder, more legible look in its Canvas
+renderer.
+
+Original author : VileR / Screwtape (int10h.org), 2020-11
+Source          : https://int10h.org/oldschool-pc-fonts/fontlist/
+License         : Creative Commons Attribution-ShareAlike 4.0 International
+                  https://creativecommons.org/licenses/by-sa/4.0/
+
+"False" variant: uncorrected (square-pixel) aspect ratio, matching this
+project's existing 9:16 glyph-cell convention -- NOT the "True" variant,
+which is aspect-corrected to a real 4:3 VGA CRT's non-square pixels and
+reads as slightly cramped at a 9px-wide cell designed for the square-
+pixel assumption. Unmarked (extended Unicode charset) variant, matching
+how this project already decodes CP437 bytes to real Unicode codepoints
+(.decode('cp437')) rather than raw CP437 byte-position glyph mapping --
+not the "437" variant, which assumes the latter.
+
+The .woff is the original TTF distribution converted to WOFF via
+fontTools (a straightforward table-repackage, not a font-editor
+rebuild) for a smaller base64 payload in the client's embedded
+@font-face. As a derivative work, both files are distributed under the
+same CC BY-SA 4.0 license, same attribution terms as above.

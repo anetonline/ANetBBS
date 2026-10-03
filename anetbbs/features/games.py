@@ -158,7 +158,45 @@ class GameManager:
             # inline). Rebuilt every redraw since it's cheap and keeps
             # numbering in sync with what's actually on screen.
             numbered = []
-            if not await write_menu_art(self.session, 'door_games'):
+            if self.session.term_mode == 'enhanced':
+                # Real clickable buttons for the door-games category
+                # list -- Jerry's explicit ask, same treatment the main
+                # menu and login screen already got. This menu is
+                # read_line()-driven (a choice can be multi-digit, e.g.
+                # "16"), unlike those single-keystroke menus --
+                # encode_menu()'s 'send' override (the number/letter
+                # plus a trailing '\r') makes a click submit exactly
+                # the way a typed choice + Enter would, so the
+                # read_line()/numbered[] dispatch logic below needs
+                # zero changes to support it.
+                from .enhanced_protocol import encode_menu
+                item_list = []
+                num = 1
+                rendered_submenu_slugs = set()
+                for g in game_list:
+                    slug = g['category']
+                    if cat_as_submenu.get(slug):
+                        if slug in rendered_submenu_slugs:
+                            continue
+                        cat_name = cat_names.get(slug, slug.capitalize())
+                        count = len(grouped[slug])
+                        plural = 'door' if count == 1 else 'doors'
+                        item_list.append((str(num), f'{cat_name} ({count} {plural})',
+                                          '', '', f'{num}\r'))
+                        numbered.append(('submenu', slug, cat_name))
+                        num += 1
+                        rendered_submenu_slugs.add(slug)
+                        continue
+                    item_list.append((str(num), g['name'], '', '', f'{num}\r'))
+                    numbered.append(g)
+                    num += 1
+                item_list.append(('Q', 'Return', '', '', 'Q\r'))
+                self.session._enhanced_vt_state = None
+                self.session.writer.write(
+                    encode_menu('Door Games', item_list).encode('utf-8'))
+                await self.session._drain_protected()
+                self.session._enhanced_menu_active = True
+            elif not await write_menu_art(self.session, 'door_games'):
                 await self.session.clear_screen()
                 hbar = '═' * _iw
                 title = "Door Games".center(_iw)
@@ -301,7 +339,30 @@ class GameManager:
             end = min(start + page_size, len(games))
             page_games = games[start:end]
 
-            if page > 0 or not await write_menu_art(self.session, art_slot):
+            if self.session.term_mode == 'enhanced':
+                # Same treatment as the top-level door menu (see
+                # show_door_menu()'s own comment) -- real clickable
+                # buttons, multi-digit/letter choices submitted via
+                # encode_menu()'s 'send' override so the read_line()
+                # dispatch below needs no changes.
+                from .enhanced_protocol import encode_menu
+                item_list = [(str(i), g['name'], '', '', f'{i}\r')
+                            for i, g in enumerate(page_games, start=start + 1)]
+                if total_pages > 1:
+                    if page > 0:
+                        item_list.append(('P', 'Prev page', '', '', 'P\r'))
+                    if page < total_pages - 1:
+                        item_list.append(('N', 'Next page', '', '', 'N\r'))
+                item_list.append(('B', 'Back', '', '', 'B\r'))
+                page_title = cat_name
+                if total_pages > 1:
+                    page_title = f'{cat_name} (page {page + 1}/{total_pages})'
+                self.session._enhanced_vt_state = None
+                self.session.writer.write(
+                    encode_menu(page_title, item_list).encode('utf-8'))
+                await self.session._drain_protected()
+                self.session._enhanced_menu_active = True
+            elif page > 0 or not await write_menu_art(self.session, art_slot):
                 await self.session.clear_screen()
                 hbar = '═' * _iw
                 title = cat_name.center(_iw)

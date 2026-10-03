@@ -1,3 +1,9 @@
+# ANetBBS v1.1.21 — MRC sticky DM; new optional Enhanced Client add-on (October 2026)
+
+Terminal MRC chat gained `/set pin <user>` ("sticky DM"), matching a feature already on the web MRC client: once pinned, plain typed messages go to that user as a direct message instead of broadcasting to the room, with a status-line indicator showing it's active, until `/set pin off`. A one-off `/t`/`/msg` to someone else still overrides it for that one message. Deliberately not saved across reconnects, matching the web client's own behavior exactly. See `docs/27-mrc-chat.md`.
+
+Introduces the ANetBBS Enhanced Client: a new, optional browser-based terminal (Canvas + WebSocket) with real clickable menus and color ANSI art, running alongside every existing client (telnet/SSH/rlogin/PETSCII) rather than replacing any of them. Unlike every other feature, this does **not** ship inside the standard release tarball — it's a separate add-on download (built via `tools/build_enhanced_client_addon.sh`), since a sysop who doesn't want a browser client shouldn't need to carry its files. See `docs/37-enhanced-client.md` for the full writeup, including how to fetch and install it.
+
 # ANetBBS v1.1.20 — CI test fix, no functional change (September 2026)
 
 v1.1.19's new ANetDRAW bundled-door tests checked for the real vendored binaries directly, which don't exist inside the Docker CI build (`.dockerignore` excludes the whole `vendor/` tree from the image, same as `doors/` — a pre-existing, deliberate limitation, see `docs/22-containers.md`). Those tests now skip gracefully in that environment instead of failing, the same way every other test in this repo that depends on an environment-specific asset already does.

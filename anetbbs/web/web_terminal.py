@@ -205,9 +205,30 @@ class _TermSession:
 @term_bp.route('/')
 @login_required
 def index():
-    """xterm.js terminal page. Defaults to localhost:2233 (our telnet)."""
+    """xterm.js terminal page. Defaults to localhost:2233 (our telnet).
+
+    Accepts optional ?host=&port= query params to pre-fill the form
+    with a specific destination -- added so the ANetBBS Enhanced
+    Client (a JSON-only protocol with no raw-byte terminal passthrough,
+    see anetbbs/features/dialout.py) can link here for dial-out instead
+    of trying to proxy arbitrary remote-BBS ANSI through its own
+    protocol. Still just pre-fills the form; the user clicks Connect
+    themselves -- no auto-connect, and this page's own @login_required
+    (a separate Flask-Login web session from the terminal-protocols
+    process's BBSSession) still applies, so a user who isn't also
+    logged into the web UI in that browser hits a login prompt first.
+    """
     default_host = os.environ.get('BBS_PUBLIC_HOST', 'localhost')
     default_port = int(os.environ.get('TELNET_PORT', '2233'))
+    req_host = (request.args.get('host') or '').strip()
+    if req_host:
+        default_host = req_host
+    req_port = request.args.get('port', '').strip()
+    if req_port:
+        try:
+            default_port = int(req_port)
+        except ValueError:
+            pass
     return render_template('terminal/index.html',
                            default_host=default_host,
                            default_port=default_port)

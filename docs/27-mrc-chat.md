@@ -18,6 +18,45 @@ hardcodes an MRC line with no way to conditionally render inside static
 ANSI. A sysop-supplied custom `data/text/menus/chat.ans` override needs
 updating by hand if MRC is turned off after the fact.
 
+## Sticky DM (`/set pin`, terminal) / click-to-stick (web)
+
+Both clients let you pin a conversation so you don't have to retype a
+DM target on every message -- a direct request from a user who wanted
+the terminal client to match a feature already on the web one.
+
+**Terminal:**
+
+```
+/set pin <user>     -- plain (non-slash) messages now go to <user> as a DM
+/set pin off         -- turn it off
+/set pin             -- show usage + current state
+```
+
+While pinned, anything you type that does **not** start with `/` is
+sent as a direct message to the pinned user instead of broadcast to
+the room. A literal `/t othertarget ...` (or `/msg`, `/dm`, `/pm`,
+`/whisper`, `/w` -- all aliases) still overrides it for that one
+message, same as before -- only plain typed lines are affected. A
+status-line badge (`PIN->user`) stays visible the whole time you're
+pinned, so it's never a silent/surprising state; `/set list` also
+shows it. The five Mystic-named `/set palette` themes (see below) use
+a fixed-coordinate status bar baked into vendored third-party border
+art with no slot for this badge -- on those themes you'll see the
+on/off confirmation printed to chat when you toggle it, but not a
+persistent on-screen indicator.
+
+Deliberately **not** saved across reconnects, unlike most other `/set`
+fields -- matches the web client's own sticky-DM behavior exactly
+(resets on page reload there too). A pin silently surviving into a
+later, unrelated session would be a privacy surprise (messages meant
+for the room quietly going to someone you pinned days ago), not a
+convenience.
+
+**Web:** click a name in the user list to pin/unpin (or the "Toggle"
+button / `Alt+T`) -- the same underlying behavior, just mouse-driven
+instead of a typed command. Also resets on page reload, for the same
+reason.
+
 ## Credit
 
 The `mystic` backend and the five Mystic-named chrome themes below are

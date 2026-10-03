@@ -152,6 +152,20 @@ async def write_menu_art(session, slot: str) -> bool:
     Returns True if art was found and written; callers fall back to their
     inline banner/menu_item code when False is returned.
     """
+    if getattr(session, 'term_mode', None) == 'enhanced':
+        # Writes raw CP437 bytes straight to session.writer below,
+        # bypassing session.write()'s mode-aware encoding entirely --
+        # same class of bug as session.py's _show_ansi_screen() (which
+        # already has this identical guard). Not yet actually exercised
+        # live for dialout/rss (no stock art file exists for either
+        # slot) or chat/game_center (DB-driven BbsMenu takes precedence
+        # over this stock fallback on any already-migrated install, see
+        # menu_engine.py's _picker_goto_or_stock()), but a latent trap
+        # for the next custom-art screen a sysop drops in. Returning
+        # False here is exactly the "no art configured" behavior every
+        # caller already falls back to correctly -- no new code needed
+        # anywhere else.
+        return False
     ansi = load_menu_ansi(slot, session.term_mode)
     if ansi is None:
         return False

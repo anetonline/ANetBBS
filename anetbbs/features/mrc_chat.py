@@ -409,6 +409,18 @@ class MRCChat(BaseChatSystem):
         self._mention_log      = deque(maxlen=50)
         self._known_users      = set()
         self._last_dm_from     = ''  # for /r (reply-to-last-DM), see _handle_event
+        # /set pin <user> -- "sticky DM", terminal equivalent of the web
+        # client's click-a-name-to-stick-DM feature (stickyDmUser in
+        # anetbbs/templates/mrc/index.html). '' means off. Deliberately
+        # NOT persisted via set_prefs/BridgeDB like palette/ticker/tz/etc
+        # -- matches the web version exactly (stickyDmUser is a plain JS
+        # variable, reset on page reload, never saved server-side); a
+        # pin silently surviving into a LATER, unrelated session would
+        # be a privacy surprise (messages meant for the room quietly
+        # going to someone you pinned days ago), not a convenience.
+        # Cleared on disconnect/reconnect for the same reason -- see
+        # _chat_loop()'s plain-message branch for where this is read.
+        self._pin_target       = ''
 
         # Input-history recall on Ctrl+Up/Down (locked-in keybinding --
         # plain Up/Down stay bound to chat-scroll, this file's existing,
@@ -1106,6 +1118,15 @@ class MRCChat(BaseChatSystem):
         right_bits = []
         if self._scroll_offset:
             right_bits.append(f'\x1b[1;37;43m PAUSED+{self._scroll_offset} \x1b[0m')
+        if self._pin_target:
+            # Magenta/bright-magenta bg+fg -- matches _send_dm()'s own
+            # "[DM -> target]" local-echo color, so a pinned caller sees
+            # the same visual language telling them "this is going
+            # privately" whether it's a one-shot /t or the ongoing pin.
+            # Plain ASCII '->' deliberately, not a Unicode arrow glyph --
+            # see the door-games-menu arrow-mangled-to-'?' bug (CP437
+            # encoding has no mapping for most Unicode arrows).
+            right_bits.append(f'\x1b[1;37;45m PIN->{self._pin_target} \x1b[0m')
         if self._mention_count:
             # Explicit fg/bg (not reverse-video) -- matches the PAUSED badge's
             # approach above. The old '1;7;91' (bold+reverse+bright-red-fg)
@@ -2285,6 +2306,18 @@ class MRCChat(BaseChatSystem):
             if line.startswith('/'):
                 if not await self._handle_slash(line):
                     break
+            elif self._pin_target:
+                # /set pin <user> -- route the plain typed line as a DM
+                # instead of a room broadcast, same as the web client's
+                # sticky-DM feature. A literal /t, /msg, etc above still
+                # targets whoever it says regardless of a pin (only this
+                # branch -- a line with NO leading slash -- is affected),
+                # same scoping as the web client's own `parsed.kind ===
+                # 'chat'` check.
+                if self._scroll_offset:
+                    self._scroll_offset = 0
+                    await self._redraw_chat_area()
+                await self._send_dm(self._pin_target, line)
             else:
                 # Sending a message snaps view back to live (bottom) so the
                 # user can see their own message echoed back from the server.
@@ -3014,6 +3047,8 @@ class MRCChat(BaseChatSystem):
                     '  defaultroom <room>  room to auto-join on your next connect (saved)',
                     '  palette <name>      chrome color scheme (saved): '
                         + ', '.join(sorted(_TERM_PALETTES)),
+                    '  pin <user>|off      sticky DM -- plain messages go to <user> '
+                        'until turned off (NOT saved)',
                     '',
                 ):
                     await self._emit(ln)
@@ -3034,6 +3069,7 @@ class MRCChat(BaseChatSystem):
                     f'\x1b[1;36mtwitfilter:\x1b[0m {"on" if self._twit_filter_enabled else "off"}',
                     f'\x1b[1;36mdefaultroom:\x1b[0m {self._default_room or "(none -- lands in lobby)"}',
                     f'\x1b[1;36mpalette:\x1b[0m {self._palette_name}',
+                    f'\x1b[1;36mpin:\x1b[0m {("-> " + self._pin_target) if self._pin_target else "off"}',
                 ):
                     await self._emit(ln)
                 return True
@@ -3143,6 +3179,33 @@ class MRCChat(BaseChatSystem):
                     # by that cascade.
                     await self._draw_ticker_line()
                 await self._emit(f'\x1b[1;36mPalette:\x1b[0m {name}')
+                return True
+
+            if field == 'pin':
+                if not value:
+                    cur = f'-> {self._pin_target}' if self._pin_target else 'off'
+                    await self._emit(
+                        f'Usage: /set pin <user>  (or: /set pin off)  -- currently: {cur}')
+                    return True
+                if value.lower() == 'off':
+                    if not self._pin_target:
+                        await self._emit('\x1b[33mPin DM is already off.\x1b[0m')
+                        return True
+                    old = self._pin_target
+                    self._pin_target = ''
+                    await self._emit(f'\x1b[1;36mPin DM off\x1b[0m (was -> {old})')
+                    await self._draw_status_line()
+                    return True
+                target = value.strip()
+                self._pin_target = target
+                # Same visual language _send_dm()'s own local echo uses
+                # for "[DM -> target]" -- a pin is conceptually the same
+                # "this is going privately to them" state, just lasting
+                # across multiple messages instead of one.
+                await self._emit(
+                    f'\x1b[1;35mPin DM on \x1b[0m\x1b[1;95m-> {target}\x1b[0m'
+                    '\x1b[2m  (plain messages go to them until /set pin off)\x1b[0m')
+                await self._draw_status_line()
                 return True
 
             await self._emit(f'\x1b[33mUnknown /set field:\x1b[0m {field}. Try /set help.')

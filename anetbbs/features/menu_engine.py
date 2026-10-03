@@ -999,6 +999,34 @@ async def run_menu(session, start='main'):
         # what was on screen before AFK triggered, not a stale value
         # from a different menu.
         async def _draw_menu():
+            if _mode == 'enhanced':
+                # Auto-generated graphical menu for the ANetBBS Enhanced
+                # Client (see the "ANetBBS Enhanced Client" plan and
+                # anetbbs/core/enhanced_server.py) -- sends the SAME
+                # item_list rows already queried above as a structured
+                # JSON message instead of ANSI text; a mouse click on
+                # one of these becomes an ordinary synthesized
+                # keystroke before it ever reaches the hotkey-dispatch
+                # code below (_WSReaderAdapter.read() in
+                # enhanced_server.py), so no new dispatch logic is
+                # needed here. Custom .ans/.asc menu art is
+                # intentionally not shown in this mode for v0 --
+                # rendering arbitrary ANSI/ASCII art in the graphical
+                # client is explicitly deferred.
+                from .enhanced_protocol import encode_menu
+                # Reset the persistent virtual-screen buffer
+                # (session._enhanced_feed()) -- a structured menu
+                # message is a completely separate client-side overlay
+                # (shows its own #menu div, hides the screen canvas),
+                # not something drawn into that buffer. Without this,
+                # whatever cursor position/colors were left over from
+                # before the menu appeared would carry into the FIRST
+                # plain write() after the user picks an item.
+                session._enhanced_vt_state = None
+                session.writer.write(encode_menu(title, item_list).encode('utf-8'))
+                await session._drain_protected()
+                session._enhanced_menu_active = True
+                return
             # Clear screen.  ASCII terminals get newlines; ANSI/wide get ESC[2J.
             if _mode == 'ascii':
                 await session.write('\r\n' * 4)

@@ -131,7 +131,56 @@ class DialoutMenu:
             return
         await self._connect(host, host, port, 'telnet')
 
+    def _enhanced_terminal_link(self, host, port):
+        """Builds a link to the web UI's real xterm.js browser terminal
+        (web/web_terminal.py), pre-filled with this destination via its
+        ?host=&port= query params. Same BBS_DOMAIN/WEB_PORT convention
+        session.py's own "Ways to reach this BBS" screen already uses
+        for its own web-UI links."""
+        from urllib.parse import urlencode
+        try:
+            from .bbs_ui import _app
+            cfg = _app().config
+        except Exception:
+            cfg = {}
+        domain = (cfg.get('BBS_DOMAIN', '') or '').strip()
+        web_port = cfg.get('WEB_PORT', 5000)
+        base = f"https://{domain}/" if domain else f"http://<this-host>:{web_port}/"
+        return f"{base}terminal/?{urlencode({'host': host, 'port': port})}"
+
     async def _connect(self, name, host, port, proto):
+        # Dial-out proxies RAW bytes in both directions (see _proxy()'s
+        # own docstring) -- CP437/ANSI/telnet-IAC bytes from the remote
+        # BBS, written directly to self.session.writer, bypassing
+        # session.write()'s normal mode-aware encoding entirely. The
+        # ANetBBS Enhanced Client speaks a JSON-only protocol over that
+        # same writer (see core/enhanced_server.py); raw bytes handed
+        # to it aren't valid JSON, so the browser silently drops every
+        # message (JSON.parse() throws, caught, ignored) -- "dial-out
+        # does nothing" was the real symptom live. Full raw-terminal
+        # passthrough over the JSON protocol is a real feature, not a
+        # quick fix for THIS protocol -- but the web UI already has a
+        # real xterm.js browser terminal (web/web_terminal.py, a raw
+        # TCP bridge to any host:port, the same SSRF-guarded pattern
+        # this module uses) that handles arbitrary remote-BBS ANSI
+        # correctly with zero new code -- Jerry's own suggestion,
+        # confirmed live. Link there instead of just refusing; the
+        # link pre-fills host/port (?host=&port=) but the user still
+        # clicks Connect themselves, and that page's own
+        # @login_required is a SEPARATE Flask-Login web session from
+        # this one -- a user not also logged into the web UI in the
+        # same browser hits a login prompt first, a known wrinkle, not
+        # a bug.
+        if getattr(self.session, 'term_mode', None) == 'enhanced':
+            web_url = self._enhanced_terminal_link(host, port)
+            await self.session.write(
+                f"\r\n{FG['red']}Dial-out isn't available directly in "
+                f"the Enhanced Client{RESET} -- it proxies raw "
+                "terminal bytes the JSON protocol can't carry.\r\n"
+                f"{FG['grn']}Use the browser terminal instead:{RESET} "
+                f"{web_url}\r\n")
+            await self.session.read_line('Press Enter...')
+            return
         # Real gap found in a security/performance audit: unlike every
         # other outbound-connect path in this codebase (web_terminal.py,
         # the RSS feed-URL/image fetches, finger.py, msp/client.py,

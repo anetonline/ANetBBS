@@ -313,7 +313,30 @@ class AnetdrawAvailableTests(unittest.TestCase):
     itself. This class tests _anetdraw_available()'s own query logic
     in isolation, so setUp() clears whatever _create_default_data()
     seeded first, establishing a known, controlled starting point for
-    each scenario below rather than depending on it."""
+    each scenario below rather than depending on it.
+
+    Real cross-test pollution found live (full-suite run, 2026-10-03):
+    _fresh_app() repoints the SHARED TestingConfig.SQLALCHEMY_DATABASE_URI
+    class attribute at this test's own temp-dir db path with no
+    restoration of its own -- unlike CategoryActionDbTests above, this
+    class had no setUpClass/tearDownClass pair to put it back. Once this
+    class's own tempfile.TemporaryDirectory() cleaned up (addCleanup,
+    end of each test), that path stopped existing -- so ANY later test
+    in the same process that calls create_app('testing') without first
+    setting its own URI (e.g. test_tz_eastern_display.py's
+    JinjaFilterTests) failed with 'unable to open database file',
+    nondeterministically, purely based on test collection order.
+    Confirmed by reproducing with just these two files run together."""
+
+    @classmethod
+    def setUpClass(cls):
+        import anetbbs.config as cfg_mod
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+
+    @classmethod
+    def tearDownClass(cls):
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -370,7 +393,22 @@ class SysopAnetdrawGatingTests(unittest.TestCase):
     as SysopCfgToolGatingTests above. setUp() clears the bundled seed
     row first (see AnetdrawAvailableTests' own docstring) so "missing
     row" is a real, deliberately-arranged scenario, not just wrong
-    about the app's actual starting state."""
+    about the app's actual starting state.
+
+    Same cross-test-pollution gap as AnetdrawAvailableTests above (see
+    its own docstring for the full incident) -- this is the specific
+    class whose dangling db path was reproduced breaking
+    test_tz_eastern_display.py in a full-suite run."""
+
+    @classmethod
+    def setUpClass(cls):
+        import anetbbs.config as cfg_mod
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+
+    @classmethod
+    def tearDownClass(cls):
+        import anetbbs.config as cfg_mod
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
 
     class _FakeSession:
         def __init__(self):

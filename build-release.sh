@@ -53,10 +53,39 @@ FILE_LIST="$WORKDIR/files.txt"
 
 # Base: everything git considers safe (tracked, or untracked-but-not-
 # gitignored). Excludes this script itself explicitly (a sysop's own
-# checkout doesn't need to re-run build-release.sh).
+# checkout doesn't need to re-run build-release.sh) and the ANetBBS
+# Enhanced Client add-on's own files -- that feature is deliberately
+# NOT part of the stock release (same reasoning as keeping RDQ3/
+# ANetCHESS as their own separate projects rather than bundled door-
+# game archives): a sysop who wants it fetches
+# tools/build_enhanced_client_addon.sh's own separate tarball and
+# applies it themselves. The small `if self.term_mode == 'enhanced':`
+# branches threaded through session.py/menu_engine.py/games.py/main.py/
+# config.py are NOT excluded here -- they're core ANetBBS plumbing
+# (the same files every other protocol's own term_mode dispatch
+# already lives in) and ship inert-by-default (ENHANCED_ENABLED=false)
+# with every stock install, same as PETSCII's own always-present
+# support. Keep this list in sync with build_enhanced_client_addon.sh's
+# own FILES array if that one changes.
 ( cd "$SCRIPT_DIR" && git ls-files --cached --others --exclude-standard ) \
   | grep -v '^build-release\.sh$' \
+  | grep -v '^anetbbs/core/enhanced_server\.py$' \
+  | grep -v '^anetbbs/features/enhanced_protocol\.py$' \
+  | grep -v '^anetbbs/enhanced_client/' \
+  | grep -v '^anetbbs/static/fonts/Flexi_IBM_VGA_False\.' \
   > "$FILE_LIST"
+
+# Same reasoning, for the add-on-only test files: two have a hard,
+# module-level `from anetbbs.core.enhanced_server import ...` /
+# `from anetbbs.features import enhanced_protocol` that would error at
+# pytest COLLECTION time (not just at the one test that needs it) in a
+# tree missing those add-on files; two more specifically test
+# anetbbs/enhanced_client/index.html's own client-side JS content, not
+# core plumbing. Every other enhanced-client-named test file tests core
+# session.py/menu_engine.py/games.py behavior that ships regardless and
+# stays in the stock tarball unchanged.
+grep -v -E '^tests/test_enhanced_(server_deadconn|protocol|client_block_chars|client_hex_to_rgb)\.py$' \
+  "$FILE_LIST" > "$FILE_LIST.tmp" && mv "$FILE_LIST.tmp" "$FILE_LIST"
 
 # Deliberate allowlist: binary bundles kept out of git history for size
 # reasons, but still part of the shipped product. Each gets the same

@@ -106,31 +106,109 @@ def _to_html_streaming(text: str) -> str:
     return ''.join(out)
 
 
-def _run_vt(text: str):
+def _run_vt(text: str, state=None):
     """Run text through the VT state machine.
 
-    Returns ``(cells, max_row)`` where
-    ``cells[(row, col)] = (char, fg_hex, bg_hex_or_None, bold_bool)``.
-    ``max_row`` is -1 when the output is empty.
+    Returns ``(cells, max_row, state)`` where
+    ``cells[(row, col)] = (char, fg_hex, bg_hex_or_None, bold_bool)``,
+    ``max_row`` is -1 when the output is empty, and ``state`` is the
+    final cursor/SGR/saved-cursor state -- feed it back in as the
+    ``state`` argument to continue parsing more text as a CONTINUATION
+    of the same terminal stream (cursor position, current colors, and
+    a saved cursor position all carried forward) instead of starting
+    fresh at row 0/col 0 with default colors.
+
+    Existing one-shot callers (_to_html_vt/to_ansi_lines) never pass
+    `state` and can ignore the returned one -- behavior for them is
+    unchanged. Added for the ANetBBS Enhanced Client (session.py's
+    'enhanced' write() branch): BBSSession.write() is called many
+    times across a session's lifetime, and real ANSI UIs (lightbar
+    menus, MRC chat's status bar) rely on cursor-positioned PARTIAL
+    redraws (move cursor, overwrite just one row) spanning separate
+    write() calls -- parsing each call as an independent one-shot
+    render (the original behavior) loses that cursor position/color
+    state between calls, turning a partial in-place update into
+    scrambled, duplicated output. See _deadconn_fixtures-adjacent
+    "live Pi3 test" bug reports for the real symptom this fixes: a
+    lightbar highlight redraw appearing as a brand new stacked line
+    instead of updating in place.
+
+    `state` also carries a pending-partial-escape-sequence buffer.
+    Real bug found live (Pi3 test, a door game): a PTY read chunk
+    boundary can legitimately split one logical ANSI escape sequence
+    across two separate write() calls (e.g. "\\x1b[1;37;40" arrives in
+    one write(), the closing "m" in the next). The original one-shot-
+    per-call design, on hitting the end of `text` mid-sequence, gave up
+    and skipped past just the ESC + '[' (`i += 2`) -- leaking the
+    remaining digits/semicolons as literal visible text ("[1;37;40m"
+    appearing on screen, confirmed live) instead of recognizing them as
+    part of an escape sequence. Now any incomplete sequence (including
+    a bare trailing ESC with nothing after it yet) is stashed in
+    `state['pending']` and prepended to the next call's text, so a
+    split sequence is parsed correctly as one continuous stream --
+    exactly how a real terminal's own parser handles chunked input.
 
     Handles the same escape sequences as _to_html_vt.
     """
     MAX_ROWS = 300
     WIDTH    = 80
 
-    cells: dict = {}
-    cur_row = cur_col = 0
-    fg = '#aaaaaa'; bg = None; bold = False
-    sv_row = sv_col = 0
+    if state is None:
+        cells: dict = {}
+        cur_row = cur_col = 0
+        fg = '#aaaaaa'; bg = None; bold = False
+        sv_row = sv_col = 0
+        scroll_top, scroll_bottom = 0, MAX_ROWS - 1
+        pending = ''
+    else:
+        cells = state['cells']
+        cur_row, cur_col = state['cur_row'], state['cur_col']
+        fg, bg, bold = state['fg'], state['bg'], state['bold']
+        sv_row, sv_col = state['sv_row'], state['sv_col']
+        scroll_top = state.get('scroll_top', 0)
+        scroll_bottom = state.get('scroll_bottom', MAX_ROWS - 1)
+        pending = state.get('pending', '')
+
+    text = pending + text
+    pending = ''
+
+    def _scroll_up():
+        """Shift every row within [scroll_top, scroll_bottom] up by
+        one, discarding scroll_top's old content and clearing the
+        newly-exposed scroll_bottom row -- the real effect a DECSTBM
+        scroll region (ESC[top;bottomr) + a newline at the bottom
+        margin has on a real terminal. Without this, content that
+        should scroll (MRC chat's message area, scrolling inside a
+        fixed-height split-screen layout) just grows cur_row past the
+        region forever instead."""
+        shifted = {}
+        for (r, c), v in cells.items():
+            if scroll_top <= r <= scroll_bottom:
+                if r > scroll_top:
+                    shifted[(r - 1, c)] = v
+            else:
+                shifted[(r, c)] = v
+        cells.clear()
+        cells.update(shifted)
+
+    def _newline():
+        """Advance one row, scrolling the active region instead of
+        growing cur_row unboundedly once past scroll_bottom."""
+        nonlocal cur_row
+        if cur_row >= scroll_bottom:
+            _scroll_up()
+            cur_row = scroll_bottom
+        else:
+            cur_row = min(MAX_ROWS - 1, cur_row + 1)
 
     def _put(ch: str):
-        nonlocal cur_row, cur_col
+        nonlocal cur_col
         if 0 <= cur_row < MAX_ROWS and 0 <= cur_col < WIDTH:
             cells[(cur_row, cur_col)] = (ch, fg, bg, bold)
         cur_col += 1
         if cur_col >= WIDTH:
             cur_col = 0
-            cur_row = min(MAX_ROWS - 1, cur_row + 1)
+            _newline()
 
     def _sgr(ps: list):
         nonlocal fg, bg, bold
@@ -144,7 +222,18 @@ def _run_vt(text: str):
     i = 0; n = len(text)
     while i < n:
         ch = text[i]
-        if ch == '\x1b' and i + 1 < n:
+        if ch == '\x1b':
+            if i + 1 >= n:
+                # Bare trailing ESC -- the next byte (which decides
+                # whether this is even a CSI sequence at all) hasn't
+                # arrived yet. Stash and wait for more, rather than
+                # silently dropping it (the original bug: fell through
+                # to the printable-character checks below, which ESC
+                # fails, so it just vanished with no trace -- harmless
+                # for a lone ESC by itself, but the same silent-drop
+                # shape as the CSI case below, which is NOT harmless).
+                pending = text[i:]
+                break
             if text[i + 1] == '[':
                 j = i + 2
                 while j < n and (text[j].isdigit() or text[j] in ';?'):
@@ -170,11 +259,39 @@ def _run_vt(text: str):
                     elif cmd == 's': sv_row, sv_col = cur_row, cur_col
                     elif cmd == 'u': cur_row, cur_col = sv_row, sv_col
                     elif cmd == 'm': _sgr(ps)
+                    elif cmd == 'r':
+                        # DECSTBM -- set the scroll region. Real
+                        # terminals also home the cursor to the new
+                        # region's top-left; matched here since every
+                        # real caller (MRC chat's _enter_split_screen())
+                        # immediately follows with its own explicit
+                        # cursor-position writes anyway.
+                        scroll_top = max(0, (p1 or 1) - 1)
+                        scroll_bottom = min(MAX_ROWS - 1, (p2 or MAX_ROWS) - 1)
+                        if scroll_bottom <= scroll_top:
+                            scroll_top, scroll_bottom = 0, MAX_ROWS - 1
+                        cur_row, cur_col = scroll_top, 0
                     i = j + 1; continue
-                i += 2; continue
+                # Ran off the end of `text` still scanning CSI params/
+                # digits -- the sequence is real but incomplete (its
+                # final letter byte hasn't arrived yet in THIS chunk).
+                # The real, live bug this fixes: the original code did
+                # `i += 2; continue` here, skipping only the ESC and
+                # '[' and leaving the remaining digits/semicolons
+                # ("1;37;40m" etc) to fall through and render as
+                # literal visible text on the very next loop
+                # iterations. Stash the whole thing from ESC onward and
+                # stop -- it gets prepended to the next call's text.
+                # Capped at 32 chars (a real CSI sequence is never
+                # remotely that long) so a pathological/corrupted
+                # sequence that never gets a terminator byte can't
+                # accumulate forever across a long session instead of
+                # eventually being dropped.
+                pending = text[i:] if (n - i) <= 32 else ''
+                break
             i += 2; continue
         if ch == '\n':
-            cur_row = min(MAX_ROWS - 1, cur_row + 1); cur_col = 0
+            _newline(); cur_col = 0
         elif ch == '\r':
             cur_col = 0
         elif ch == '\x08':
@@ -184,12 +301,16 @@ def _run_vt(text: str):
         i += 1
 
     max_row = max((r for r, _ in cells), default=-1)
-    return cells, max_row
+    final_state = {'cells': cells, 'cur_row': cur_row, 'cur_col': cur_col,
+                   'fg': fg, 'bg': bg, 'bold': bold,
+                   'sv_row': sv_row, 'sv_col': sv_col, 'pending': pending,
+                   'scroll_top': scroll_top, 'scroll_bottom': scroll_bottom}
+    return cells, max_row, final_state
 
 
 def _to_html_vt(text: str) -> str:
     """Virtual-terminal renderer — builds a 2-D cell grid, renders to HTML."""
-    cells, max_row = _run_vt(text)
+    cells, max_row, _state = _run_vt(text)
     if max_row < 0:
         return ''
 
@@ -246,7 +367,7 @@ def to_ansi_lines(text: str, width: int = 80) -> list:
     Call after stripping record-boundary \\n for art bodies; for plain text
     leave \\n intact so the VT renderer advances rows normally.
     """
-    cells, max_row = _run_vt(text)
+    cells, max_row, _state = _run_vt(text)
     if max_row < 0:
         return text.splitlines() or ['']
 

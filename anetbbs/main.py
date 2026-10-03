@@ -168,9 +168,11 @@ def main():
     ftp_enabled = getattr(config_class, 'FTP_ENABLED', False)
     petscii40_enabled = getattr(config_class, 'PETSCII40_ENABLED', False)
     petscii80_enabled = getattr(config_class, 'PETSCII80_ENABLED', False)
+    enhanced_enabled = getattr(config_class, 'ENHANCED_ENABLED', False)
 
     if not telnet_enabled and not ssh_enabled and not rlogin_enabled \
-            and not ftp_enabled and not petscii40_enabled and not petscii80_enabled:
+            and not ftp_enabled and not petscii40_enabled and not petscii80_enabled \
+            and not enhanced_enabled:
         logger.info("All BBS servers are disabled. Use 'anetbbs-web' to run the web interface.")
         return
 
@@ -241,6 +243,12 @@ def main():
         'petscii': {
             'host': config_class.PETSCII80_HOST,
             'port': config_class.PETSCII80_PORT,
+        }
+    }
+    enhanced_cfg = {
+        'enhanced': {
+            'host': config_class.ENHANCED_HOST,
+            'port': config_class.ENHANCED_PORT,
         }
     }
 
@@ -323,6 +331,44 @@ def main():
             logger.info("Starting ANetBBS PETSCII (80-col) Server on %s:%d",
                         config_class.PETSCII80_HOST, config_class.PETSCII80_PORT)
             tasks.append(asyncio.ensure_future(petscii80_server.start()))
+
+        if enhanced_enabled:
+            # The Enhanced Client ships as a separate, optional add-on
+            # package (not bundled into the stock ANetBBS release --
+            # see tools/build_enhanced_client_addon.sh and
+            # anetbbs/enhanced_client/README.md), same reasoning as
+            # keeping RDQ3/ANetCHESS as their own separate projects
+            # rather than bundled door-game archives. A sysop can flip
+            # ENHANCED_ENABLED=true without having fetched/applied that
+            # add-on yet (easy to do -- it's right next to every other
+            # protocol's own *_ENABLED flag in config.py); without this
+            # guard, the bare ModuleNotFoundError for enhanced_server.py
+            # would propagate out of this whole startup function and
+            # take down EVERY other protocol (telnet/SSH/rlogin/
+            # PETSCII/FTP), not just this one optional feature -- a
+            # config typo turning into a total outage. Logged as a
+            # warning and skipped instead, exactly like a mis-typed/
+            # missing optional dependency anywhere else in this file.
+            try:
+                from anetbbs.core.enhanced_server import EnhancedServer
+            except ModuleNotFoundError:
+                logger.warning(
+                    "ENHANCED_ENABLED is true but the Enhanced Client "
+                    "add-on isn't installed (anetbbs/core/"
+                    "enhanced_server.py not found) -- see "
+                    "anetbbs/enhanced_client/README.md to fetch and "
+                    "apply it, or set ENHANCED_ENABLED=false. Skipping "
+                    "this listener; every other protocol starts normally.")
+            else:
+                enhanced_cfg_merged = {**bbs_config, **enhanced_cfg}
+                enhanced_server = EnhancedServer(
+                    enhanced_cfg_merged, config_class.ENHANCED_HOST,
+                    config_class.ENHANCED_PORT)
+                servers_to_stop.append(enhanced_server)
+                logger.info("Starting ANetBBS Enhanced Client server on %s:%d "
+                            "(TEST VERSION)",
+                            config_class.ENHANCED_HOST, config_class.ENHANCED_PORT)
+                tasks.append(asyncio.ensure_future(enhanced_server.start()))
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)

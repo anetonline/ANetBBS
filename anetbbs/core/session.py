@@ -371,6 +371,23 @@ class BBSSession:
         self.user = None
         self._forced_term_mode = forced_term_mode
         self._forced_width = forced_width
+        # Persistent virtual-screen state for the Enhanced Client
+        # ('enhanced' term_mode only) -- see _enhanced_feed()'s own
+        # docstring. None until the first 'enhanced'-mode write/screen.
+        self._enhanced_vt_state = None
+        # True from the moment a structured 'menu' overlay message is
+        # sent (encode_menu() -- see _login_lightbar_menu(), menu_engine.
+        # py's _draw_menu(), games.py's show_door_menu()/
+        # _show_category_submenu()) until the next REAL 'screen' message
+        # legitimately replaces it (cleared in _enhanced_feed()). Lets
+        # read_line() tell "I'm reading the click response to a menu
+        # that's still on screen" (suppress the prompt/echo -- see
+        # read_line()'s own docstring for the stomping bug this guards
+        # against) apart from "I'm reading an ordinary visible prompt
+        # like a username" (show it normally, same as every other mode)
+        # -- a single unconditional term_mode == 'enhanced' check can't
+        # tell those two apart and wrongly silenced the second case too.
+        self._enhanced_menu_active = False
         self._direct_door_slug = (direct_door_slug or '').strip() or None
         # Set True once _launch_direct_door() actually hands off to a game
         # -- lets the finally: block in start() skip the goodbye screen for
@@ -1773,6 +1790,35 @@ class BBSSession:
             markers = segments[1::2]
 
             async def _send_part(text, prefix=b'', suffix=b''):
+                if mode == 'enhanced':
+                    # Jerry's ask: real ANSI art (welcome.ans etc.)
+                    # rendered as real color in the Enhanced Client, not
+                    # skipped. text is latin-1 mojibake of the original
+                    # CP437 bytes (same convention as the branch below);
+                    # re-decoding as 'cp437' (a real stdlib codec, not a
+                    # custom table) recovers the TRUE Unicode glyphs
+                    # (e.g. byte 0xDB -> U+2588 FULL BLOCK, not U+00DB)
+                    # a browser's own monospace font needs. Fed through
+                    # _enhanced_feed()'s PERSISTENT virtual-screen buffer
+                    # (same one every plain write() call uses) rather
+                    # than a one-shot _run_vt() call, so a multi-part
+                    # @PAUSE@-paged screen's later parts continue the
+                    # same cursor/color state instead of each part
+                    # resetting to row 0 -- @PAUSE@ paging / cursor-up
+                    # in-place animation (_play_screen_animation) still
+                    # work around this per-part call unchanged -- only
+                    # the actual rendering mechanism differs here, not
+                    # the page-by-page control flow above.
+                    try:
+                        unicode_text = text.encode('latin-1').decode('cp437', errors='replace')
+                        if prefix:
+                            unicode_text = '\r\n' + unicode_text
+                        if suffix:
+                            unicode_text = unicode_text + '\r\n'
+                        await self._enhanced_feed(unicode_text)
+                    except Exception:
+                        pass
+                    return
                 # ANSI screens are stored as Latin-1 mojibake of the original
                 # CP437 bytes (each input byte 0xNN is now codepoint U+00NN in
                 # the DB). encode('latin-1') recovers those original bytes,
@@ -1805,15 +1851,27 @@ class BBSSession:
                 if not is_last:
                     marker = markers[i]
                     if marker == '@PAUSE@':
-                        self.writer.write(_PAUSE_PROMPT)
-                        await self._drain_protected()
+                        if mode == 'enhanced':
+                            await self.write('\r\n[Press any key to continue]\r\n')
+                        else:
+                            self.writer.write(_PAUSE_PROMPT)
+                            await self._drain_protected()
                         await self.read_key('')
-                    else:
+                    elif mode != 'enhanced':
+                        # In-place cursor-up redraw animation -- no
+                        # Canvas-side equivalent in v0 (see the
+                        # Enhanced Client plan's deferred list); the
+                        # static art from _send_part() above still
+                        # shows correctly, just without the animated
+                        # frames.
                         await self._play_screen_animation(marker)
 
             if force_pause or db_pause:
-                self.writer.write(_PAUSE_PROMPT)
-                await self._drain_protected()
+                if mode == 'enhanced':
+                    await self.write('\r\n[Press any key to continue]\r\n')
+                else:
+                    self.writer.write(_PAUSE_PROMPT)
+                    await self._drain_protected()
                 await self.read_key('')
         except Exception:
             pass
@@ -1886,6 +1944,39 @@ class BBSSession:
         from the ascii/petscii branches' read_line()-based menus, so
         the caller doesn't need to know which branch produced it.
         """
+        if self.term_mode == 'enhanced':
+            # Real clickable buttons instead of an ANSI lightbar box --
+            # Jerry's explicit ask (asked more than once on the Pi3
+            # test pass). Reuses the EXACT same mechanism
+            # menu_engine.py's own 'enhanced' _draw_menu() branch
+            # already uses: a structured 'menu' message built from
+            # (hotkey, label, action_type, action_args) tuples, with a
+            # click synthesized server-side into the matching hotkey
+            # keystroke before it ever reaches read_key_arrow() below
+            # (see _WSReaderAdapter.read() in enhanced_server.py) -- no
+            # new dispatch mechanism, just the same one already proven
+            # on the main menu.
+            from ..features.enhanced_protocol import encode_menu
+            item_list = [('1', 'Login', '', ''),
+                         ('2', 'New User Registration', '', ''),
+                         ('3', 'Exit', '', '')]
+            self._enhanced_vt_state = None
+            self.writer.write(
+                encode_menu(f'Welcome to {bbs_name}', item_list).encode('utf-8'))
+            await self._drain_protected()
+            self._enhanced_menu_active = True
+            while True:
+                key = await self.read_key_arrow()
+                if key in ('1', 'L'):
+                    return '1'
+                if key in ('2', 'N'):
+                    return '2'
+                if key in ('3', 'E', 'ESC', 'CTRL_C'):
+                    return '3'
+                # Arrow keys / bare Enter have no "current selection"
+                # to act on in a pure click-or-direct-hotkey UI --
+                # ignored, not an error; loop back for a real choice.
+
         items = (('1', 'L', 'Login'),
                  ('2', 'N', 'New User Registration'),
                  ('3', 'E', 'Exit'))
@@ -2266,6 +2357,13 @@ class BBSSession:
 
     async def init_session(self):
         """Initialize the session with proper telnet negotiation"""
+        if self._forced_term_mode == 'enhanced':
+            # Not a telnet transport at all -- see
+            # anetbbs/core/enhanced_server.py. Raw telnet IAC
+            # negotiation bytes written directly via self.writer.write()
+            # below would corrupt the JSON-text protocol the Enhanced
+            # Client WebSocket actually speaks.
+            return
         # Send initial telnet negotiations
         await self.send_telnet_command(WILL + ECHO)
         await self.send_telnet_command(WILL + SGA)
@@ -2522,6 +2620,31 @@ class BBSSession:
         """Write text to the terminal. Broken pipes are normal — port
         probes and rage-quitting clients both close the socket while we
         still have IAC negotiation in flight. Don't spam the journal."""
+        if self.term_mode == 'enhanced':
+            # Its own branch, not woven into the str/bytes dispatch
+            # below -- unlike every other mode, 'enhanced' output isn't
+            # a one-shot transform-then-write; it's fed into a
+            # PERSISTENT per-session virtual-screen buffer
+            # (_enhanced_feed(), see its own docstring) so cursor-
+            # positioned partial redraws spanning separate write()
+            # calls (lightbar menus, MRC chat's status bar) compose
+            # correctly instead of each call being parsed in isolation.
+            # Real gap found live (first Pi3 test pass): an earlier
+            # version of this branch just ANSI-stripped each call and
+            # appended it as flat scrolling text -- a lightbar menu's
+            # own cursor-positioned single-row redraw
+            # (_login_lightbar_menu()'s _redraw_item()) came out as a
+            # brand new duplicated line instead of updating in place,
+            # and MRC chat's status bar/frame (also cursor-positioned)
+            # rendered as scrambled garbage.
+            try:
+                plain = text if isinstance(text, str) else text.decode('latin-1', errors='replace')
+                await self._enhanced_feed(plain)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            except Exception as e:
+                logger.debug("write failed: %s", e)
+            return
         try:
             if isinstance(text, str):
                 if self.term_mode == 'petscii':
@@ -2549,6 +2672,44 @@ class BBSSession:
         except Exception as e:
             logger.debug("write failed: %s", e)
             return
+        await self._drain_protected()
+
+    async def _enhanced_feed(self, text: str):
+        """THE single rendering mechanism for every 'enhanced'-mode
+        write() call and _show_ansi_screen() art render. Feeds `text`
+        through ansi_html._run_vt(), continuing from
+        self._enhanced_vt_state (None on the first call), and sends
+        the resulting screen as one structured 'screen' message.
+
+        This replaces what used to be two separate, simpler-but-wrong
+        mechanisms: a flat scrolling text log that discarded ANSI
+        cursor-positioning entirely, and a one-shot art renderer that
+        reset to row 0 on every call. \\x1b[2J (full clear) and
+        cursor-positioned partial redraws are both handled correctly
+        as a side effect of _run_vt()'s own persistent state machine
+        (including DECSTBM scroll regions, for MRC chat's fixed
+        status-bar-over-scrolling-chat-area layout) -- no special-
+        casing needed here at all.
+
+        Callers are responsible for any CP437-mojibake correction
+        BEFORE calling this -- _show_ansi_screen() does its own
+        (content loaded from .ans files is latin-1 mojibake of the
+        original CP437 bytes); plain write() callers pass already-
+        correct Unicode text (ordinary Python string literals with
+        embedded ANSI color codes), which needs no such correction.
+        """
+        from ..features import enhanced_protocol
+        from ..features.ansi_html import _run_vt
+        cells, max_row, new_state = _run_vt(text, state=self._enhanced_vt_state)
+        self._enhanced_vt_state = new_state
+        if max_row < 0:
+            return
+        # A real 'screen' message is about to go out -- whatever menu
+        # overlay was showing is legitimately being replaced by this
+        # caller's own content now, same as any other mode transitioning
+        # off a menu. See _enhanced_menu_active's own docstring.
+        self._enhanced_menu_active = False
+        self.writer.write(enhanced_protocol.encode_screen(cells, max_row).encode('utf-8'))
         await self._drain_protected()
 
     async def _drain_protected(self):
@@ -2659,8 +2820,43 @@ class BBSSession:
         reasoning -- same optional full-screen-redraw hook for callers
         that own more visible state than just this prompt + the
         already-typed line (which gets redrawn regardless, see below).
+
+        Real bug found live (Pi3 test, 2026-10-02): in 'enhanced' mode,
+        write() always feeds a persistent virtual-screen buffer and
+        emits a 'screen' message (see write()'s own docstring) -- there
+        is no such thing as a silent/invisible write in that mode. A
+        caller that sends a structured 'menu' overlay (encode_menu(),
+        a completely separate client-side display from the screen
+        canvas -- see run_menu()'s and show_door_menu()'s own comments)
+        and then calls read_line(prompt=...) to collect the resulting
+        click-synthesized "digits + \\r" (games.py's door-games list is
+        exactly this shape) used to have its prompt-write AND every
+        per-character echo below immediately emit a 'screen' message,
+        stomping the just-sent menu with a near-blank one-line screen
+        before the user could even see, let alone click, anything --
+        "pick a door, nothing happens" with zero exception anywhere,
+        since nothing was actually wrong except which message won.
+        Enhanced mode's click flow already shows the user what they
+        picked (the button itself); a text prompt/echo has no useful
+        meaning there and only corrupts the display.
+
+        The FIRST fix for this (shipped same day, also live-tested)
+        wrongly scoped the skip to "term_mode == 'enhanced'" alone --
+        which also silenced every ORDINARY enhanced-mode read_line()
+        prompt that has nothing to do with a menu overlay at all, e.g.
+        "Press Enter to continue..." on the pre-login Matrix splash and
+        "Username: "/handle_login()'s whole prompt chain -- those went
+        completely invisible too, since nothing distinguished "a menu
+        is still up" from "no menu was ever sent." Narrowed to
+        self._enhanced_menu_active (see its own docstring) -- true only
+        from the moment a menu overlay is actually sent until the next
+        real write() legitimately replaces it -- so only read_line()
+        calls that are genuinely racing a still-visible menu overlay are
+        silenced; a plain prompt with no menu in play shows normally,
+        exactly like every other terminal mode.
         """
-        if prompt:
+        _enhanced = self.term_mode == 'enhanced' and self._enhanced_menu_active
+        if prompt and not _enhanced:
             await self.write(prompt)
 
         line = bytearray()
@@ -2689,7 +2885,7 @@ class BBSSession:
                 if is_backspace:
                     if line:
                         line.pop()
-                        if self.echo:
+                        if self.echo and not _enhanced:
                             if is_petscii:
                                 from ..features.petscii_codec import CURSOR_LEFT
                                 await self.write(f'{CURSOR_LEFT} {CURSOR_LEFT}')
@@ -2698,7 +2894,7 @@ class BBSSession:
                     continue
 
                 elif char == b'\r':  # Enter key
-                    if self.echo:
+                    if self.echo and not _enhanced:
                         await self.write('\r\n')
                     break
 
@@ -2719,12 +2915,12 @@ class BBSSession:
                         logical_ch = decode_char(char[0])
                         if len(line) < max_len:
                             line.extend(logical_ch.encode(self.encoding, errors='replace'))
-                        if self.echo:
+                        if self.echo and not _enhanced:
                             await self.write(logical_ch)
                     else:
                         if len(line) < max_len:
                             line.extend(char)
-                        if self.echo:
+                        if self.echo and not _enhanced:
                             await self.write(char.decode(self.encoding))
 
             except _AFKInterrupted:
@@ -2745,10 +2941,14 @@ class BBSSession:
                 # Always redraw the prompt + already-typed buffer too --
                 # on_afk_redraw() (if given) only knows about whatever
                 # static screen content the caller owns, never about
-                # THIS call's own in-progress partial line.
-                if prompt:
+                # THIS call's own in-progress partial line. Skipped in
+                # enhanced mode for the same reason the main loop's
+                # echo is skipped above -- there's no text display to
+                # restore, and writing one would stomp on_afk_redraw()'s
+                # own menu/screen output.
+                if prompt and not _enhanced:
                     await self.write(prompt)
-                if line:
+                if line and not _enhanced:
                     try:
                         await self.write(bytes(line).decode(self.encoding))
                     except Exception:
@@ -3149,9 +3349,20 @@ class BBSSession:
                     peer = f'{addr[0]}:{addr[1]}' if isinstance(addr, tuple) else str(addr)
             except Exception:
                 pass
-            # Detect protocol from the writer class name (TelnetWriter / SshWriter / etc)
-            wname = type(self.writer).__name__.lower()
-            proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
+            # Detect protocol from the writer class name (TelnetWriter / SshWriter / etc).
+            # Real gap found live (Enhanced Client Pi3 test pass):
+            # _WSWriterAdapter's class name matches none of ssh/rlogin,
+            # so who's-online/node displays showed "telnet" for an
+            # Enhanced Client connection -- it isn't telnet at all (no
+            # IAC negotiation even happens, see init_session()'s own
+            # 'enhanced' guard). Checked directly via term_mode rather
+            # than adding yet another writer-class-name substring match,
+            # since that's the actual ground truth for this one.
+            if self.term_mode == 'enhanced':
+                proto = 'enhanced'
+            else:
+                wname = type(self.writer).__name__.lower()
+                proto = 'ssh' if 'ssh' in wname else ('rlogin' if 'rlogin' in wname else 'telnet')
 
             # Multinode slot acquisition — claim a node 1..BBS_NODES so
             # the user shows up on the multinode roster. If all nodes are
