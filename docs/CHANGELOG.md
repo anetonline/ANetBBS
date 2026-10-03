@@ -1,11 +1,36 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.22`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.23`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.23 — Web ANSI editor: image tools, full TheDraw pack; new Admin → Add-ons page (October 2026)
+
+The web ANSI editor gained two new tools: an Image → ANSI converter
+(stretch-fits an uploaded photo to the grid, converting it to CP437
+half-block/full-block art against the editor's own 16-color palette)
+and a reference-image trace mode (loads a photo as a dimmable underlay
+to draw over by hand, never touching the saved art). The TheDraw font
+picker's font pack is no longer something a sysop has to track down
+and point a setting at by hand — a "Download & Install Fonts" button
+fetches a complete pack (1,241 files, over 5,000 font entries
+including TheDraw's `SETS/` mega-packs) from a GitHub Release asset in
+one click. See `docs/36-ansi-editor.md`.
+
+That same download-and-install mechanism is now generalized into a
+new **Admin → Add-ons** page, covering both the font pack above and
+the Enhanced Client overlay from v1.1.21 — each sourced from its own
+configurable Release URL, with real working defaults so both buttons
+function on a stock install with no configuration. Deliberately
+lighter-weight than the full self-upgrade mechanism (no privilege
+escalation, no service restart triggered automatically): an add-on
+install only ever adds a small set of new files and never replaces
+anything, with a plain restart reminder shown for the one case (the
+Enhanced Client) where a restart is actually needed. See
+`docs/38-addons.md`.
 
 ## v1.1.22 — CI test fix, no functional change (October 2026)
 

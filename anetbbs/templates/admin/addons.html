@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Add-ons - {{ config.BBS_NAME }}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .addon-card { border-radius: .75rem; box-shadow: 0 1px 6px rgba(0,0,0,.08); }
+  .addon-status-installed { color: #2d8048; font-weight: 600; }
+  .addon-status-missing { color: #6c757d; }
+  .addon-status-unconfigured { color: #b58c00; }
+  .addon-restart-hint {
+    background: #fff8e6; border: 1px solid #f0d58a; border-radius: .5rem;
+    padding: .6rem .9rem; margin-top: .6rem; font-size: .9rem;
+  }
+  .addon-result { font-size: .85rem; margin-top: .5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="bbs-header d-flex justify-content-between align-items-center">
+    <h1><i class="bi bi-puzzle"></i> Add-ons</h1>
+    <a href="{{ url_for('admin.dashboard') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-speedometer2"></i> Dashboard
+    </a>
+  </div>
+  <p class="text-muted">
+    Optional pieces that aren't part of the stock ANetBBS release — each
+    one is downloaded from a GitHub Release asset you point its URL
+    setting at. Nothing here is fetched automatically.
+  </p>
+
+  <div class="row g-3 mt-1">
+    {% for item in items %}
+    <div class="col-md-6">
+      <div class="card addon-card h-100" data-addon-id="{{ item.id }}">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+          <strong>{{ item.name }}</strong>
+          {% if item.installed %}
+            <span class="addon-status-installed"><i class="bi bi-check-circle"></i> Installed</span>
+          {% elif item.configured %}
+            <span class="addon-status-missing">Not installed</span>
+          {% else %}
+            <span class="addon-status-unconfigured">Not configured</span>
+          {% endif %}
+        </div>
+        <div class="card-body">
+          <p class="card-text small text-muted">{{ item.description }}</p>
+          {% if item.configured %}
+            <button class="btn btn-sm btn-success addon-install-btn" data-id="{{ item.id }}">
+              <i class="bi bi-download"></i> Download &amp; Install
+            </button>
+          {% else %}
+            <div class="small text-muted">
+              Set <code>{{ item.url_config_key }}</code> to a direct-download
+              URL (a GitHub Release asset) to enable this.
+            </div>
+          {% endif %}
+          <div class="addon-result"></div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+(function() {
+  const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+  async function fetchJson(url, opts) {
+    const o = Object.assign({credentials: 'same-origin'}, opts || {});
+    o.headers = Object.assign({}, CSRF ? {'X-CSRFToken': CSRF} : {}, o.headers || {});
+    const r = await fetch(url, o);
+    const text = await r.text();
+    try {
+      return {ok: r.ok, status: r.status, json: JSON.parse(text)};
+    } catch (_) {
+      return {ok: false, status: r.status,
+              json: {error: `HTTP ${r.status} returned non-JSON (${text.slice(0, 200)})`}};
+    }
+  }
+
+  document.querySelectorAll('.addon-install-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const card = btn.closest('[data-addon-id]');
+      const resultBox = card.querySelector('.addon-result');
+      if (!confirm('Download and install ' + id + ' now?')) return;
+      btn.disabled = true;
+      btn.textContent = 'Installing…';
+      resultBox.innerHTML = '';
+      const {json: j} = await fetchJson('/admin/addons/' + id + '/install', {method: 'POST'});
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-download"></i> Download &amp; Install';
+      if (j.error) {
+        resultBox.innerHTML = '<span class="text-danger">' + j.error + '</span>';
+        return;
+      }
+      let msg = 'Installed ' + j.installed + ' file(s)';
+      if (j.skipped) msg += ', skipped ' + j.skipped;
+      resultBox.innerHTML = '<span class="text-success">' + msg + '</span>';
+      if (j.restart_hint) {
+        resultBox.innerHTML += '<div class="addon-restart-hint">' + j.restart_hint + '</div>';
+      }
+      const statusEl = card.querySelector('.card-header span');
+      if (statusEl) {
+        statusEl.className = 'addon-status-installed';
+        statusEl.innerHTML = '<i class="bi bi-check-circle"></i> Installed';
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

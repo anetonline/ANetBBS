@@ -359,16 +359,44 @@ class Config:
         f"text:{os.path.join(BASE_DIR, 'data', 'text')};"
         f"mods/txt:{os.path.join(BASE_DIR, 'data', 'mods', 'txt')}")
 
-    # Web ANSI editor's TheDraw (.TDF) font browser -- a sysop drops a
-    # font pack (e.g. ANetDRAW's own 3,716-font download) here, or
-    # points this at wherever they already keep one (an existing
-    # ANetDRAW/Synchronet install's own tdfonts/ directory, say).
-    # Empty by default -- no font pack ships with ANetBBS itself (like
-    # ANetDRAW, it's a separate download the sysop fetches on their
-    # own), so the font picker simply shows nothing until a sysop sets
-    # this.
+    # Web ANSI editor's TheDraw (.TDF) font browser. Defaults to an
+    # empty directory the editor's own "Download & Install Fonts"
+    # button (see TDF_FONTS_PACK_URL below) populates on click -- a
+    # sysop never needs to touch this setting for that path. Still
+    # overridable to point at a font pack dropped in by hand, or an
+    # existing ANetDRAW/Synchronet install's own tdfonts/ directory.
     TDF_FONTS_DIR = os.environ.get(
         'TDF_FONTS_DIR', os.path.join(BASE_DIR, 'data', 'tdf-fonts'))
+
+    # Direct-download URL for a zipped font pack the editor's own
+    # "Download & Install Fonts" button fetches into TDF_FONTS_DIR --
+    # same reasoning as tools/download_jsdos.sh fetching the ~5MB
+    # js-dos runtime from a CDN at use time rather than committing it
+    # to git: a multi-MB binary font pack doesn't belong in ANetBBS's
+    # own repo or release tarball. Points at a GitHub Release asset (a
+    # plain HTTPS GET, no auth needed for a public release) rather
+    # than a raw repo file, since Releases are the right place for a
+    # large versioned binary blob. Defaults to the real public asset on
+    # the upstream repo's own "addons" release so every stock install's
+    # download button works out of the box; still overridable to a
+    # private mirror or a self-hosted pack via the same env var.
+    TDF_FONTS_PACK_URL = os.environ.get(
+        'TDF_FONTS_PACK_URL',
+        'https://github.com/anetonline/ANetBBS/releases/download/addons/tdf-fonts.zip')
+
+    # Direct-download URL for the Enhanced Client add-on zip (see
+    # tools/build_enhanced_client_addon.sh) -- Admin -> Add-ons'
+    # install button fetches this and extracts it over the live
+    # install. Same reasoning and same "addons" release as
+    # TDF_FONTS_PACK_URL just above -- defaulting this doesn't enable
+    # anything by itself: installing just drops inert files (the
+    # add-on still needs ENHANCED_ENABLED=true and a restart to do
+    # anything), so there's no downside to every stock install's
+    # button working out of the box the same way the font pack's does.
+    ENHANCED_CLIENT_ADDON_URL = os.environ.get(
+        'ENHANCED_CLIENT_ADDON_URL',
+        'https://github.com/anetonline/ANetBBS/releases/download/addons/'
+        'ANetBBS-EnhancedClient-addon-v1.1.22.tar.gz')
 
     # Security — country blocking via ip-api.com (free, no registration).
     # Comma-separated ISO 3166-1 alpha-2 codes to block (e.g. CN,RU,KP).

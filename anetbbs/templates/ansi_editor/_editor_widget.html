@@ -25,6 +25,7 @@
 
 .ansi-grid-wrap { background:#000; padding:6px; overflow:auto; border:1px solid #333; }
 .ansi-grid {
+    position: relative;        /* containing block for #refImage below */
     display: grid;
     gap: 0;
     width: max-content;        /* shrink-wrap to columns × cell width */
@@ -33,6 +34,8 @@
     font-family: 'Courier New', 'DejaVu Sans Mono', monospace;
 }
 .ansi-grid .cell {
+    position: relative;        /* explicit stacking above #refImage, not DOM-order-dependent */
+    z-index: 1;
     width: var(--cell-w, 10px);
     height: var(--cell-h, 18px);
     box-sizing: border-box;
@@ -42,6 +45,24 @@
     overflow: hidden;
     padding: 0;
     margin: 0;
+    opacity: 1;
+}
+/* Reference-image trace mode (Part C): dims every cell uniformly so the
+   image positioned behind the grid (#refImage, z-index:0) shows through
+   -- same "lower this layer's opacity to see the one below" idea any
+   paint program's reference-layer feature already uses, applied here
+   via a single CSS custom property rather than per-cell JS, matching
+   how zoom already drives --cell-w/--cell-h the same way. */
+.ansi-grid.tracing .cell { opacity: var(--trace-opacity, 0.5); }
+#refImage {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;   /* stretch-fit, matching Part B's own import -- see its own comment for why that's the correct (not simplified) choice here */
+    pointer-events: none;
+    z-index: 0;
+    display: none;
 }
 .ansi-grid .cell.cur {
     outline: 1px solid #ff0;
@@ -80,6 +101,8 @@
     <button id="btnUndo" class="btn btn-outline-light btn-sm" title="Undo (Ctrl+Z)"><i class="bi bi-arrow-counterclockwise"></i></button>
     <button id="btnRedo" class="btn btn-outline-light btn-sm" title="Redo (Ctrl+Shift+Z)"><i class="bi bi-arrow-clockwise"></i></button>
     <button id="btnClear" class="btn btn-outline-warning btn-sm" title="Clear canvas"><i class="bi bi-trash"></i> Clear</button>
+    <button id="btnImportImage" class="btn btn-outline-light btn-sm" title="Convert a .jpg/.png/.gif into CP437 art, filling the whole canvas"><i class="bi bi-image"></i> Import Image</button>
+    <input type="file" id="importImageInput" accept="image/*" style="display:none;">
     <button id="btnPreview" class="btn btn-outline-info btn-sm" title="Preview as terminal would render"><i class="bi bi-eye"></i> Preview</button>
     <span id="saveStatus" class="text-muted small">unsaved</span>
     <span class="ms-3 text-muted small" id="cursorPos">row 0 col 0</span>
@@ -150,6 +173,13 @@
         </div>
 
         <h6 class="mt-3">THEDRAW FONTS</h6>
+        <div id="tdfInstallPanel" class="mb-1" style="display:none;">
+            <p class="small text-muted mb-1">No fonts installed yet.</p>
+            <button id="btnTdfInstall" class="btn btn-sm btn-outline-light w-100">
+                <i class="bi bi-cloud-download"></i> Download &amp; Install Fonts
+            </button>
+            <div id="tdfInstallStatus" class="small text-muted mt-1"></div>
+        </div>
         <div class="mb-1">
             <input type="text" id="tdfSearch" class="form-control form-control-sm"
                    placeholder="Search fonts...">
@@ -163,6 +193,32 @@
         <button id="btnTdfInsert" class="btn btn-sm btn-outline-light w-100 mt-1" disabled>
             <i class="bi bi-fonts"></i> Insert at cursor
         </button>
+
+        <h6 class="mt-3">REFERENCE IMAGE</h6>
+        <p class="small text-muted mb-1">Trace over a photo/sketch --
+            never saved or exported, purely an editing aid.</p>
+        <button id="btnRefImageLoad" class="btn btn-sm btn-outline-light w-100">
+            <i class="bi bi-image"></i> Load reference image
+        </button>
+        <input type="file" id="refImageInput" accept="image/*" style="display:none;">
+        <div id="refImageControls" style="display:none;">
+            <div class="form-check form-check-sm mt-2">
+                <input class="form-check-input" type="checkbox" id="refImageShow" checked>
+                <label class="form-check-label small text-light" for="refImageShow">Show image</label>
+            </div>
+            <div class="form-check form-check-sm">
+                <input class="form-check-input" type="checkbox" id="refImageDim">
+                <label class="form-check-label small text-light" for="refImageDim"
+                       title="Lowers the whole grid's opacity so the image shows through what you've already drawn, not just blank cells">
+                    Dim canvas while tracing
+                </label>
+            </div>
+            <label class="small text-muted d-block mt-1">Image opacity</label>
+            <input type="range" id="refImageOpacity" class="form-range" min="10" max="100" value="60">
+            <button id="btnRefImageRemove" class="btn btn-sm btn-outline-warning w-100 mt-1">
+                <i class="bi bi-x-circle"></i> Remove image
+            </button>
+        </div>
 
         <h6 class="mt-3">CHARACTER PALETTE</h6>
         <div class="charset" id="charset"></div>
@@ -546,6 +602,169 @@
         }
         dirty = true;
         document.getElementById('saveStatus').textContent = 'unsaved';
+    }
+
+    // ---- Image -> ANSI import ----
+    // Stretch-fits an uploaded .jpg/.png/.gif/etc onto the CURRENT
+    // W x H grid (never resizes the grid itself -- this edits an
+    // existing, fixed-size piece of art in place, unlike a from-
+    // scratch converter) -- 2 source pixel rows per cell row, each
+    // cell becoming a half-block (▀, independent top/bottom color) or
+    // a solid block (█) when both halves match closely enough.
+    // Stretching to exactly W x (H*2) rather than preserving the
+    // source image's own aspect ratio is the visually-correct choice
+    // here, not a simplification: this editor's own cell geometry
+    // (10x18 CSS pixels per cell, halved vertically by half-block
+    // mode) already makes each resulting "pixel" roughly square, the
+    // same compensation a classic image-to-ANSI converter's own
+    // width/height formula exists to provide.
+    //
+    // Nearest-color matching runs against this editor's own real
+    // palette array above (NOT a generic VGA table) -- fg searches
+    // all 16 entries (matching the FOREGROUND swatch panel's own full
+    // range), bg is restricted to the first 8 (matching the
+    // BACKGROUND swatch panel's own 8-swatch range, and the `& 0x07`
+    // mask every export format and drawCell() itself already apply --
+    // producing bg 8-15 here would just be silently mangled later,
+    // so it's never produced in the first place).
+    //
+    // A scratch <canvas> is used purely as getImageData() scratch
+    // space -- created fresh per import, never added to the page.
+    const paletteRgb = palette.map(hex => {
+        const n = parseInt(hex.slice(1), 16);
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    });
+
+    function nearestPaletteIndex(rgb, maxIndex) {
+        let best = 0, bestDist = Infinity;
+        for (let i = 0; i <= maxIndex; i++) {
+            const p = paletteRgb[i];
+            const dr = rgb[0] - p[0], dg = rgb[1] - p[1], db = rgb[2] - p[2];
+            const d = dr * dr + dg * dg + db * db;
+            if (d < bestDist) { bestDist = d; best = i; }
+        }
+        return best;
+    }
+
+    function importImageFile(file) {
+        if (!file) return;
+        const url = URL.createObjectURL(file);
+        const im = new Image();
+        im.onerror = () => {
+            URL.revokeObjectURL(url);
+            alert('Could not read that image file.');
+        };
+        im.onload = () => {
+            try {
+                const scratch = document.createElement('canvas');
+                scratch.width = W;
+                scratch.height = H * 2;
+                const sctx = scratch.getContext('2d', { willReadFrequently: true });
+                sctx.imageSmoothingEnabled = true;
+                sctx.drawImage(im, 0, 0, W, H * 2);
+                const d = sctx.getImageData(0, 0, W, H * 2).data;
+
+                pushHistory();
+                for (let r = 0; r < H; r++) {
+                    for (let c = 0; c < W; c++) {
+                        const ti = ((r * 2) * W + c) * 4;
+                        const bi = ((r * 2 + 1) * W + c) * 4;
+                        const topIdx = nearestPaletteIndex([d[ti], d[ti + 1], d[ti + 2]], 15);
+                        const botIdx = nearestPaletteIndex([d[bi], d[bi + 1], d[bi + 2]], 7);
+                        const i = r * W + c;
+                        cells[i] = topIdx === botIdx
+                            ? { c: '█', fg: topIdx, bg: botIdx }
+                            : { c: '▀', fg: topIdx, bg: botIdx };
+                        drawCell(i);
+                    }
+                }
+                dirty = true;
+                document.getElementById('saveStatus').textContent = 'unsaved';
+            } catch (e) {
+                alert('Image import failed: ' + e.message);
+            } finally {
+                URL.revokeObjectURL(url);
+            }
+        };
+        im.src = url;
+    }
+
+    document.getElementById('btnImportImage').addEventListener('click', () => {
+        if (!confirm('Import an image? This replaces the entire canvas. (Undo will restore it.)')) return;
+        document.getElementById('importImageInput').click();
+    });
+    document.getElementById('importImageInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        e.target.value = '';
+        importImageFile(file);
+    });
+
+    // ---- Reference image / trace-over mode ----
+    // A real <img>, created here (not in the static HTML) and inserted
+    // as #grid's own first child -- buildGrid() (called once, at page
+    // init, below) wipes #grid's innerHTML on every call, so anything
+    // placed there in markup would be destroyed; creating it in JS
+    // AFTER that one-time call sidesteps the problem entirely rather
+    // than teaching buildGrid() to preserve a child it doesn't know
+    // about. Positioned via #refImage's own CSS (position:absolute,
+    // inset:0, 100%/100% -- see the stylesheet above) so it always
+    // exactly matches #grid's current on-screen size, including
+    // through zoom changes (driven by the same --cell-w/--cell-h
+    // custom properties applyZoom() already sets) with no JS
+    // recalculation needed here at all.
+    //
+    // Purely a client-side editing aid: never added to `cells`, never
+    // touches grid_json, never part of any export -- removing it (or
+    // just never loading one) leaves everything else completely
+    // unaffected.
+    function initRefImage() {
+        const refImg = document.createElement('img');
+        refImg.id = 'refImage';
+        grid.insertBefore(refImg, grid.firstChild);
+
+        const loadBtn = document.getElementById('btnRefImageLoad');
+        const fileInput = document.getElementById('refImageInput');
+        const controls = document.getElementById('refImageControls');
+        const showChk = document.getElementById('refImageShow');
+        const dimChk = document.getElementById('refImageDim');
+        const opacitySlider = document.getElementById('refImageOpacity');
+        const removeBtn = document.getElementById('btnRefImageRemove');
+        let objectUrl = null;
+
+        function applyOpacity() {
+            refImg.style.opacity = (opacitySlider.value / 100).toString();
+        }
+        function applyShow() {
+            refImg.style.display = showChk.checked ? 'block' : 'none';
+        }
+        function applyDim() {
+            grid.classList.toggle('tracing', dimChk.checked);
+            grid.style.setProperty('--trace-opacity', (opacitySlider.value / 100).toString());
+        }
+
+        loadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            objectUrl = URL.createObjectURL(file);
+            refImg.src = objectUrl;
+            controls.style.display = '';
+            showChk.checked = true;
+            applyShow();
+            applyOpacity();
+        });
+        showChk.addEventListener('change', applyShow);
+        dimChk.addEventListener('change', applyDim);
+        opacitySlider.addEventListener('input', () => { applyOpacity(); applyDim(); });
+        removeBtn.addEventListener('click', () => {
+            if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+            refImg.removeAttribute('src');
+            controls.style.display = 'none';
+            dimChk.checked = false;
+            applyDim();
+        });
     }
 
     function flipSelectionHorizontal() {
@@ -1071,10 +1290,49 @@
             insertTdfResult(cursorR, cursorC, lastResult);
         });
 
-        fetch(`{{ url_for('ansi_editor.list_fonts') }}`).then(r => r.json()).then(data => {
-            fonts = data || [];
-            renderList('');
-        }).catch(() => { listEl.textContent = '(font list unavailable)'; });
+        // "Download & Install Fonts" -- shown whenever the picker comes
+        // back empty (fresh install, nobody's set up a font pack yet),
+        // hidden again the moment it finds real fonts. Clicking it hits
+        // the new /fonts/install route (anetbbs/web/ansi_editor.py),
+        // which fetches TDF_FONTS_PACK_URL and extracts it into
+        // TDF_FONTS_DIR server-side -- this just re-runs loadFonts()
+        // afterward to pick up the result, same request the page
+        // already makes on its own load.
+        const installPanel = document.getElementById('tdfInstallPanel');
+        const installBtn = document.getElementById('btnTdfInstall');
+        const installStatus = document.getElementById('tdfInstallStatus');
+
+        function loadFonts() {
+            fetch(`{{ url_for('ansi_editor.list_fonts') }}`).then(r => r.json()).then(data => {
+                fonts = data || [];
+                installPanel.style.display = fonts.length ? 'none' : '';
+                renderList('');
+            }).catch(() => { listEl.textContent = '(font list unavailable)'; });
+        }
+
+        installBtn.addEventListener('click', async () => {
+            installBtn.disabled = true;
+            installStatus.textContent = 'Downloading and installing…';
+            try {
+                const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+                const csrf = csrfMeta ? csrfMeta.getAttribute('content') : '';
+                const r = await fetch(`{{ url_for('ansi_editor.install_fonts') }}`, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': csrf},
+                    credentials: 'same-origin',
+                });
+                const data = await r.json();
+                if (!r.ok || data.error) throw new Error(data.error || ('HTTP ' + r.status));
+                installStatus.textContent = `Installed ${data.installed} fonts.`;
+                loadFonts();
+            } catch (e) {
+                installStatus.textContent = 'Install failed: ' + e.message;
+            } finally {
+                installBtn.disabled = false;
+            }
+        });
+
+        loadFonts();
     })();
 
     // Zoom — scales cell width/height/font via CSS variables.
@@ -1193,6 +1451,7 @@
 
     // ---- Initialize ----
     buildGrid();
+    initRefImage();
     buildSwatches();
     buildCharset();
     updateCharPreview();

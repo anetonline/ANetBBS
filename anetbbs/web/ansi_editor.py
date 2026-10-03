@@ -944,6 +944,85 @@ def list_fonts():
                     for i, e in enumerate(entries)])
 
 
+@ansi_bp.route('/fonts/install', methods=['POST'])
+@login_required
+def install_fonts():
+    """Downloads the TheDraw font pack zip from TDF_FONTS_PACK_URL and
+    extracts every .TDF file it finds into TDF_FONTS_DIR -- the "THEDRAW
+    FONTS" panel's "Download & Install Fonts" button target, for the
+    common case where a sysop hasn't set up a font pack by hand at all.
+
+    Flattens on extraction (writes every .TDF by its own basename
+    directly into TDF_FONTS_DIR, discarding whatever folder structure
+    the zip itself used) rather than preserving the zip's own layout --
+    tdf_fonts.scan_fonts() only ever scans directly inside TDF_FONTS_DIR,
+    not recursively (matching ANetDRAW's own real font-scan behavior),
+    so a zip shaped like ANetDRAW's own tdf-fonts.zip (a flat top level
+    plus a SETS/ subfolder of mega-pack files) needs flattening before
+    those fonts are actually visible to the picker. Confirmed no
+    filename collisions exist between the two in the real pack this
+    was built against -- a collision here would just mean one file
+    quietly overwrites the other, same as re-running this twice
+    harmlessly overwrites already-installed files with themselves.
+
+    Streams the download to a temp file (never buffers the whole zip
+    in memory) and caps it at a generous sanity limit -- this is meant
+    for a multi-MB font pack, not an open-ended fetch."""
+    require_admin_or_403()
+    pack_url = current_app.config.get('TDF_FONTS_PACK_URL', '')
+    if not pack_url:
+        return jsonify({'error': 'TDF_FONTS_PACK_URL is not configured — '
+                                  'set it in your environment/config first'}), 400
+    fonts_dir = current_app.config.get('TDF_FONTS_DIR', '')
+    if not fonts_dir:
+        return jsonify({'error': 'TDF_FONTS_DIR is not configured'}), 400
+
+    import zipfile
+
+    from ._addon_download import DownloadError, download_zip_to_tempfile
+
+    try:
+        tmp_path = download_zip_to_tempfile(pack_url, user_agent='ANetBBS/ansi_editor')
+    except DownloadError as exc:
+        return jsonify({'error': str(exc)}), 502
+
+    os.makedirs(fonts_dir, exist_ok=True)
+    root = os.path.realpath(fonts_dir)
+    try:
+        installed = 0
+        with zipfile.ZipFile(tmp_path) as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                name = os.path.basename(info.filename)
+                if not name.lower().endswith('.tdf'):
+                    continue
+                # Zip-slip guard: confirm the flattened destination
+                # really lands inside fonts_dir before writing (a
+                # basename can't contain a path separator, but a
+                # crafted filename like "..%2f..%2fetc" on some
+                # platforms could still resolve oddly -- belt and
+                # suspenders, same discipline as this project's other
+                # upload-derived file writes).
+                dest = os.path.realpath(os.path.join(fonts_dir, name))
+                if dest != root and not dest.startswith(root + os.sep):
+                    continue
+                with z.open(info) as src, open(dest, 'wb') as out:
+                    out.write(src.read())
+                installed += 1
+    except (zipfile.BadZipFile, ValueError, OSError) as exc:
+        return jsonify({'error': f'install failed: {exc}'}), 500
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    if installed == 0:
+        return jsonify({'error': 'downloaded file contained no .TDF fonts'}), 500
+    return jsonify({'installed': installed})
+
+
 @ansi_bp.route('/fonts/render')
 @login_required
 def render_font_preview():

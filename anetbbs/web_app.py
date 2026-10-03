@@ -580,6 +580,7 @@ def create_app(config_name=None):
     from .web.telegram import telegram_bp
     from .web.peers import peers_bp
     from .web.ansi_editor import ansi_bp
+    from .web.addons import addons_bp
     from .web.web_terminal import term_bp, register_socketio_handlers as _register_term_handlers
     from .web.stats import stats_bp
     from .web.feeds import feeds_bp
@@ -669,6 +670,7 @@ def create_app(config_name=None):
     app.register_blueprint(telegram_bp)
     app.register_blueprint(peers_bp)
     app.register_blueprint(ansi_bp)
+    app.register_blueprint(addons_bp)
     app.register_blueprint(term_bp)
     _register_term_handlers(socketio)
     app.register_blueprint(stats_bp)

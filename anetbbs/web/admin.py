@@ -332,6 +332,7 @@ ADMIN_HUB_SECTIONS = {
             ('control.index', 'Control Panel', 'bi-sliders', 'Live node control'),
             ('pulse.index', 'ANetBBS Pulse', 'bi-phone', 'Read-only mobile status dashboard'),
             ('upgrades_admin.index', 'Check for Updates', 'bi-arrow-up-circle', 'ANetBBS version updates'),
+            ('addons.index', 'Add-ons', 'bi-puzzle', 'Optional installable extras (Enhanced Client, TheDraw fonts)'),
             ('preflight.index', 'Preflight Checklist', 'bi-clipboard2-check', 'Pre-update sanity checks'),
             ('events_admin.index', 'Scheduled Events', 'bi-calendar2-event', 'Cron-style maintenance jobs'),
             ('security_admin.index', 'Security Updates', 'bi-shield-check', 'OS package security patches'),

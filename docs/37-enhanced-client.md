@@ -63,12 +63,25 @@ listener; telnet/SSH/rlogin/PETSCII/FTP all start normally regardless.
 
 ## Installing
 
+**From Admin -> Add-ons** (the easier path): set
+`ENHANCED_CLIENT_ADDON_URL` to a direct-download URL for the add-on
+archive (a GitHub Release asset works well, no auth needed for a
+public asset), then click **Download & Install** on that page --
+it fetches the archive and extracts it over the install automatically.
+See [38 — Add-ons](38-addons.md) for how this page works and what it
+checks before writing anything.
+
+**By hand:**
+
 1. Build or obtain `ANetBBS-EnhancedClient-addon-<version>.tar.gz`.
 2. Extract it over an existing ANetBBS install, same workflow as any
    other update:
    ```
    tar -xzf ANetBBS-EnhancedClient-addon-<version>.tar.gz --strip-components=1 -C /path/to/anetbbs
    ```
+
+**Either way, then:**
+
 3. Set `ENHANCED_ENABLED=true` in your config (defaults:
    `ENHANCED_HOST=0.0.0.0`, `ENHANCED_PORT=6402` -- override either if
    that doesn't fit).
