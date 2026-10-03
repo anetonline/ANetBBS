@@ -1,11 +1,23 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.23`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.24`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.24 — Image Import / Reference Image: fix a silent CSP block (October 2026)
+
+v1.1.23's new Image → ANSI import and reference-image trace mode both
+preview a user-selected local file via
+`URL.createObjectURL()`/`<img src="blob:...">`. The site-wide
+Content-Security-Policy's `img-src` directive didn't include `blob:`,
+so the browser silently blocked the image load — nothing visible
+happened, no error shown to the sysop. Fixed by adding `blob:` to
+`img-src`; confirmed safe since a `blob:` URL can only ever reference
+image data the page's own script created locally, never anything
+attacker- or remote-controlled.
 
 ## v1.1.23 — Web ANSI editor: image tools, full TheDraw pack; new Admin → Add-ons page (October 2026)
 

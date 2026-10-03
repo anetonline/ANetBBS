@@ -1,3 +1,7 @@
+# ANetBBS v1.1.24 — Image Import / Reference Image: fix a silent CSP block (October 2026)
+
+v1.1.23's new Image → ANSI import and reference-image trace mode both preview a user-selected local file via `URL.createObjectURL()`/`<img src="blob:...">`. The site-wide Content-Security-Policy's `img-src` directive didn't include `blob:`, so the browser silently blocked the image load — nothing visible happened, no error shown to the sysop. Fixed by adding `blob:` to `img-src`; confirmed safe since a `blob:` URL can only ever reference image data the page's own script created locally, never anything attacker- or remote-controlled.
+
 # ANetBBS v1.1.23 — Web ANSI editor: image tools, full TheDraw pack; new Admin → Add-ons page (October 2026)
 
 The web ANSI editor gained two new tools: an Image → ANSI converter (stretch-fits an uploaded photo to the grid, converting it to CP437 half-block/full-block art against the editor's own 16-color palette) and a reference-image trace mode (loads a photo as a dimmable underlay to draw over by hand, never touching the saved art). The TheDraw font picker's font pack is no longer something a sysop has to track down and point a setting at by hand — a "Download & Install Fonts" button fetches a complete pack (1,241 files, over 5,000 font entries including TheDraw's `SETS/` mega-packs) from a GitHub Release asset in one click. See `docs/36-ansi-editor.md`.

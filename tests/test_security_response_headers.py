@@ -85,6 +85,22 @@ class SecurityResponseHeadersTests(unittest.TestCase):
         # Still gets the universally-safe headers.
         self.assertEqual(resp.headers.get('X-Content-Type-Options'), 'nosniff')
 
+    def test_default_csp_allows_blob_image_sources(self):
+        """Real bug found live: the web ANSI editor's Image Import and
+        Reference Image trace mode both preview a user-selected local
+        file via URL.createObjectURL()/<img src="blob:...">. Confirmed
+        via a real headless-browser run that the site-wide CSP's
+        img-src (missing `blob:`) silently blocked that image load --
+        im.onload simply never fired, no visible error, so the import
+        appeared to do nothing. A blob: URL can only ever reference a
+        Blob the page's own script created, never attacker-controlled
+        input, so this is safe to allow site-wide."""
+        client = self.app.test_client()
+        resp = client.get('/')
+        csp = resp.headers.get('Content-Security-Policy', '')
+        img_src = next((d for d in csp.split(';') if d.strip().startswith('img-src')), '')
+        self.assertIn('blob:', img_src)
+
     def test_no_hsts_over_plain_http(self):
         client = self.app.test_client()
         resp = client.get('/')

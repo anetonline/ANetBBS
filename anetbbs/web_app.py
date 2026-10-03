@@ -951,7 +951,17 @@ def create_app(config_name=None):
         "style-src 'self' 'unsafe-inline' "
         "https://cdn.jsdelivr.net https://fonts.googleapis.com; "
         "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; "
-        "img-src 'self' data: https:; "
+        # blob: -- the web ANSI editor's Image Import and Reference
+        # Image trace mode both preview a user-selected local file via
+        # URL.createObjectURL()/<img src="blob:...">; confirmed via a
+        # real headless-browser run that this was silently blocked
+        # without it (im.onload simply never fires, no visible error
+        # to the user). A blob: URL can only ever reference a Blob the
+        # page's own script created -- it is not something an external
+        # origin or attacker-controlled input can produce -- so this is
+        # the same safe, standard exception the DOS emulator frame's
+        # own scoped CSP already grants for the same reason below.
+        "img-src 'self' data: blob: https:; "
         "connect-src 'self' ws: wss:; "
         "object-src 'none'; "
         "base-uri 'self'; "
