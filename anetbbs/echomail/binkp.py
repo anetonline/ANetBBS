@@ -1010,6 +1010,18 @@ class BinkPClient:
         # that same early window, before _receive_messages() ever ran its
         # own dedicated EOB-count loop -- see _consume_inbound_file_frame.
         self._interleaved_eob_count = 0
+        # Whether a real CMD_FILE has been sent OR received yet this
+        # session -- see _receive_messages()'s own use of this for why
+        # it matters (the short post-transfer idle timeout there assumes
+        # a transfer has already happened; real gap found live, 2026-10:
+        # a hub that's simply slow to START its backlog, with nothing of
+        # our own queued outbound, got cut off before that assumption
+        # ever held). Set True by each of the four send methods
+        # (_send_messages/_send_hatch/_send_freq_requests/
+        # _send_outbound_dir_files) right after they transmit a CMD_FILE,
+        # and by _consume_inbound_file_frame() the moment the peer offers
+        # one.
+        self._any_file_this_session = False
 
     def _log_transcript(self, line: str):
         ts = datetime.utcnow().strftime('%H:%M:%S.%f')[:-3]
@@ -1055,6 +1067,7 @@ class BinkPClient:
         self._outbound_dir = resolve_outbound_dir(data_dir, self.hub_address)
         self._interleaved_received = []
         self._interleaved_eob_count = 0
+        self._any_file_this_session = False
         self._connect()
         try:
             self._handshake()
@@ -1100,6 +1113,7 @@ class BinkPClient:
             self._send_cmd(CMD_FILE,
                            f'{item.filename} {len(binary)} {mtime} 0')
             self._send_data(binary)
+            self._any_file_this_session = True
             if not self._wait_got():
                 logger.warning("Hatch: peer didn't ack %s", item.filename)
                 failures.append((item, f"peer didn't ack binary {item.filename}"))
@@ -1112,6 +1126,7 @@ class BinkPClient:
             self._send_cmd(CMD_FILE,
                            f'{tic_name} {len(tic_bytes)} {mtime} 0')
             self._send_data(tic_bytes)
+            self._any_file_this_session = True
             if not self._wait_got():
                 logger.warning("Hatch: peer didn't ack %s", tic_name)
                 failures.append((item, f"peer didn't ack manifest {tic_name}"))
@@ -1148,6 +1163,7 @@ class BinkPClient:
         mtime = int(datetime.utcnow().timestamp())
         self._send_cmd(CMD_FILE, f'{fname} {len(content)} {mtime} 0')
         self._send_data(content)
+        self._any_file_this_session = True
         if self._wait_got():
             logger.info('BinkP: sent FREQ %s to %s (%d request(s))',
                        fname, self.hub_address, len(self.freq_requests))
@@ -1179,6 +1195,7 @@ class BinkPClient:
             mtime = int(datetime.utcnow().timestamp())
             self._send_cmd(CMD_FILE, f'{name} {len(data)} {mtime} 0')
             self._send_data(data)
+            self._any_file_this_session = True
             if not self._wait_got():
                 logger.warning("Outbound dir: peer didn't ack %s", name)
                 failures.append((name, "peer didn't ack file"))
@@ -1381,6 +1398,12 @@ class BinkPClient:
                 return False
             cmd = data[0]
             if cmd == CMD_FILE:
+                # The peer has started offering a real file -- mark it
+                # even before we know whether we'll accept or reject it
+                # below, so a caller waiting on self._any_file_this_session
+                # (see _receive_messages()) can re-tighten its own idle
+                # timeout the instant real transfer activity begins.
+                self._any_file_this_session = True
                 text = data[1:].decode('latin-1', errors='replace')
                 parts = text.split()
                 candidate_name = parts[0] if parts else 'unknown.pkt'
@@ -1798,6 +1821,7 @@ class BinkPClient:
 
         self._send_cmd(CMD_FILE, f'{filename} {size} {mtime} 0')
         self._send_data(payload)
+        self._any_file_this_session = True
 
         # Wait for GOT (accepted) or SKIP/ERR (rejected). Any CMD_FILE
         # the peer interleaves while we wait is received and GOT-acked
@@ -1958,8 +1982,31 @@ class BinkPClient:
             # looked. Waiting less than that ~15s window before
             # proactively responding gives our confirmation a chance to
             # actually reach the hub while the link is still alive.
+            #
+            # BUT only once a transfer has actually happened THIS
+            # session. Real bug report (Winzlo/Clearing Houz, 2026-10-04,
+            # full transcript + hub-side confirmation): when we have
+            # nothing of our own queued outbound, every _send_* method
+            # above returns immediately with zero network activity, so
+            # this is actually the FIRST wait of the whole session, not
+            # a post-transfer one -- the ~15s teardown behavior above has
+            # no reason to apply yet, since nothing has been transferred
+            # for the hub to go quiet AFTER. A hub that's simply slow to
+            # start transmitting its backlog (confirmed live: 30-40+
+            # seconds against this real hub, a case _send_messages()'
+            # own 60s ack-wait already tolerates via the same interleaved-
+            # receive mechanism whenever we DO have outbound traffic) got
+            # cut off here before ever offering anything -- logged as a
+            # clean success, backlog never received, every poll forever.
+            # Use the same proven-sufficient self.timeout for this first
+            # wait instead; _consume_inbound_file_frame() flips
+            # self._any_file_this_session the instant the hub's first
+            # CMD_FILE header arrives, and the loop below re-tightens to
+            # 5.0s from that point on, so the original post-transfer
+            # protection is unchanged for the rest of the session.
             try:
-                self._sock.settimeout(5.0)
+                self._sock.settimeout(
+                    5.0 if self._any_file_this_session else self.timeout)
             except (OSError, AttributeError):
                 pass
             # No fixed frame-count or total-time cap here -- real OOM-
@@ -2031,6 +2078,19 @@ class BinkPClient:
                     self._consume_inbound_file_frame(is_cmd, data, state)
                 finally:
                     self._interleaved_received = before
+                # The hub's first CMD_FILE (if this session started with
+                # nothing queued outbound, so the loop entered above at
+                # self.timeout rather than 5.0 -- see this block's own
+                # comment above the while loop) just flipped
+                # self._any_file_this_session to True inside
+                # _consume_inbound_file_frame(). Re-tighten now so the
+                # original post-transfer dead-link detection still
+                # applies for the rest of this loop, same as always.
+                if self._any_file_this_session:
+                    try:
+                        self._sock.settimeout(5.0)
+                    except (OSError, AttributeError):
+                        pass
         # Per binkp/1.1 (binkp11.txt): a session only counts as
         # successfully finished once a round passes where NEITHER side
         # sends nor receives any command between two consecutive M_EOB

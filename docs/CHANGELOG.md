@@ -1,11 +1,32 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.24`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.25`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.25 — BinkP: a hub slow to start its backlog could get cut off with nothing queued outbound (October 2026)
+
+A real sysop report (full session transcripts, hub-side confirmation
+of a stuck backlog) found that when a leaf has nothing of its own
+queued outbound, ANetBBS's BinkP poller moved straight to its
+post-transfer idle-wait phase — a short 5-second timeout tuned for
+detecting a connection that's already finished exchanging files and
+gone quiet. Against a hub that's simply slow to begin transmitting its
+own backlog (confirmed live: 30-40+ seconds is normal for at least one
+real FTN hub), that same 5-second wait fired before the hub ever
+offered anything, and the session was logged as a clean success with
+the backlog never received — repeating indefinitely on every
+subsequent poll. The timeout now only shrinks once a file has actually
+been exchanged this session; the very first wait, when nothing has
+been sent or received yet, uses the same longer timeout the poller's
+own outbound ack-wait already relies on successfully. Every session
+that already has outbound mail, hatch items, FREQ requests, or
+outbound-dir files queued is unaffected — confirmed via the full
+existing BinkP regression suite (267 tests across every file touching
+this subsystem), none of which changed behavior.
 
 ## v1.1.24 — Image Import / Reference Image: fix a silent CSP block (October 2026)
 
