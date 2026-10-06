@@ -83,6 +83,14 @@ class UpdateProfileForm(FlaskForm):
     avatar_url = StringField('Avatar URL', validators=[Optional(), Length(max=500)])
     avatar_file = WTFFileField('Upload Avatar', validators=[Optional(), FileAllowed(['jpg', 'jpeg', 'png', 'gif', 'webp'], 'Images only!')])
     theme_id = SelectField('Theme', coerce=int, validators=[Optional()])
+    nav_position = SelectField('Nav Position', validators=[Optional()], choices=[
+        ('left', 'Left'),
+        ('top', 'Top'),
+        ('right', 'Right'),
+        ('bottom', 'Bottom'),
+    ], description=(
+        "Only affects the Command Deck theme's movable rail -- which "
+        "screen edge it docks to. No effect on any other theme."))
     sixel_mode = SelectField('Sixel Graphics', validators=[Optional()], choices=[
         ('auto', 'Automatic (detect)'),
         ('forced_on', 'Always On'),
@@ -326,6 +334,7 @@ def edit():
         # Handle theme selection
         theme_id = form.theme_id.data
         current_user.theme_id = theme_id if theme_id and theme_id != 0 else None
+        current_user.nav_position = form.nav_position.data or 'left'
 
         current_user.sixel_mode = form.sixel_mode.data or 'auto'
         current_user.cursor_style = form.cursor_style.data or 'default'
@@ -384,6 +393,7 @@ def edit():
         form.public_watch_optout.data = current_user.public_watch_optout
         form.avatar_url.data = current_user.avatar_url
         form.theme_id.data = current_user.theme_id or 0
+        form.nav_position.data = current_user.nav_position or 'left'
         form.sixel_mode.data = current_user.sixel_mode or 'auto'
         form.cursor_style.data = current_user.cursor_style or 'default'
         form.echomail_name_pref.data = current_user.echomail_name_pref or 'handle'

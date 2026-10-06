@@ -1144,6 +1144,9 @@ def _lightweight_migrate(app):
     _ensure_column('users', 'access_level', 'INTEGER NOT NULL DEFAULT 10')
     _ensure_column('users', 'codepage', "VARCHAR(8) DEFAULT 'cp437'")
     _ensure_column('users', 'language', "VARCHAR(8) DEFAULT 'en'")
+    # Users: which screen edge a movable-rail theme's nav docks to --
+    # only Command Deck reads this. See models.py's User.nav_position.
+    _ensure_column('users', 'nav_position', "VARCHAR(10) NOT NULL DEFAULT 'left'")
     # Boards: optional ANSI banner shown at top of board page.
     _ensure_column('boards', 'ansi_banner', 'TEXT')
     # Boards: sub-conference / category grouping.
@@ -1787,6 +1790,20 @@ def _create_default_data():
                 ' "--theme-card-bg": "#ffffff", "--theme-input-bg": "#ffffff",'
                 ' "--theme-input-focus": "#ffffcc", "--theme-border": "#808080",'
                 ' "--theme-stylesheet": "retro-web"}'
+            ),
+        },
+        {
+            'name': 'command-deck',
+            'display_name': 'Command Deck',
+            'description': 'A fixed icon-rail app shell instead of a top navbar — mission-control blue chrome + amber status lights, Sora + IBM Plex Mono. Real mobile support: a slide-in drawer plus a bottom tab bar on phones.',
+            'is_default': False,
+            'css_variables': (
+                '{"--theme-bg": "#14161c", "--theme-bg-dark": "#0b0c10",'
+                ' "--theme-primary": "#4da3ff", "--theme-primary-dark": "#2f86e0",'
+                ' "--theme-text": "#e8eaf0", "--theme-text-muted": "#9aa2b1",'
+                ' "--theme-card-bg": "#1a1d24", "--theme-input-bg": "#0f1116",'
+                ' "--theme-input-focus": "#171a21", "--theme-border": "#2a2e38",'
+                ' "--theme-stylesheet": "command-deck"}'
             ),
         },
     ]

@@ -89,6 +89,13 @@ class User(UserMixin, db.Model):
     date_of_birth = db.Column(db.Date)
     show_email = db.Column(db.Boolean, default=False)
     theme_id = db.Column(db.Integer, db.ForeignKey('themes.id'), nullable=True)
+    # Which screen edge a movable-rail theme's nav docks to --
+    # 'left'/'top'/'right'/'bottom'. Only Command Deck reads this today
+    # (anetbbs/static/css/command_deck_theme.css); inert for every
+    # other theme. Per-user, not per-theme-row, same reasoning as
+    # theme_id itself being per-user rather than needing 4 separate
+    # "Command Deck (top)"-style duplicate Theme rows.
+    nav_position = db.Column(db.String(10), nullable=False, default='left')
     # JSON-encoded {kind: bool} map. Missing key = default-on.
     notify_prefs = db.Column(db.Text)
     # Mystic/Synchronet-style numeric access level (0-255). admin gets 100+.

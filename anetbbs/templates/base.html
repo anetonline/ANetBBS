@@ -41,6 +41,19 @@
             border-bottom: 2px solid var(--theme-primary);
         }
 
+        /* Real gap found live (Pi3 screenshot across multiple themes):
+           Bootstrap's own .bg-dark utility class hardcodes #212529
+           with !important -- used on the secondary search bar wrapper
+           below the navbar -- so on any theme without its own
+           dedicated override stylesheet (most of them), that strip
+           showed Bootstrap's raw gray instead of the theme's actual
+           dark background, a visibly mismatched band on every one of
+           those pages. Overridden here, once, for every theme, same
+           pattern .navbar itself already uses just above. */
+        .bg-dark {
+            background-color: var(--theme-bg-dark) !important;
+        }
+
         .navbar-brand, .nav-link {
             color: var(--theme-primary) !important;
             font-weight: 600;
@@ -278,6 +291,28 @@
             .footer { padding: 8px 4px; font-size: 0.75rem; }
             /* Make form input rows wrap properly */
             .row.g-2 > [class*="col-"] { margin-bottom: 4px; }
+            /* Real bug found live (Pi3 phone screenshot): action-button
+               rows (echomail read's Prev/Next/Reply/Thread/Next Unread/
+               Bookmark, and the same d-flex-of-buttons shape used
+               across 87 other templates) are sized for desktop width
+               with no flex-wrap, so on a phone they crowd/overlap
+               instead of flowing onto new lines. Generic fix in one
+               place rather than 87 templates: let any flex row wrap,
+               with a real gap so wrapped rows don't touch, and let
+               button groups shrink/wrap too for the same reason.
+
+               Follow-up found live (same Pi3, second look): row-gap
+               alone only spaced wrapped LINES apart -- items still
+               sitting on the SAME line relied entirely on whatever
+               ms-1/ms-2 margin utility a given template happened to
+               add between its own buttons, which isn't consistent
+               app-wide and reads as touching/overlapping at the bolder
+               Command Deck button weight. `gap` (both axes) guarantees
+               real breathing room between EVERY adjacent button
+               regardless of what margin classes a specific row does or
+               doesn't have. */
+            .d-flex { flex-wrap: wrap; gap: 6px; }
+            .btn-group { flex-wrap: wrap; gap: 6px; }
         }
         /* ANSI/CP437 message body — preserves whitespace and uses a font with
            good box-drawing/CP437 coverage. Inline color spans come from the
@@ -331,6 +366,8 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/ivory_editorial_theme.css') }}">
       {% elif '"retro-web"' in effective_theme.css_variables %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/retro_web_theme.css') }}">
+      {% elif '"command-deck"' in effective_theme.css_variables %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/command_deck_theme.css') }}">
       {% endif %}
     {% endif %}
     {% endif %}
@@ -347,7 +384,7 @@
           href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css">
     {% block head_extra %}{% endblock %}
 </head>
-<body>
+<body data-nav-position="{{ (current_user.nav_position or 'left') if current_user.is_authenticated else 'left' }}">
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container-fluid">
@@ -368,7 +405,7 @@
 
                     <!-- Messaging dropdown — Boards / PMs / Netmail / Contacts -->
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" data-bs-display="static">
                             <i class="bi bi-envelope"></i> {{ t('nav.messaging', 'Messaging') }}
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
@@ -392,7 +429,7 @@
                     {% if current_user.is_authenticated %}
                     <!-- Chat dropdown — MRC / IRC -->
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" data-bs-display="static">
                             <i class="bi bi-broadcast"></i> {{ t('nav.chat', 'Chat') }}
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
@@ -413,7 +450,7 @@
 
                     <!-- Files dropdown -->
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" data-bs-display="static">
                             <i class="bi bi-folder"></i> {{ t('nav.files', 'Files') }}
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
@@ -434,7 +471,7 @@
                          pages the same way the Admin dropdown was, see
                          main.py's TOOLS_HUB_SECTIONS / tools_hub()). -->
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" data-bs-display="static">
                             <i class="bi bi-tools"></i> {{ t('nav.tools', 'Tools') }}
                         </a>
                         <ul class="dropdown-menu" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
@@ -449,7 +486,7 @@
                     {% if current_user.is_authenticated and current_user.is_admin %}
                     <!-- Admin dropdown -->
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" data-bs-display="static">
                             <i class="bi bi-shield-lock"></i> Admin
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
@@ -500,7 +537,7 @@
                         </li>
                         <!-- Account dropdown — Profile / AKAs / Themes / Logout -->
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" data-bs-display="static">
                                 <i class="bi bi-person-circle"></i> {{ current_user.username }}
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end" style="background-color:var(--theme-bg-dark);border:1px solid var(--theme-primary);">
@@ -537,6 +574,32 @@
             </div>
         </div>
     </nav>
+
+    {# Command Deck phone bottom tab bar — new, small, additive markup
+       gated entirely to this one theme (see command_deck_theme.css's
+       own header comment). Inert/zero bytes for every other theme.
+       Recomputes the PM-unread count inline rather than reusing
+       `unread2` above, matching this file's own existing convention
+       of recomputing per-section rather than sharing {% set %} scope
+       across an {% if %} boundary. #}
+    {% if effective_theme and effective_theme.is_active and effective_theme.css_variables and '"command-deck"' in effective_theme.css_variables %}
+    <nav id="cdMobileTabbar">
+        <a href="{{ url_for('main.index') }}"><i class="bi bi-house"></i>Home</a>
+        <a href="{{ url_for('boards.list_boards') }}"><i class="bi bi-chat-left-text"></i>Boards</a>
+        {% if current_user.is_authenticated %}
+        <a href="{{ url_for('pm.inbox') }}">
+            <i class="bi bi-envelope"></i>Messages
+            {% set cd_unread = current_user.received_messages | selectattr('read_at', 'none') | selectattr('is_deleted_recipient', 'equalto', False) | list | length %}
+            {% if cd_unread > 0 %}<span class="badge bg-danger">{{ cd_unread }}</span>{% endif %}
+        </a>
+        <a href="{{ url_for('games.lobby') }}"><i class="bi bi-controller"></i>Games</a>
+        <a href="{{ url_for('profile.index') }}"><i class="bi bi-person-circle"></i>{{ current_user.username }}</a>
+        {% else %}
+        <a href="{{ url_for('main.tools_hub', section='community') }}"><i class="bi bi-people"></i>Community</a>
+        <a href="{{ url_for('auth.login') }}"><i class="bi bi-box-arrow-in-right"></i>Login</a>
+        {% endif %}
+    </nav>
+    {% endif %}
 
     <!-- Secondary search bar — pulled out of the main navbar so the nav links
          keep their full width when many sections are present. -->

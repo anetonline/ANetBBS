@@ -1,11 +1,77 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.25`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.26`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.26 — New web theme: Command Deck (October 2026)
+
+A thirteenth web UI theme, and the first one that changes the page's
+actual shape instead of just its colors: a fixed icon rail replaces
+the top navbar, with flyout submenus and a hover-to-expand label view,
+built around a mission-control palette (cool structural blue, warm
+amber status-light badges) and Sora + IBM Plex Mono type. Every other
+theme is unaffected — the existing navbar markup is reused as-is,
+restyled entirely through CSS, with no page-structure changes outside
+this one theme. Real, dedicated mobile support rather than a
+squeezed-down desktop layout: a slide-in drawer from the existing
+hamburger toggle, plus a new bottom tab bar for quick thumb access to
+the most-used sections on phones.
+
+Two real-hardware follow-ups from Pi3 testing, same day: the
+account-menu flyout (at the bottom of the rail) was opening downward
+and running off the bottom of the screen, cutting off everything past
+"Edit Profile" — it now opens upward instead, so all items are always
+reachable. The content area also got a real second pass after direct
+feedback that it still read as a recolored stock layout: cards now
+have HUD-style corner brackets, a diagonal gradient fill, a hover-lift
+interaction, and an alternating blue/amber accent rhythm instead of
+flat single-tone panels; the page's shared hero banner became an
+actual glowing gradient readout with a slow scan-line sweep instead of
+a centered logo over a thin line; stat numbers render as bold
+monospace readouts; and the layout runs full-bleed next to the rail
+instead of floating in a centered column. Selectable from Profile →
+Themes. See `docs/08-themes.md`.
+
+A third Pi3 round found two more real gaps and added a requested
+customization feature. First, the two bugs: the secondary search bar
+(and anything else using Bootstrap's own `.bg-dark` utility class)
+showed Bootstrap's raw hardcoded gray instead of the active theme's
+own background on every theme except the handful with a dedicated
+override stylesheet — fixed once in `base.html` for all thirteen
+themes, not just Command Deck. Action-button rows (echomail's Prev/
+Next/Reply/Thread/Next Unread/Bookmark, and the same `d-flex`-of-
+buttons shape used across 87 other templates) had no flex-wrap, so on
+a phone they crowded together instead of flowing onto new lines — also
+fixed once, site-wide, in `base.html`'s shared mobile styles.
+
+Second, the feature: Command Deck's rail can now dock to any of the
+four screen edges — left (unchanged default), right (a mirror), or
+top/bottom (a horizontal bar in the same visual language, closer to a
+traditional navbar shape but still Command Deck's own). Each position
+opens its dropdown flyouts in whichever direction actually has room.
+Picked per-user from Profile → Edit, right next to the existing Theme
+picker; has no effect on any other theme. Mobile is deliberately
+unaffected by this setting — phones keep the same drawer + bottom tab
+bar regardless of what's picked for desktop.
+
+A fourth Pi3 round fixed two more real gaps. The Nav Position picker
+was shown unconditionally with only a small caption explaining it's
+Command-Deck-only — looked exactly like a working setting for whatever
+theme happened to be selected (e.g. Graphite Teal), since it never
+actually disappeared. It's now hidden entirely unless Command Deck is
+the currently-selected theme, updating live with no page reload as the
+Theme dropdown changes. Separately, mobile action-button rows were
+still crowding together even after the earlier flex-wrap fix — that
+fix only added spacing *between wrapped lines*, not between buttons
+sharing the same line, which depended entirely on whatever margin
+utility class a given template's row happened to add. A real `gap` (both
+axes) now guarantees breathing room between every adjacent button
+app-wide regardless of what margin classes a specific row does or
+doesn't have.
 
 ## v1.1.25 — BinkP: a hub slow to start its backlog could get cut off with nothing queued outbound (October 2026)
 

@@ -1,6 +1,6 @@
 # Themes
 
-ANetBBS ships twelve hand-picked themes, all WCAG-AA-readable on
+ANetBBS ships thirteen hand-picked themes, all WCAG-AA-readable on
 body text:
 
 - **Modern Dark** (default) — high-contrast Catppuccin-style palette
@@ -20,6 +20,12 @@ body text:
   forest-teal accent and serif headlines
 - **Retro Web '99** — tiled pinstripe background, beveled Windows-95
   chrome, underlined blue/purple links, Times New Roman
+- **Command Deck** — the one theme that changes the page shape, not
+  just its colors: a fixed icon rail replaces the top navbar (hover to
+  expand, flyout submenus), mission-control blue chrome with amber
+  status-light badges, Sora + IBM Plex Mono. Real mobile treatment,
+  not a squeezed-down desktop layout: a slide-in drawer plus a
+  thumb-reachable bottom tab bar on phones.
 
 ## Per-user
 

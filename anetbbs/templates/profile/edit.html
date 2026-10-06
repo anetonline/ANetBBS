@@ -193,6 +193,37 @@
                         {{ form.theme_id.label(class="form-label") }}
                         {{ form.theme_id(class="form-select") }}
                     </div>
+                    {# Real confusion found live (Pi3 screenshot): shown
+                       unconditionally with only a small caption saying
+                       it's Command-Deck-only, this looked like a real,
+                       working setting for whatever theme happened to be
+                       selected (e.g. Graphite Teal) -- nav_position has
+                       no effect on any theme's layout except Command
+                       Deck's own movable rail, so the field is hidden
+                       entirely unless that's the one currently picked,
+                       updating live as the Theme select changes. #}
+                    <div class="mb-3" id="navPositionField" style="display:none;">
+                        {{ form.nav_position.label(class="form-label") }}
+                        {{ form.nav_position(class="form-select") }}
+                        {% if form.nav_position.description %}
+                        <div class="form-text">{{ form.nav_position.description }}</div>
+                        {% endif %}
+                    </div>
+                    <script>
+                    (function() {
+                        var COMMAND_DECK_THEME_ID = {{ (themes | selectattr('name', 'equalto', 'command-deck') | map(attribute='id') | first | default(0)) | tojson }};
+                        var themeSelect = document.getElementById('theme_id');
+                        var navField = document.getElementById('navPositionField');
+                        function sync() {
+                            var picked = parseInt(themeSelect.value, 10);
+                            navField.style.display = (picked === COMMAND_DECK_THEME_ID) ? '' : 'none';
+                        }
+                        if (themeSelect && navField && COMMAND_DECK_THEME_ID) {
+                            themeSelect.addEventListener('change', sync);
+                            sync();
+                        }
+                    })();
+                    </script>
                     {% if themes %}
                     <div class="row g-2">
                         {% for theme in themes %}
