@@ -94,11 +94,11 @@ backends only changes how the raw bytes get to the hub.
 ## Native `umrc-client` support (one shared bridge, no separate `umrc-bridge`)
 
 **Status: working, verified live against a real `umrc-client` build
-(2026-09-21) -- but still on the `umrc-bridge-wip` branch, not yet
-merged to `main` or shipped in a numbered release.** Everything below
-reflects what was actually confirmed working during that testing
-session, including several real bugs found and fixed along the way --
-not a design document written in advance.
+(2026-09-21), merged to `main` and shipped starting in v1.1.0 (security/
+audit follow-up in v1.1.2).** Everything below reflects what was
+actually confirmed working during that testing session, including
+several real bugs found and fixed along the way -- not a design
+document written in advance.
 
 [uMRC](https://github.com/codefenix-dev/uMRC) -- **download and full
 source at that link** -- is a separate, OpenDoors-based MRC door

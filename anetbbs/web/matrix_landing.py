@@ -19,6 +19,7 @@ original mod used) -- never re-nags on every page load, and (per the
 caller in main.py) never shown to an already-authenticated visitor.
 """
 from flask import make_response, redirect, url_for
+from markupsafe import escape
 
 SKIP_COOKIE = 'anetbbs_matrix_seen'
 SKIP_PARAM = 'mtx'
@@ -47,7 +48,7 @@ def render_stock_web_matrix(request):
         ways.append(f"SSH &mdash; port {cfg.get('SSH_PORT', 2234)}")
     if cfg.get('RLOGIN_ENABLED', False):
         ways.append(f"Rlogin &mdash; port {cfg.get('RLOGIN_PORT', 513)}")
-    connect_host = domain or request.host.split(':')[0]
+    connect_host = escape(domain or request.host.split(':')[0])
     ways_html = ''.join(f'<li>{w} to <code>{connect_host}</code></li>' for w in ways)
 
     continue_url = url_for('main.index', **{SKIP_PARAM: 'skip'})

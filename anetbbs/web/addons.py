@@ -31,6 +31,10 @@ from flask_login import login_required
 
 from .access_control import require_admin_or_403
 from ._addon_download import DownloadError, download_zip_to_tempfile
+from ..echomail.zip_safety import (
+    MAX_ARCHIVE_UNCOMPRESSED, MAX_MEMBER_UNCOMPRESSED, ZipBombError,
+    iter_safe_members,
+)
 
 
 addons_bp = Blueprint('addons', __name__, url_prefix='/admin/addons')
@@ -115,15 +119,33 @@ def _iter_archive_entries(tmp_path, archive_format):
     sysop to do by hand with `tar --strip-components=1`."""
     if archive_format == 'zip':
         with zipfile.ZipFile(tmp_path) as z:
-            for info in z.infolist():
-                if info.is_dir():
-                    continue
-                yield info.filename, z.read(info)
+            for info, data in iter_safe_members(z):
+                yield info.filename, data
     elif archive_format == 'tar.gz':
+        # Same zip-bomb risk as the zip branch above (a small,
+        # highly-compressed tar.gz can declare a tiny member whose
+        # actual decompressed size is enormous) -- member.size is the
+        # declared uncompressed size, free to read before extractfile()
+        # ever decompresses anything, same discipline as
+        # zip_safety.iter_safe_members() applies to zip members.
+        total = 0
         with tarfile.open(tmp_path, 'r:gz') as t:
             for member in t.getmembers():
                 if not member.isfile():
                     continue
+                if member.size > MAX_MEMBER_UNCOMPRESSED:
+                    raise ZipBombError(
+                        f'{member.name!r} declares {member.size} bytes '
+                        f'uncompressed (per-member cap '
+                        f'{MAX_MEMBER_UNCOMPRESSED}) -- refusing to extract')
+                total += member.size
+                if total > MAX_ARCHIVE_UNCOMPRESSED:
+                    raise ZipBombError(
+                        f'cumulative declared uncompressed size '
+                        f'({total} bytes) exceeds archive cap '
+                        f'({MAX_ARCHIVE_UNCOMPRESSED}) at member '
+                        f'{member.name!r} -- refusing to extract remaining '
+                        'members')
                 name = member.name.split('/', 1)[1] if '/' in member.name else member.name
                 f = t.extractfile(member)
                 yield name, (f.read() if f else b'')
@@ -165,7 +187,17 @@ def _extract_preserve_paths(entries, install_root, allowed_prefixes):
     installed = skipped = 0
     for relpath, data in entries:
         rel = relpath.lstrip('/')
-        if not any(rel == p or rel.startswith(p) for p in allowed_prefixes):
+        # An exact-file entry (no trailing '/') must match exactly --
+        # `rel.startswith(p)` alone would also let
+        # 'anetbbs/core/enhanced_server.py.evil' or a similarly-named
+        # sibling through, since startswith() has no path-boundary
+        # check. A directory-prefix entry (ends in '/') legitimately
+        # matches anything under it via startswith(). Real containment
+        # (the realpath check just below) already prevents actual
+        # traversal outside install_root either way -- this tightens
+        # the allowlist itself to mean what its own docstring says.
+        if not any(rel == p or (p.endswith('/') and rel.startswith(p))
+                   for p in allowed_prefixes):
             skipped += 1
             continue
         dest = os.path.realpath(os.path.join(install_root, rel))
@@ -232,7 +264,7 @@ def install_addon(addon_id):
             install_root = _install_root(current_app.config)
             installed, skipped = _extract_preserve_paths(
                 entries, install_root, entry['allowed_prefixes'])
-    except (zipfile.BadZipFile, tarfile.TarError, ValueError, OSError) as exc:
+    except (zipfile.BadZipFile, tarfile.TarError, ZipBombError, ValueError, OSError) as exc:
         return jsonify({'error': f'install failed: {exc}'}), 500
     finally:
         try:

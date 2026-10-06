@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # IRC client (asyncio version, mIRC-color-stripping)
 # ---------------------------------------------------------------------------
 
+_DRAIN_TIMEOUT = 30  # seconds for the upstream IRC drain() before giving up
+                     # (see anetbbs/core/session.py's WRITE_DRAIN_TIMEOUT_SECONDS
+                     # docstring for why an unbounded drain() can hang forever)
+
 _MIRC_COLOR_RE = re.compile(
     r'\x03(\d{1,2}(,\d{1,2})?)?|\x04[0-9a-fA-F]{6}|[\x02\x0f\x16\x1d\x1e\x1f]'
 )
@@ -136,8 +140,8 @@ class _IrcLeg:
             return
         try:
             self.writer.write((line + '\r\n').encode('utf-8', errors='replace'))
-            await self.writer.drain()
-        except (OSError, ConnectionError):
+            await asyncio.wait_for(self.writer.drain(), timeout=_DRAIN_TIMEOUT)
+        except (OSError, ConnectionError, asyncio.TimeoutError):
             self.connected = False
 
     async def say(self, text):

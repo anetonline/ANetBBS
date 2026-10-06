@@ -38,6 +38,9 @@ _MAX_HIST     = 200   # command-history entries -- see _chat_key()'s ENTER
 _PING_SECS    = 90
 _USERS_W      = 22   # right panel width including its borders
 _READ_TIMEOUT = 30   # seconds for IRC socket read before considering stale
+_DRAIN_TIMEOUT = 30  # seconds for IRC socket drain() before giving up (see
+                     # anetbbs/core/session.py's WRITE_DRAIN_TIMEOUT_SECONDS
+                     # docstring for why an unbounded drain() can hang forever)
 
 # ── ANSI helpers ───────────────────────────────────────────────────────────────
 
@@ -230,7 +233,7 @@ class _IRC:
         if self.writer and not self.writer.is_closing():
             try:
                 self.writer.write((line + "\r\n").encode('utf-8', errors='replace'))
-                await self.writer.drain()
+                await asyncio.wait_for(self.writer.drain(), timeout=_DRAIN_TIMEOUT)
             except Exception:
                 pass
 

@@ -136,6 +136,26 @@ class XBinFormatTests(unittest.TestCase):
         self.assertEqual(''.join(c['c'] for c in result['cells']), '****')
         self.assertTrue(all(c['fg'] == 0x07 and c['bg'] == 0x00 for c in result['cells']))
 
+    def test_oversized_declared_dimensions_are_refused(self):
+        """Real audit finding: width/height come straight from the
+        uploaded file's own header (each up to 65535, unsigned 16-bit)
+        with no cap, unlike every other grid-dimension entry point in
+        this file. A tiny crafted header declaring an enormous
+        width*height must be refused before the cell-padding loop ever
+        tries to build billions of dicts, not decoded."""
+        from anetbbs.web.ansi_editor import parse_xbin_to_grid
+        header = b'XBIN\x1a' + struct.pack('<HHBB', 60000, 60000, 16, 0)
+        with self.assertRaises(ValueError):
+            parse_xbin_to_grid(header)
+
+    def test_dimensions_at_the_editors_real_cap_still_work(self):
+        from anetbbs.web.ansi_editor import render_xbin, parse_xbin_to_grid
+        grid = _grid(132, 50, [_solid_cell()] * (132 * 50))
+        data = render_xbin(grid)
+        result = parse_xbin_to_grid(data)
+        self.assertEqual(result['width'], 132)
+        self.assertEqual(result['height'], 50)
+
 
 class PcboardFormatTests(unittest.TestCase):
     def test_emits_at_x_code_with_bg_then_fg_hex_nibbles(self):

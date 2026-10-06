@@ -1,11 +1,40 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.26`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.27`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.27 — Audit pass: dead-connection fix, hardening, doc corrections (October 2026)
+
+A follow-up audit pass covering everything changed since the last full
+review (v1.0.76). One dead-connection hang fix: a raw write-then-drain
+call in the stock menu-art renderer (used by Game Center, Door Games,
+the Chat menu, and a few sysop menus) wasn't going through the same
+backpressure-timeout protection every other session-output call site
+already has — a client that stopped reading could hang that session
+forever instead of being disconnected cleanly. Brought in line with
+the existing protection; the same fix also went into the Graffiti Wall
+and the terminal IRC client's own write path.
+
+Several smaller hardening fixes: tightened input handling on a couple
+of admin-only upload/install code paths (Add-ons installer, TheDraw
+font-pack installer), a stricter allowlist check on the Add-ons
+installer so it does exactly what its own documentation says, and a
+fix to the optional pre-login web page so it can no longer reflect
+request data back into the page unescaped. A few install/update script
+code-generation steps now pass values through as real environment
+variables instead of splicing them into generated source directly.
+
+Also: three stale documentation claims corrected (a "not yet released"
+status note on native uMRC support that's actually been live since
+v1.1.0; two Add-ons config settings described as empty that now ship
+with real working defaults; and a built-in theme count that hadn't
+been updated since a thirteenth theme was added). The Enhanced Client
+overlay's leftover internal "(TEST)" labeling was also removed now
+that it's a real shipped add-on.
 
 ## v1.1.26 — New web theme: Command Deck (October 2026)
 

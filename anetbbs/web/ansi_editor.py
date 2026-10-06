@@ -473,6 +473,17 @@ def parse_xbin_to_grid(data):
     if data[:5] != _XBIN_ID:
         raise ValueError('not an XBin file (bad magic)')
     width, height, _font_height, flags = struct.unpack('<HHBB', data[5:11])
+    # Real Low finding from a security/performance audit: width/height
+    # come straight from the uploaded file's own header (each up to
+    # 65535) with no cap, unlike every other grid-dimension entry point
+    # in this file (create()/import_ans()/save() all clamp to the same
+    # [20,132]x[5,50] bounds) -- an uploaded XBin declaring an enormous
+    # width*height could try to allocate billions of cell dicts below.
+    # Same clamp applied consistently rather than judged case by case.
+    if width > 132 or height > 50:
+        raise ValueError(
+            f'XBin dimensions {width}x{height} exceed the editor\'s '
+            f'supported size (max 132x50)')
     pos = 11
     has_palette = bool(flags & 0x01)
     has_font = bool(flags & 0x02)
@@ -980,6 +991,7 @@ def install_fonts():
     import zipfile
 
     from ._addon_download import DownloadError, download_zip_to_tempfile
+    from ..echomail.zip_safety import ZipBombError, MAX_MEMBER_UNCOMPRESSED
 
     try:
         tmp_path = download_zip_to_tempfile(pack_url, user_agent='ANetBBS/ansi_editor')
@@ -1007,10 +1019,20 @@ def install_fonts():
                 dest = os.path.realpath(os.path.join(fonts_dir, name))
                 if dest != root and not dest.startswith(root + os.sep):
                     continue
+                # Zip-bomb guard: a .tdf font pack should be tiny, but
+                # nothing enforced that before reading -- check the
+                # declared uncompressed size (free) before ever
+                # decompressing, same cap/discipline as
+                # zip_safety.iter_safe_members().
+                if info.file_size > MAX_MEMBER_UNCOMPRESSED:
+                    raise ZipBombError(
+                        f'{info.filename!r} declares {info.file_size} bytes '
+                        f'uncompressed (cap {MAX_MEMBER_UNCOMPRESSED}) -- '
+                        'refusing to extract')
                 with z.open(info) as src, open(dest, 'wb') as out:
                     out.write(src.read())
                 installed += 1
-    except (zipfile.BadZipFile, ValueError, OSError) as exc:
+    except (zipfile.BadZipFile, ZipBombError, ValueError, OSError) as exc:
         return jsonify({'error': f'install failed: {exc}'}), 500
     finally:
         try:

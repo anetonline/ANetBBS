@@ -14,10 +14,13 @@ downloads and extracts it on click.
 
 ## Enhanced Client
 
-Set `ENHANCED_CLIENT_ADDON_URL` to a direct-download URL for
-`ANetBBS-EnhancedClient-addon-<version>.tar.gz` (see
+`ENHANCED_CLIENT_ADDON_URL` already defaults to a direct-download URL
+for `ANetBBS-EnhancedClient-addon-<version>.tar.gz` on the upstream
+repo's own `addons` Release (see
 [37 — Enhanced Client](37-enhanced-client.md) for what's in that
-archive and how it's built). Installing writes the archive's files to
+archive and how it's built), so a stock install's button works with no
+configuration -- override it to point at a different version or a
+self-hosted mirror if needed. Installing writes the archive's files to
 their real paths under the install root -- only paths matching a fixed
 allowlist kept in sync with `tools/build_enhanced_client_addon.sh`'s
 own file manifest; anything else in the archive is skipped and never
@@ -32,9 +35,10 @@ running won't pick up a just-added file. You still need to set
 
 ## TheDraw Font Pack
 
-Set `TDF_FONTS_PACK_URL` the same way (see
-[36 — Web ANSI Editor](36-ansi-editor.md) for details) and install from
-here or from the editor's own font picker panel -- both trigger the
+`TDF_FONTS_PACK_URL` is the same kind of setting (see
+[36 — Web ANSI Editor](36-ansi-editor.md) for details) and also
+defaults to a real public Release asset out of the box -- install from
+here or from the editor's own font picker panel, both trigger the
 exact same download-and-extract. No restart needed: the font picker
 scans `TDF_FONTS_DIR` fresh on every request.
 

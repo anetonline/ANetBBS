@@ -46,6 +46,33 @@ def _build_zip(entries):
     return buf.getvalue()
 
 
+def _build_bomb_zip(member_name, declared_size):
+    """A real zip bomb: all-zero payload compresses extremely well, so
+    a tiny archive can declare a huge uncompressed size -- same pattern
+    as tests/test_qwk_rep_zip_bomb.py."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr(member_name, b'\x00' * declared_size, compresslevel=9)
+    return buf.getvalue()
+
+
+def _build_bomb_targz(member_name, declared_size):
+    """Same idea for tar.gz -- a sparse-ish all-zero member compresses
+    to almost nothing under gzip, but its TarInfo.size still declares
+    the full uncompressed size up front. member_name must be one of
+    enhanced_client's own real allowed_prefixes so this test isolates
+    the zip-bomb cap specifically -- a path outside the allowlist would
+    get skipped (and then fail as "no matching files") for an unrelated
+    reason, masking whether the bomb cap itself did anything."""
+    topdir = 'ANetBBS-EnhancedClient-addon-9.9.9'
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w:gz') as t:
+        info = tarfile.TarInfo(name=f'{topdir}/{member_name}')
+        info.size = declared_size
+        t.addfile(info, io.BytesIO(b'\x00' * declared_size))
+    return buf.getvalue()
+
+
 def _build_targz(entries):
     """entries: {tar-internal-path: raw bytes} -- paths are expected to
     already include a shared top-level directory, same shape
@@ -251,6 +278,74 @@ class AddonsInstallTests(unittest.TestCase):
 
         fonts_dir = self.app.config['TDF_FONTS_DIR']
         self.assertEqual(sorted(os.listdir(fonts_dir)), ['FLAT.TDF', 'NESTED.TDF'])
+
+    def test_allowlist_does_not_match_a_sibling_file_by_bare_prefix(self):
+        """A real audit finding: an exact-file allowlist entry (no
+        trailing '/') was checked with a bare startswith(), which also
+        matches a similarly-named sibling like
+        'enhanced_server.py.evil' -- real containment (the realpath
+        check) still prevented actual traversal, but the allowlist
+        itself should mean what its own docstring says: an exact file
+        path, or a directory prefix ending in '/'."""
+        topdir = 'ANetBBS-EnhancedClient-addon-9.9.9'
+        archive = _build_targz({
+            f'{topdir}/anetbbs/core/enhanced_server.py': b'# real file',
+            f'{topdir}/anetbbs/core/enhanced_server.py.evil': b'# sibling, not allowlisted',
+        })
+        server = _TestServer({'/pack.tar.gz': (200, 'application/gzip', archive)})
+        self.addCleanup(server.stop)
+        self.app.config['ENHANCED_CLIENT_ADDON_URL'] = server.url('/pack.tar.gz')
+
+        client = self._admin_client()
+        resp = client.post('/admin/addons/enhanced_client/install')
+        data = json.loads(resp.data)
+        self.assertEqual(data['installed'], 1)
+        self.assertEqual(data['skipped'], 1)
+
+        root = self._tmp.name
+        self.assertTrue(os.path.exists(
+            os.path.join(root, 'anetbbs', 'core', 'enhanced_server.py')))
+        self.assertFalse(os.path.exists(
+            os.path.join(root, 'anetbbs', 'core', 'enhanced_server.py.evil')))
+
+    def test_tdf_fonts_zip_bomb_is_refused_before_decompression(self):
+        """A real audit finding: _iter_archive_entries()'s zip branch
+        read every member via z.read(info) with no check on the
+        declared uncompressed size. A tiny, highly-compressed .zip
+        could expand to hundreds of MB in memory the instant it's
+        read. Must now be refused as a clean 500, not decompressed."""
+        from anetbbs.echomail.zip_safety import MAX_MEMBER_UNCOMPRESSED
+
+        bomb = _build_bomb_zip('tdf-fonts/BOMB.TDF', MAX_MEMBER_UNCOMPRESSED + 1024)
+        self.assertLess(len(bomb), 200 * 1024,
+                        'the archive itself must stay tiny -- proves the '
+                        'check fires from the declared-size header, not '
+                        'after actually decompressing')
+        server = _TestServer({'/pack.zip': (200, 'application/zip', bomb)})
+        self.addCleanup(server.stop)
+        self.app.config['TDF_FONTS_PACK_URL'] = server.url('/pack.zip')
+
+        client = self._admin_client()
+        resp = client.post('/admin/addons/tdf_fonts/install')
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn('error', json.loads(resp.data))
+
+    def test_enhanced_client_targz_bomb_is_refused_before_decompression(self):
+        """Same zip-bomb class, tar.gz branch (enhanced_client's real
+        archive format) -- must also be refused before extractfile()
+        decompresses the member."""
+        from anetbbs.echomail.zip_safety import MAX_MEMBER_UNCOMPRESSED
+
+        bomb = _build_bomb_targz('anetbbs/core/enhanced_server.py',
+                                 MAX_MEMBER_UNCOMPRESSED + 1024)
+        server = _TestServer({'/pack.tar.gz': (200, 'application/gzip', bomb)})
+        self.addCleanup(server.stop)
+        self.app.config['ENHANCED_CLIENT_ADDON_URL'] = server.url('/pack.tar.gz')
+
+        client = self._admin_client()
+        resp = client.post('/admin/addons/enhanced_client/install')
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn('error', json.loads(resp.data))
 
     def test_unreachable_url_is_a_clean_502(self):
         self.app.config['ENHANCED_CLIENT_ADDON_URL'] = 'http://127.0.0.1:1/pack.tar.gz'

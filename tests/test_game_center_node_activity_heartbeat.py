@@ -74,6 +74,12 @@ class _FakeSession:
     async def write(self, text):
         self.written.append(text)
 
+    async def _drain_protected(self):
+        """Matches the real BBSSession's own _drain_protected() --
+        write_menu_art() and sibling raw-write call sites use this
+        instead of a bare session.writer.drain()."""
+        await self.writer.drain()
+
     async def clear_screen(self):
         await self.write('\x1b[2J\x1b[H\x1b[0m')
 

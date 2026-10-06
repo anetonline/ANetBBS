@@ -51,7 +51,10 @@ a fresh install) is where the editor looks for `.tdf` font files.
 **One-click install**: the font picker panel shows a **Download &
 Install Fonts** button whenever it comes back empty. Clicking it hits
 `POST /admin/ansi/fonts/install`, which downloads a zip from
-`TDF_FONTS_PACK_URL` (env var, empty by default) and extracts every
+`TDF_FONTS_PACK_URL` (env var, defaults to the real public font-pack
+asset on the upstream repo's own `addons` release, so this works out
+of the box on a stock install -- still overridable to a private
+mirror or self-hosted pack) and extracts every
 `.TDF` file it finds — flattened into `TDF_FONTS_DIR` directly,
 regardless of whatever folder structure the zip itself used (so a zip
 shaped like ANetDRAW's own real pack — a flat top level plus a `SETS/`
@@ -67,10 +70,13 @@ release tarball — same reasoning as `tools/download_jsdos.sh` fetching
 the ~5MB js-dos runtime from a CDN at use time rather than committing
 it to git: a ~29MB binary font pack doesn't belong in a source
 checkout every sysop pulls down regardless of whether they use this
-feature. Set `TDF_FONTS_PACK_URL` to a direct-download URL (a GitHub
-Release asset works well, same as js-dos's own CDN link — a plain
-HTTPS GET, no auth needed for a public asset) before the button will
-do anything; it says so plainly if the setting is still empty.
+feature. `TDF_FONTS_PACK_URL` already points at a public GitHub
+Release asset by default (a plain HTTPS GET, no auth needed), so a
+stock install's button works immediately with no configuration;
+override it to point at a private mirror or self-hosted pack instead
+if you'd rather not depend on the upstream repo's release. If the
+setting is ever cleared to empty, the install response says so
+plainly.
 
 `TDF_FONTS_DIR` can still be pointed at a font pack dropped in by hand,
 or an existing Synchronet/ANetDRAW install's own font directory,

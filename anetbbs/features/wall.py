@@ -300,7 +300,7 @@ async def show_wall(session, allow_post: bool = True) -> None:
             for post in posts:
                 session.writer.write(_render_post(post, is_admin, user_c, W, ascii_mode))
         session.writer.write(_footer(is_admin, has_older, has_newer, border, key_c, W, ascii_mode))
-        await session.writer.drain()
+        await session._drain_protected()
 
         prompt = f'{_WH}Wall>{_RST} '
         choice = (await session.read_line(prompt) or '').strip().lower()
@@ -318,7 +318,7 @@ async def show_wall(session, allow_post: bool = True) -> None:
 
     try:
         session.writer.write(b'\x1b[0m')
-        await session.writer.drain()
+        await session._drain_protected()
     except Exception:
         pass
 
@@ -348,12 +348,12 @@ async def _post_to_wall(session, border: str, key_c: str,
             f'{_BOLD}{border}╚{wbar}╝{_RST}\r\n'
             f'{_DIM}Max 2 lines x {W} chars. Leave blank to cancel.{_RST}\r\n\r\n'
         ))
-    await session.writer.drain()
+    await session._drain_protected()
 
     raw1 = (await session.read_line(f'{key_c}Line 1:{_RST} ') or '').rstrip('\r\n')
     if not raw1.strip():
         session.writer.write(_enc(f'{_DIM}Cancelled.{_RST}\r\n'))
-        await session.writer.drain()
+        await session._drain_protected()
         await asyncio.sleep(0.8)
         return
 
@@ -381,7 +381,7 @@ async def _post_to_wall(session, border: str, key_c: str,
             pass  # best-effort -- never break local posting on a sync failure
 
     session.writer.write(_enc(f'\r\n{_GR}Posted!{_RST}\r\n'))
-    await session.writer.drain()
+    await session._drain_protected()
     await asyncio.sleep(0.8)
 
 
@@ -402,5 +402,5 @@ async def _admin_delete(session) -> None:
             session.writer.write(_enc(f'{_RD}Post #{post_id} deleted.{_RST}\r\n'))
         else:
             session.writer.write(_enc(f'{_DIM}Post not found.{_RST}\r\n'))
-        await session.writer.drain()
+        await session._drain_protected()
     await asyncio.sleep(0.8)

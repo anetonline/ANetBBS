@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ANetBBS Enhanced Client (TEST)</title>
+<title>ANetBBS Enhanced Client</title>
 <style>
   /* Flexi IBM VGA (the "False"/square-pixel, unmarked/extended-
      charset variant) -- a real scalable TrueType IBM VGA face from
@@ -133,7 +133,7 @@
 </style>
 </head>
 <body>
-<div id="status">ANetBBS Enhanced Client -- TEST VERSION -- connecting...</div>
+<div id="status">ANetBBS Enhanced Client -- connecting...</div>
 <div id="wrap"><canvas id="term" width="960" height="600"></canvas></div>
 <div id="menu">
   <h1 id="menu-title"></h1>
@@ -145,10 +145,9 @@
   'use strict';
 
   // Bumped by hand on every client-side change -- lets a screenshot
-  // instantly confirm whether a fix is actually deployed/loaded (not
-  // served from a stale browser cache) instead of guessing from
-  // visual comparison alone. TEST VERSION ONLY; not meant to survive
-  // past this testing phase.
+  // (or a sysop's bug report) instantly confirm whether a fix is
+  // actually deployed/loaded (not served from a stale browser cache)
+  // instead of guessing from visual comparison alone.
   var CLIENT_BUILD = 'build-7-no-clip';
 
   // 18x32 = a clean 2x multiple of the IBM VGA font's native 9x16
@@ -397,7 +396,7 @@
   }
 
   ws.addEventListener('open', function () {
-    statusEl.textContent = 'ANetBBS Enhanced Client -- TEST VERSION (' + CLIENT_BUILD + ') -- connected';
+    statusEl.textContent = 'ANetBBS Enhanced Client (' + CLIENT_BUILD + ') -- connected';
     // Pass the server's bot-defense gate (real users press a key before
     // the login screen appears) -- see session.py's _bot_gate().
     send({ type: 'key', ch: ' ' });

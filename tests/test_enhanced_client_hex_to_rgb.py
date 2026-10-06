@@ -63,5 +63,18 @@ class HexToRgbTests(unittest.TestCase):
         self.assertEqual(self._call('#ffffff'), [255, 255, 255])
 
 
+class EnhancedClientNotLabeledTestVersionTests(unittest.TestCase):
+    """Real audit finding: the Enhanced Client overlay carried a
+    leftover "(TEST)"/"TEST VERSION" label in its title, status line,
+    and connected-message text from its original internal testing
+    phase -- stale now that it's a real shipped, publicly-downloadable
+    add-on (see docs/37-enhanced-client.md and Admin -> Add-ons)."""
+
+    def test_no_test_labeling_remains_in_shipped_markup(self):
+        html = CLIENT_HTML.read_text()
+        self.assertNotIn('(TEST)', html)
+        self.assertNotIn('TEST VERSION', html)
+
+
 if __name__ == '__main__':
     unittest.main()

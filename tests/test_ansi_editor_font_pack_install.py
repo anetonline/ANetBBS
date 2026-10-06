@@ -214,6 +214,33 @@ class AnsiEditorFontPackInstallTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 500)
         self.assertIn('error', json.loads(resp.data))
 
+    def test_zip_bomb_is_refused_before_decompression(self):
+        """A real audit finding: install_fonts() read each .tdf member
+        via src.read() with no check on its declared uncompressed
+        size. A tiny, highly-compressed .zip could expand to hundreds
+        of MB in memory the instant it's read -- must now be refused
+        as a clean 500, not decompressed."""
+        from anetbbs.echomail.zip_safety import MAX_MEMBER_UNCOMPRESSED
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+            z.writestr('tdf-fonts/BOMB.TDF',
+                       b'\x00' * (MAX_MEMBER_UNCOMPRESSED + 1024),
+                       compresslevel=9)
+        bomb = buf.getvalue()
+        self.assertLess(len(bomb), 200 * 1024,
+                        'the archive itself must stay tiny -- proves the '
+                        'check fires from the declared-size header, not '
+                        'after actually decompressing')
+        server = _TestServer({'/pack.zip': (200, 'application/zip', bomb)})
+        self.addCleanup(server.stop)
+        self.app.config['TDF_FONTS_PACK_URL'] = server.url('/pack.zip')
+
+        client = self._admin_client()
+        resp = client.post('/admin/ansi/fonts/install')
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn('error', json.loads(resp.data))
+
     def test_zip_with_no_tdf_files_is_a_clean_500(self):
         zip_bytes = _build_zip({'tdf-fonts/README.txt': b'nothing but this'})
         server = _TestServer({'/pack.zip': (200, 'application/zip', zip_bytes)})

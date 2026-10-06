@@ -186,5 +186,5 @@ async def write_menu_art(session, slot: str) -> bool:
         session.writer.write(b'\x1b[2J\x1b[H' + body.encode('latin-1'))
     except Exception:
         session.writer.write(b'\x1b[2J\x1b[H' + ansi)
-    await session.writer.drain()
+    await session._drain_protected()
     return True

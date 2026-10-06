@@ -1845,25 +1845,37 @@ if [[ -f "$NGINX_AVAIL" ]]; then
     # Without it, static files fall through to Flask — still works but slower.
     if ! grep -q 'location /static/' "$NGINX_AVAIL" 2>/dev/null; then
         info "Adding /static/ location to nginx config (missing from old install)..."
-        STATIC_BLOCK="
-    # Static files served directly by nginx for performance.
-    location /static/ {
-        alias ${INSTALL_DIR}/anetbbs/static/;
-        add_header Cache-Control \"public, max-age=86400\";
-    }"
-        # Insert before the last closing brace in the last server{} block
-        python3 -c "
-import re, sys
-txt = open('$NGINX_AVAIL').read()
-# Insert before final closing brace
+        # Real gap found in a security/performance audit: INSTALL_DIR
+        # used to be spliced unescaped into this python3 -c's own
+        # triple-quoted string literal (via bash interpolation into
+        # STATIC_BLOCK first) -- same bug class already fixed above
+        # for DATABASE_URL/SECRET_KEY (see that comment for the full
+        # reasoning). A sysop-supplied --install-dir containing a
+        # single quote or a literal ''' sequence could break out of
+        # the string or inject Python. Fixed the same way: INSTALL_DIR
+        # travels in as a real environment variable, read back via
+        # os.environ, with the heredoc delimiter quoted so bash does
+        # no expansion inside it at all.
+        NGINX_AVAIL="$NGINX_AVAIL" INSTALL_DIR="$INSTALL_DIR" python3 << 'STATICPYEOF' 2>/dev/null && \
+            { NGINX_CHANGED=true; ok "nginx: /static/ location added"; } || \
+        warn "nginx: could not auto-add /static/ location — add it manually from deploy/anetbbs-nginx.conf.template"
+import os
+nginx_avail = os.environ['NGINX_AVAIL']
+install_dir = os.environ['INSTALL_DIR']
+static_block = (
+    "\n    # Static files served directly by nginx for performance.\n"
+    "    location /static/ {\n"
+    f"        alias {install_dir}/anetbbs/static/;\n"
+    "        add_header Cache-Control \"public, max-age=86400\";\n"
+    "    }"
+)
+txt = open(nginx_avail).read()
 idx = txt.rfind('}')
 if idx != -1:
-    txt = txt[:idx] + '''$STATIC_BLOCK
-}'''
-    open('$NGINX_AVAIL', 'w').write(txt)
+    txt = txt[:idx] + static_block + "\n}"
+    open(nginx_avail, 'w').write(txt)
     print('inserted')
-" 2>/dev/null && { NGINX_CHANGED=true; ok "nginx: /static/ location added"; } || \
-        warn "nginx: could not auto-add /static/ location — add it manually from deploy/anetbbs-nginx.conf.template"
+STATICPYEOF
     fi
 
     # Fix: Add /mrcws and /mrc-auth-check locations if entirely absent.
@@ -1880,39 +1892,50 @@ if idx != -1:
         REAL_WEB_PORT="${REAL_WEB_PORT:-5000}"
         REAL_MRC_PORT="${REAL_MRC_PORT:-$(grep -E '^MRC_BRIDGE_PORT=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')}"
         REAL_MRC_PORT="${REAL_MRC_PORT:-8080}"
-        MRC_BLOCK="
-    location = /mrc-auth-check {
-        internal;
-        proxy_pass http://127.0.0.1:${REAL_WEB_PORT}/mrc/auth-check;
-        proxy_pass_request_body off;
-        proxy_set_header Content-Length \"\";
-        proxy_set_header X-Original-URI \$request_uri;
-        proxy_set_header Cookie \$http_cookie;
-    }
-
-    location /mrcws {
-        auth_request /mrc-auth-check;
-        proxy_pass         http://127.0.0.1:${REAL_MRC_PORT}/ws;
-        proxy_http_version 1.1;
-        proxy_set_header   Host              \$host;
-        proxy_set_header   X-Real-IP         \$remote_addr;
-        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto \$scheme;
-        proxy_set_header   Upgrade    \$http_upgrade;
-        proxy_set_header   Connection \"upgrade\";
-        proxy_read_timeout 86400s;
-    }"
-        python3 -c "
-import sys
-txt = open('$NGINX_AVAIL').read()
+        # Same fix as the /static/ block above: REAL_WEB_PORT/
+        # REAL_MRC_PORT travel in as real environment variables rather
+        # than being spliced into the python3 -c triple-quoted string
+        # literal -- these come from .env so are lower-risk in
+        # practice, but the same discipline applies everywhere this
+        # pattern occurs rather than being judged case by case.
+        NGINX_AVAIL="$NGINX_AVAIL" REAL_WEB_PORT="$REAL_WEB_PORT" REAL_MRC_PORT="$REAL_MRC_PORT" \
+            python3 << 'MRCWSPYEOF' 2>/dev/null && \
+            { NGINX_CHANGED=true; ok "nginx: /mrcws location added"; } || \
+        warn "nginx: could not auto-add /mrcws location — add it manually from deploy/anetbbs-nginx.conf.template"
+import os
+nginx_avail = os.environ['NGINX_AVAIL']
+real_web_port = os.environ['REAL_WEB_PORT']
+real_mrc_port = os.environ['REAL_MRC_PORT']
+mrc_block = (
+    "\n    location = /mrc-auth-check {\n"
+    "        internal;\n"
+    f"        proxy_pass http://127.0.0.1:{real_web_port}/mrc/auth-check;\n"
+    "        proxy_pass_request_body off;\n"
+    "        proxy_set_header Content-Length \"\";\n"
+    "        proxy_set_header X-Original-URI $request_uri;\n"
+    "        proxy_set_header Cookie $http_cookie;\n"
+    "    }\n"
+    "\n"
+    "    location /mrcws {\n"
+    "        auth_request /mrc-auth-check;\n"
+    f"        proxy_pass         http://127.0.0.1:{real_mrc_port}/ws;\n"
+    "        proxy_http_version 1.1;\n"
+    "        proxy_set_header   Host              $host;\n"
+    "        proxy_set_header   X-Real-IP         $remote_addr;\n"
+    "        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;\n"
+    "        proxy_set_header   X-Forwarded-Proto $scheme;\n"
+    "        proxy_set_header   Upgrade    $http_upgrade;\n"
+    "        proxy_set_header   Connection \"upgrade\";\n"
+    "        proxy_read_timeout 86400s;\n"
+    "    }"
+)
+txt = open(nginx_avail).read()
 idx = txt.rfind('}')
 if idx != -1:
-    txt = txt[:idx] + '''$MRC_BLOCK
-}'''
-    open('$NGINX_AVAIL', 'w').write(txt)
+    txt = txt[:idx] + mrc_block + "\n}"
+    open(nginx_avail, 'w').write(txt)
     print('inserted')
-" 2>/dev/null && { NGINX_CHANGED=true; ok "nginx: /mrcws location added"; } || \
-        warn "nginx: could not auto-add /mrcws location — add it manually from deploy/anetbbs-nginx.conf.template"
+MRCWSPYEOF
     fi
 
     # Fix: /mrcws and /socket.io/ set their OWN proxy_set_header lines
@@ -1932,27 +1955,34 @@ if idx != -1:
     for NGINX_WS_LOC in "/mrcws" "/socket.io/"; do
         NGINX_WS_LOC_ESCAPED="$(printf '%s' "$NGINX_WS_LOC" | sed 's/[.[\*^$/]/\\&/g')"
         if grep -q "location ${NGINX_WS_LOC_ESCAPED} {" "$NGINX_AVAIL" 2>/dev/null; then
-            python3 -c "
-import re
-loc = '''$NGINX_WS_LOC'''
-path = '$NGINX_AVAIL'
+            # Same fix as the two blocks above: loop values here are
+            # fixed literals today, but pass through real environment
+            # variables anyway rather than bash-splicing into the
+            # python3 -c string, matching this file's own standing
+            # discipline for this bug class rather than judging each
+            # site's current exploitability case by case.
+            if NGINX_AVAIL="$NGINX_AVAIL" NGINX_WS_LOC="$NGINX_WS_LOC" python3 << 'WSHDRPYEOF' 2>/dev/null | grep -q patched
+import os, re
+loc = os.environ['NGINX_WS_LOC']
+path = os.environ['NGINX_AVAIL']
 txt = open(path).read()
 pat = re.compile(r'(location ' + re.escape(loc) + r' \{)(.*?)(\n    \})', re.DOTALL)
 m = pat.search(txt)
 if m and 'X-Forwarded-For' not in m.group(2):
-    insert = ('\n        proxy_set_header   Host              \$host;'
-              '\n        proxy_set_header   X-Real-IP         \$remote_addr;'
-              '\n        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;'
-              '\n        proxy_set_header   X-Forwarded-Proto \$scheme;')
+    insert = ('\n        proxy_set_header   Host              $host;'
+              '\n        proxy_set_header   X-Real-IP         $remote_addr;'
+              '\n        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;'
+              '\n        proxy_set_header   X-Forwarded-Proto $scheme;')
     new_body = m.group(2) + insert
     txt = txt[:m.start()] + m.group(1) + new_body + m.group(3) + txt[m.end():]
     open(path, 'w').write(txt)
     print('patched')
-" 2>/dev/null | grep -q patched && {
+WSHDRPYEOF
+            then
                 info "Patching nginx: $NGINX_WS_LOC missing X-Forwarded-For (web caller IPs were silently dropped)"
                 NGINX_CHANGED=true
                 ok "nginx: $NGINX_WS_LOC forwarded-headers fixed"
-            }
+            fi
         fi
     done
 

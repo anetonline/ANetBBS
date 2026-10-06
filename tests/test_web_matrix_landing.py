@@ -94,6 +94,32 @@ class WebMatrixLandingTests(unittest.TestCase):
         second = client.get('/')
         self.assertNotIn(b'Connect in the Browser', second.data)
 
+    def test_host_header_is_escaped_not_reflected_raw(self):
+        """BBS_DOMAIN unset falls back to the request's own Host header
+        for the "connect directly" hint -- an attacker-supplied Host
+        header must come back HTML-escaped, not injected raw into the
+        page (a real audit finding: unescaped reflection into
+        `<code>{connect_host}</code>`).
+
+        Calls render_stock_web_matrix() directly with a fake request
+        object rather than going through a real HTTP request -- current
+        Werkzeug already rejects a Host header containing '<'/'>' at
+        the WSGI layer (its own, separate hardening), which would mask
+        whether *this* code's own escaping is doing its job."""
+        self.app.config['WEB_MATRIX_ENABLED'] = True
+        self.app.config['BBS_DOMAIN'] = ''
+        from anetbbs.web.matrix_landing import render_stock_web_matrix
+        from unittest.mock import MagicMock
+
+        fake_request = MagicMock()
+        fake_request.cookies.get.return_value = None
+        fake_request.args.get.return_value = None
+        fake_request.host = '<script>alert(1)</script>:8080'
+        with self.app.test_request_context('/'):
+            html = render_stock_web_matrix(fake_request)
+        self.assertNotIn('<script>alert(1)</script>', html)
+        self.assertIn('&lt;script&gt;', html)
+
     def test_mod_override_wins_over_toggle_when_both_present(self):
         with tempfile.TemporaryDirectory() as tmp:
             mods_core = Path(tmp) / 'mods' / 'core'

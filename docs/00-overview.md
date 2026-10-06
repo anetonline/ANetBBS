@@ -59,7 +59,7 @@ once.
   IRC bridge, MRC bridge for inter-BBS chat, in-page shoutbox.
 - **Real-time sysop control panel** — service start/stop/restart
   from the web, NodeSpy showing what every terminal user is doing.
-- **Themes** — pick from 12 built-in or sysop builds custom.
+- **Themes** — pick from 13 built-in or sysop builds custom.
 - **Customizable everything** — every menu, hotkey, ANSI screen,
   external program, board category is data-driven, and the
   `data/mods/` tree covers what isn't (bundled door scripts, a

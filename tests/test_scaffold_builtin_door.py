@@ -61,6 +61,7 @@ class ScaffoldBuiltinDoorTests(unittest.TestCase):
         for p in self._generated_files:
             if p.exists():
                 p.unlink()
+        Path('/tmp/pwned').unlink(missing_ok=True)
         self.ctx.pop()
 
     def _run(self, *cli_args):
@@ -105,6 +106,30 @@ class ScaffoldBuiltinDoorTests(unittest.TestCase):
         self.assertFalse((FEATURES_DIR / 'Not A Valid Slug!.py').exists())
         from anetbbs.models import Game
         self.assertIsNone(Game.query.filter_by(name='Bad Slug Door').first())
+
+    def test_title_with_triple_quote_and_backslash_produces_valid_python(self):
+        """A real audit finding: args.title used to be spliced directly
+        into the generated module's raw docstring/string-literal
+        source. A title containing '\"\"\"' (ending the docstring
+        early) or a backslash could produce invalid or differently-
+        parsed Python. Must now produce an importable module no matter
+        what the title contains, and the title text must still show up
+        intact (as real escaped data) in the write() banner."""
+        tricky_title = 'Evil"""; import os; os.system("touch /tmp/pwned"); x = """Door\\'
+        rc = self._run('scafftest3', tricky_title)
+        self.assertEqual(rc, 0)
+
+        module_file = FEATURES_DIR / 'scafftest3.py'
+        self.assertTrue(module_file.exists())
+
+        mod = importlib.import_module('anetbbs.features.scafftest3')
+        self.assertTrue(hasattr(mod, 'launch_scafftest3'))
+        self.assertFalse(Path('/tmp/pwned').exists(),
+                         'the injected os.system() call must never run')
+
+        import inspect as _inspect
+        src = _inspect.getsource(mod)
+        self.assertIn(tricky_title, src)
 
     def test_duplicate_slug_refused_not_overwritten(self):
         rc1 = self._run('scafftest2', 'First Version')
