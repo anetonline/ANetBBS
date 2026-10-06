@@ -1816,12 +1816,24 @@ if [[ -f "$NGINX_AVAIL" ]]; then
     # .env (which install.sh already writes correctly) and patch nginx
     # to match, so an install that's carrying this bug self-heals here
     # without needing a fresh reinstall.
-    REAL_MRC_PORT="$(grep -E '^MRC_BRIDGE_PORT=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')"
+    # A trailing `|| true` on each of these two: under `set -e
+    # -o pipefail`, a VAR="$(pipeline)" assignment whose pipeline's
+    # LAST stage legitimately finds no match (e.g. no MRC_BRIDGE_PORT=
+    # line yet, or no existing "127.0.0.1:PORT/ws;" at all -- precisely
+    # the case where /mrcws doesn't exist in this config yet) aborts
+    # the entire script right here with no error message at all. A
+    # real, pre-existing gap found auditing this exact failure mode
+    # (confirmed empirically: `set -euo pipefail; X="$(grep -oE foo
+    # <<<bar | grep -oE foo)"` exits 1 before ever reaching the next
+    # line) -- both vars are already guarded by `[[ -n "$VAR" ...]]`
+    # below, so an empty value from `|| true` is handled correctly,
+    # not silently wrong.
+    REAL_MRC_PORT="$(grep -E '^MRC_BRIDGE_PORT=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')" || true
     # Extract just the port digits after the colon immediately before
     # /ws -- grep -oE '[0-9]+' alone would match "127" from the IP's
     # own octets first, since head -1 takes whichever numeric group
     # comes first in the string, not the actual port.
-    CURRENT_MRC_PORT="$(grep -oE '127\.0\.0\.1:[0-9]+/ws;' "$NGINX_AVAIL" 2>/dev/null | head -1 | grep -oE ':[0-9]+/ws;' | grep -oE '[0-9]+')"
+    CURRENT_MRC_PORT="$(grep -oE '127\.0\.0\.1:[0-9]+/ws;' "$NGINX_AVAIL" 2>/dev/null | head -1 | grep -oE ':[0-9]+/ws;' | grep -oE '[0-9]+')" || true
     if [[ -n "$REAL_MRC_PORT" && -n "$CURRENT_MRC_PORT" && "$CURRENT_MRC_PORT" != "$REAL_MRC_PORT" ]]; then
         info "Patching nginx: MRC bridge proxy port $CURRENT_MRC_PORT → $REAL_MRC_PORT (matching the bridge's actual listen port)"
         sed -i "s|127.0.0.1:${CURRENT_MRC_PORT}/ws;|127.0.0.1:${REAL_MRC_PORT}/ws;|g" "$NGINX_AVAIL"
@@ -1856,9 +1868,19 @@ if [[ -f "$NGINX_AVAIL" ]]; then
         # travels in as a real environment variable, read back via
         # os.environ, with the heredoc delimiter quoted so bash does
         # no expansion inside it at all.
-        NGINX_AVAIL="$NGINX_AVAIL" INSTALL_DIR="$INSTALL_DIR" python3 << 'STATICPYEOF' 2>/dev/null && \
-            { NGINX_CHANGED=true; ok "nginx: /static/ location added"; } || \
-        warn "nginx: could not auto-add /static/ location — add it manually from deploy/anetbbs-nginx.conf.template"
+        # The heredoc opener ends in `; then` on its own line, matching
+        # this file's own established safe pattern (see the DATABASE_URL/
+        # SECRET_KEY migration blocks above) -- NOT `<<'EOF' ... && \`
+        # with the success/failure handling backslash-continued onto
+        # later lines. That chained form is a real, confirmed-live bug:
+        # it parsed fine and worked under this sandbox's bash, but a
+        # production server's bash hit "syntax error near unexpected
+        # token `fi'" at this exact block, aborting update.sh mid-run
+        # (after services were already stopped) on 2026-10-06. Heredocs
+        # combined with a trailing &&/|| line-continuation on the same
+        # statement is a known bash-version-sensitive edge case; the
+        # `; then ... else ... fi` form avoids it entirely.
+        if NGINX_AVAIL="$NGINX_AVAIL" INSTALL_DIR="$INSTALL_DIR" python3 << 'STATICPYEOF' 2>/dev/null; then
 import os
 nginx_avail = os.environ['NGINX_AVAIL']
 install_dir = os.environ['INSTALL_DIR']
@@ -1876,6 +1898,11 @@ if idx != -1:
     open(nginx_avail, 'w').write(txt)
     print('inserted')
 STATICPYEOF
+            NGINX_CHANGED=true
+            ok "nginx: /static/ location added"
+        else
+            warn "nginx: could not auto-add /static/ location — add it manually from deploy/anetbbs-nginx.conf.template"
+        fi
     fi
 
     # Fix: Add /mrcws and /mrc-auth-check locations if entirely absent.
@@ -1898,10 +1925,11 @@ STATICPYEOF
         # literal -- these come from .env so are lower-risk in
         # practice, but the same discipline applies everywhere this
         # pattern occurs rather than being judged case by case.
-        NGINX_AVAIL="$NGINX_AVAIL" REAL_WEB_PORT="$REAL_WEB_PORT" REAL_MRC_PORT="$REAL_MRC_PORT" \
-            python3 << 'MRCWSPYEOF' 2>/dev/null && \
-            { NGINX_CHANGED=true; ok "nginx: /mrcws location added"; } || \
-        warn "nginx: could not auto-add /mrcws location — add it manually from deploy/anetbbs-nginx.conf.template"
+        # Same `; then ... else ... fi` form as the /static/ block above
+        # -- see its comment for why the chained `&& \ ... || \` form is
+        # a confirmed-live bug, not just a style preference.
+        if NGINX_AVAIL="$NGINX_AVAIL" REAL_WEB_PORT="$REAL_WEB_PORT" REAL_MRC_PORT="$REAL_MRC_PORT" \
+            python3 << 'MRCWSPYEOF' 2>/dev/null; then
 import os
 nginx_avail = os.environ['NGINX_AVAIL']
 real_web_port = os.environ['REAL_WEB_PORT']
@@ -1936,6 +1964,11 @@ if idx != -1:
     open(nginx_avail, 'w').write(txt)
     print('inserted')
 MRCWSPYEOF
+            NGINX_CHANGED=true
+            ok "nginx: /mrcws location added"
+        else
+            warn "nginx: could not auto-add /mrcws location — add it manually from deploy/anetbbs-nginx.conf.template"
+        fi
     fi
 
     # Fix: /mrcws and /socket.io/ set their OWN proxy_set_header lines

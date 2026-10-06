@@ -1,11 +1,31 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.27`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.28`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.28 — update.sh: fix a self-upgrade crash introduced in v1.1.27 (October 2026)
+
+A real live incident: v1.1.27's `update.sh` hardening of the nginx
+self-healing config patches introduced a bash construct (a heredoc
+immediately followed by a backslash-continued success/failure chain)
+that parsed fine in testing but failed with a bash syntax error on a
+production server mid-upgrade — after services had already been
+stopped, leaving the site down until manually restarted. Rewritten to
+use the same `if cmd <<'EOF'; then ... else ... fi` heredoc form
+already proven elsewhere in this script. A second, unrelated, pre-
+existing bug in the same area was also found and fixed while tracking
+this down: a port-mismatch check could silently abort the whole script
+under `set -e`/`pipefail` whenever an older nginx config had no
+existing MRC proxy line to match against yet — exactly the situation
+where this script's own "add the missing location block" logic is
+supposed to run. Both are now covered by a regression test that runs
+the real, complete nginx-patching section end to end, under the same
+shell options the live script runs under, rather than testing narrower
+slices in isolation.
 
 ## v1.1.27 — Audit pass: dead-connection fix, hardening, doc corrections (October 2026)
 
