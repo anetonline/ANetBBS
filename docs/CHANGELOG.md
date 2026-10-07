@@ -1,11 +1,61 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.28`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.29`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.29 — fsxNet IBOL + IBLC: real InterBBS Oneliners + Last Callers (October 2026)
+
+Two new optional features that speak the real, externally-defined
+Synchronet mod protocols used on fsxNet to exchange data over its
+shared `FSX_DAT` echo area — not ANetBBS's own private InterBBS Wall/
+Last Callers format, but the actual wire format other BBS software
+(Synchronet, Mystic) already reads and writes, so posts and logins
+round-trip with the wider network. **IBOL** (InterBBS Oneliners) lets
+users post a short message to a shared cross-BBS wall; **IBLC**
+(InterBBS Last Callers) broadcasts each login and shows a feed of
+every other participating BBS's logins plus a directory of known
+systems (calls, last call, OS, telnet address) you can connect
+straight to. Both are independent toggles, off by default, with their
+own admin settings page (Admin → fsxNet IBOL/IBLC) and their own data
+tables — entirely separate from the existing InterBBS Wall/Last
+Callers sync. See `docs/39-fsxnet-interbbs.md` for setup and full
+credits — this port implements the real wire format by reading the
+actual reference scripts (`iblc.js`/`ibol.js`, by Craig Hendricks/
+codefenix of ConstructiveChaos BBS, continuing Andrew Pamment/apam's
+original IBOL), not a reinvented approximation.
+
+Both are also available as real Logon/Logoff Modules (Admin →
+Logon/Logoff Modules, or the `anetbbs-cfg` terminal tool), the same
+way the existing Graffiti Wall and Last Callers already are — pick
+`fsxnet_ibol`/`fsxnet_iblc` as the module type to show either screen
+automatically on login. Recording a login to fsxNet IBLC is never
+skipped by Fast Logon, matching the existing Last Callers precedent:
+only the *display* screen is a skippable login module, the actual
+FSX_DAT post happens via the same always-runs hook that already writes
+the local Caller Log row. The admin settings page also moved from the
+main Admin dashboard to Admin → Messages, next to Echomail, since this
+is fundamentally an echomail-area feature.
+
+Both terminal screens were redesigned for a cleaner look matching the
+real Synchronet reference client: a bordered CP437 header for the
+Oneliner wall with pipe-color support and a true scrollable "View All"
+mode; a real arrow-key scrollable/selectable BBS directory (`[B]` from
+the Last Callers screen) with live column widths pulled directly from
+the real `iblc.js` source; and explicit word-wrap on the About screens
+instead of relying on terminal auto-wrap. Fixed a handful of glyphs
+that don't actually exist in the CP437 code page (a malformed escape
+sequence and a couple of Unicode-only characters) that would have
+rendered as garbage or a bare `?` on a real BBS terminal.
+
+Also fixed a real data-loss bug found against live fsxNet traffic:
+inbound IBLC message matching was case-sensitive, silently dropping a
+meaningful share of real last-caller posts that arrive with different
+header capitalization than the reference script uses. Matching is now
+case-insensitive for both IBOL and IBLC.
 
 ## v1.1.28 — update.sh: fix a self-upgrade crash introduced in v1.1.27 (October 2026)
 

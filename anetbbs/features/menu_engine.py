@@ -440,6 +440,26 @@ async def _act_lastcallers(ui, args):
     return None
 
 
+async def _act_fsxnet_ibol(ui, args):
+    """Launch the fsxNet IBOL (InterBBS Oneliners) wall."""
+    try:
+        from .fsxnet_ibol import show_oneliner_wall
+        await show_oneliner_wall(ui.session)
+    except Exception:
+        logger.exception('fsxnet_ibol action failed')
+    return None
+
+
+async def _act_fsxnet_iblc(ui, args):
+    """Show the fsxNet IBLC (InterBBS Last Callers) feed + BBS directory."""
+    try:
+        from .fsxnet_iblc import show_last_callers
+        await show_last_callers(ui.session, args)
+    except Exception:
+        logger.exception('fsxnet_iblc action failed')
+    return None
+
+
 async def _act_exec(ui, args):
     """Run an external program with the user's terminal attached.
 
@@ -731,6 +751,8 @@ _ACTIONS = {
     'ansi': _act_ansi,
     'wall': _act_wall,
     'lastcallers': _act_lastcallers,
+    'fsxnet_ibol': _act_fsxnet_ibol,
+    'fsxnet_iblc': _act_fsxnet_iblc,
     'exec': _act_exec,
     'multinode': _act_multinode,
     'chat_local': _act_chat_local,
@@ -1505,6 +1527,8 @@ ACTION_TYPE_CHOICES = [
     ('multinode', 'Multinode chat (between connected terminal nodes)'),
     ('oneliners', 'Show one-liners + last 10 callers'),
     ('lastcallers', 'Last callers list (full, paginated)'),
+    ('fsxnet_ibol', 'fsxNet IBOL — InterBBS Oneliners wall (real wire-format FSX_DAT sync)'),
+    ('fsxnet_iblc', 'fsxNet IBLC — InterBBS Last Callers + BBS directory (real wire-format FSX_DAT sync)'),
     ('who', "Who's online"),
     ('profile', 'View own profile'),
     ('edit_prof', 'Edit profile'),

@@ -33,6 +33,8 @@ MODULE_TYPES = [
     ('shell',         'Shell Command'),
     ('door_native',   'Native Linux Door'),
     ('door_python',   'Python Door Module'),
+    ('fsxnet_ibol',   'fsxNet IBOL (InterBBS Oneliners)'),
+    ('fsxnet_iblc',   'fsxNet IBLC (InterBBS Last Callers)'),
 ]
 EVENT_TYPES = [('logon', 'Logon'), ('logoff', 'Logoff')]
 
@@ -47,6 +49,11 @@ def _params_help(module_type: str) -> str:
         'shell':       '{"command": "/path/to/script.sh"}',
         'door_native': '{"path": "/path/to/door", "args": "--node $NODE"}',
         'door_python': '{"module": "anetbbs.doors.mything", "func": "run"}',
+        'fsxnet_ibol': 'No params needed — leave as {}. Configure the feature itself '
+                       'at Admin -> fsxNet IBOL/IBLC.',
+        'fsxnet_iblc': 'No params needed — leave as {}. This is the display screen only '
+                       '-- the login-event POST to FSX_DAT always happens regardless of '
+                       'this module or fast-logon, same as the local Last Callers feed.',
     }
     return helps.get(module_type, '{}')
 

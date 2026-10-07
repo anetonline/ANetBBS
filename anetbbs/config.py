@@ -558,6 +558,31 @@ class Config:
         'GAMES_INTERBBS_ENABLED', 'false').lower() == 'true'
     GAMES_INTERBBS_NETWORK_ID = os.environ.get('GAMES_INTERBBS_NETWORK_ID') or None
 
+    # fsxNet IBOL/IBLC -- real wire-format InterBBS Oneliners + Last
+    # Callers (anetbbs/echomail/fsxnet_sync.py), speaking the actual
+    # Synchronet mod protocol over fsxNet's shared FSX_DAT echo area --
+    # NOT the same thing as WALL_INTERBBS_*/LASTCALLERS_INTERBBS_*
+    # above, which is ANetBBS's own private node-to-node format. Two
+    # independent enable flags since a sysop may want only one.
+    FSXNET_IBOL_ENABLED = os.environ.get(
+        'FSXNET_IBOL_ENABLED', 'false').lower() == 'true'
+    FSXNET_IBLC_ENABLED = os.environ.get(
+        'FSXNET_IBLC_ENABLED', 'false').lower() == 'true'
+    FSXNET_NETWORK_ID = os.environ.get('FSXNET_NETWORK_ID') or None
+    # Sysop-editable in case their own EchoArea.tag differs from the
+    # usual convention -- mirrors iblc.ini's messageBase being user-set
+    # rather than hardcoded.
+    FSXNET_AREA_TAG = os.environ.get('FSXNET_AREA_TAG', 'FSX_DAT')
+    # Blank falls back to BBS_NAME -- mirrors ibol.ini's systemName.
+    FSXNET_SYSTEM_NAME = os.environ.get('FSXNET_SYSTEM_NAME', '')
+    # Blank = standard telnet port 23 -- mirrors iblc.ini's telnetPort.
+    FSXNET_TELNET_PORT = os.environ.get('FSXNET_TELNET_PORT', '')
+    # Same reasoning as LASTCALLERS_HIDE_SYSOP above, scoped to this
+    # feature -- matches iblc.js's own documented behavior of obeying
+    # the same "Include Sysop in Statistics" rule.
+    FSXNET_HIDE_SYSOP = os.environ.get(
+        'FSXNET_HIDE_SYSOP', 'false').lower() == 'true'
+
 
 class _EnvDatabaseURI:
     """Class-attribute descriptor: re-reads DATABASE_URL from the

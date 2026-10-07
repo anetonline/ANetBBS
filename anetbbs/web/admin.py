@@ -270,6 +270,7 @@ ADMIN_HUB_SECTIONS = {
             ('admin.taglines_admin', 'Taglines', 'bi-chat-quote', 'Shared tagline pool for message composing'),
             ('admin.broadcast', 'Broadcast', 'bi-broadcast', 'Send a message to all online users'),
             ('echomail_admin.dashboard', 'Echomail', 'bi-envelope-arrow-up', 'FidoNet-style echomail networks'),
+            ('fsxnet_admin.index', 'fsxNet IBOL/IBLC', 'bi-diagram-3-fill', 'Real wire-format InterBBS Oneliners + Last Callers over FSX_DAT'),
             ('admin.default_echos', 'Default Echo Subs', 'bi-envelope-check', 'Auto-subscribe new users to echoes'),
             ('admin.word_filter', 'Word Filter', 'bi-filter-circle', 'Blocked words/phrases'),
             ('admin.pages', 'Sysop Pages', 'bi-bell', 'Users paging the sysop'),

@@ -3439,6 +3439,66 @@ class WallPost(db.Model):
         return f'<WallPost {self.id} by {self.username}>'
 
 
+class FsxnetOneliner(db.Model):
+    """One post on the real fsxNet IBOL ("InterBBS Oneliners") wall --
+    deliberately separate from WallPost/ANET_WALL (anetbbs/echomail/
+    interbbs_sync.py), which is ANetBBS's own private node-to-node
+    relay format. This table holds posts exchanged over fsxNet's real
+    FSX_DAT echo area, speaking the actual wire format Synchronet/
+    Mystic's IBOL mods use (see anetbbs/echomail/fsxnet_sync.py) --
+    other fsxNet participants' posts land here verbatim, not
+    translated into ANetBBS's own Wall format."""
+    __tablename__ = 'fsxnet_oneliners'
+
+    id = db.Column(db.Integer, primary_key=True)
+    author = db.Column(db.String(80), nullable=False)
+    source_bbs = db.Column(db.String(100), nullable=False)
+    # Raw text, one "line" per \n -- may contain literal pipe-color
+    # codes (|12red) same as WallPost.line1; word-wrapped at render
+    # time, not storage time.
+    body = db.Column(db.Text, nullable=False, default='')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    # Dedup key against anetbbs/echomail/EchomailMessage.msg_id -- also
+    # true for a message WE posted (see fsxnet_sync.py's own comment on
+    # why there's no origin_bbs-style loop-prevention gate needed here:
+    # IBOL/IBLC aren't relay protocols, this table is a pure read-only
+    # display cache of what's in the FSX_DAT echo).
+    remote_msg_id = db.Column(db.String(100), nullable=True, index=True, unique=True)
+
+    def __repr__(self):
+        return f'<FsxnetOneliner {self.id} by {self.author}@{self.source_bbs}>'
+
+
+class FsxnetLastCaller(db.Model):
+    """One login event shared over fsxNet's real IBLC ("InterBBS Last
+    Callers") mod -- deliberately separate from CallerLog/
+    ANET_LASTCALLERS (same reasoning as FsxnetOneliner above).
+
+    remote_date_str/remote_time_str are stored as opaque display text,
+    NEVER parsed -- the real iblc.js explicitly does not trust a remote
+    BBS's own locale/timezone-dependent date-time strings for sorting;
+    created_at (this row's own local arrival time) is the one
+    authoritative, sortable timestamp, exactly matching iblc.js's own
+    documented reasoning (see fsxnet_sync.py)."""
+    __tablename__ = 'fsxnet_lastcallers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    alias = db.Column(db.String(80), nullable=False)
+    bbs_name = db.Column(db.String(100), nullable=False, index=True)
+    remote_date_str = db.Column(db.String(20))
+    remote_time_str = db.Column(db.String(20))
+    location = db.Column(db.String(100))
+    os = db.Column(db.String(40))
+    # Telnet dial-out target, "host" or "host:port" -- used directly by
+    # the BBS-directory screen's dial-out action (DialoutMenu._connect).
+    address = db.Column(db.String(160))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    remote_msg_id = db.Column(db.String(100), nullable=True, index=True, unique=True)
+
+    def __repr__(self):
+        return f'<FsxnetLastCaller {self.id} {self.alias}@{self.bbs_name}>'
+
+
 # ---------------------------------------------------------------------------
 # Logon / Logoff Modules
 # ---------------------------------------------------------------------------

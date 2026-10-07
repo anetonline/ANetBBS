@@ -474,6 +474,11 @@ def login():
                 post_lastcaller_to_interbbs(_cl)
             except Exception:
                 pass
+            try:
+                from ..echomail.fsxnet_sync import post_lastcall_to_fsxnet
+                post_lastcall_to_fsxnet(user, 'web')
+            except Exception:
+                pass
         except Exception:
             db.session.rollback()
         _log_activity(user.id, 'login')
@@ -719,6 +724,11 @@ def register():
             try:
                 from ..echomail.interbbs_sync import post_lastcaller_to_interbbs
                 post_lastcaller_to_interbbs(_cl)
+            except Exception:
+                pass
+            try:
+                from ..echomail.fsxnet_sync import post_lastcall_to_fsxnet
+                post_lastcall_to_fsxnet(user, 'web')
             except Exception:
                 pass
         except Exception:

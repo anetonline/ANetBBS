@@ -445,6 +445,14 @@ def sync_scores_inbound(app, params):
     return _impl(app, params)
 
 
+def sync_fsxnet_inbound(app, params):
+    """Materialize new inbound fsxNet IBOL/IBLC messages into local
+    FsxnetOneliner/FsxnetLastCaller rows. Thin wrapper -- see
+    anetbbs/echomail/fsxnet_sync.py."""
+    from ..echomail.fsxnet_sync import sync_fsxnet_inbound as _impl
+    return _impl(app, params)
+
+
 def shell(app, params):
     """Run an arbitrary shell command. Dangerous — only for sysops who
     know what they're typing. Runs as the service user (no sudo).
@@ -491,6 +499,7 @@ REGISTRY: Dict[str, HandlerFn] = {
     'sync_wall_inbound':     sync_wall_inbound,
     'sync_lastcallers_inbound': sync_lastcallers_inbound,
     'sync_scores_inbound':   sync_scores_inbound,
+    'sync_fsxnet_inbound':   sync_fsxnet_inbound,
     'shell':                shell,
 }
 
@@ -510,6 +519,7 @@ HANDLER_META = {
     'sync_wall_inbound': ('InterBBS Wall: import inbound posts', 'Materialize new ANET_WALL echomail into local Wall posts. Auto-created when InterBBS Wall is enabled.'),
     'sync_lastcallers_inbound': ('InterBBS Last Callers: import inbound entries', 'Materialize new ANET_LASTCALLERS echomail into local Last Callers entries. Auto-created when InterBBS Last Callers is enabled.'),
     'sync_scores_inbound': ('InterBBS Game Scores: import inbound scores', 'Materialize new ANET_GAMESCORES echomail into local game high scores. Auto-created when InterBBS Score Sharing is enabled.'),
+    'sync_fsxnet_inbound': ('fsxNet IBOL/IBLC: import inbound data', 'Materialize new FSX_DAT echomail into local Oneliners/Last Callers. Auto-created when fsxNet IBOL or IBLC is enabled.'),
     'shell':          ('Shell command',          'Run an arbitrary command as the service user. Params: command, timeout.'),
 }
 

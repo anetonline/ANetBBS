@@ -162,6 +162,15 @@ fill in your assigned FTN address / packet ID and password on the
 seeded network row(s) at **Admin → Echomail Networks**, subscribe to
 whichever areas you want, and activate the network.
 
+## fsxNet IBOL / IBLC
+
+Real wire-format InterBBS Oneliners + Last Callers over fsxNet's
+shared `FSX_DAT` echo area — speaks the actual Synchronet mod
+protocol other BBS software on the network already understands,
+separate from the ANetBBS-only InterBBS Wall/Last Callers above. See
+[doc 39 — fsxNet IBOL/IBLC](39-fsxnet-interbbs.md) for setup,
+attribution, and how it works.
+
 ## Setting up a network
 
 **Admin → Echomail Networks** (`/admin/echomail/`):

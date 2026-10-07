@@ -608,6 +608,7 @@ def create_app(config_name=None):
     from .web.wall_admin import wall_admin_bp
     from .web.lastcallers_admin import lastcallers_admin_bp
     from .web.games_interbbs_admin import games_interbbs_admin_bp
+    from .web.fsxnet_admin import fsxnet_admin_bp
     from .web.personal_pages import pages_bp, serve_root_page
     from .web.docs import docs_bp
     from .web.wiki import wiki_bp
@@ -726,6 +727,7 @@ def create_app(config_name=None):
     app.register_blueprint(wall_admin_bp)
     app.register_blueprint(lastcallers_admin_bp)
     app.register_blueprint(games_interbbs_admin_bp)
+    app.register_blueprint(fsxnet_admin_bp)
 
     # Public downloads — auto-listing of the sysop's release directory.
     # No DB rows; scans DOWNLOADS_DIR on each (cached) request.

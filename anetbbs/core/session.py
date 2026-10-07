@@ -3478,6 +3478,14 @@ class BBSSession:
                     except Exception:
                         pass
                     try:
+                        from ..models import User as _User
+                        from ..echomail.fsxnet_sync import post_lastcall_to_fsxnet
+                        _u = _User.query.get(self.user['id'])
+                        if _u is not None:
+                            post_lastcall_to_fsxnet(_u, proto)
+                    except Exception:
+                        pass
+                    try:
                         from ..features.webhooks import fire
                         fire('login', {'user': self.user.get('username', '?'),
                                        'service': proto})

@@ -1,8 +1,8 @@
 """Login Modules section (anetbbs-cfg) -- logon/logoff actions (wall
 prompt, ANSI screen, file bulletins, shell command, native/Python
-doors). params_json is edited as raw JSON text, validated on save --
-see MODULE_TYPES' help text for each type's expected shape (mirrors
-login_modules_admin.py's _params_help()).
+doors, fsxNet IBOL/IBLC). params_json is edited as raw JSON text,
+validated on save -- see MODULE_TYPES' help text for each type's
+expected shape (mirrors login_modules_admin.py's _params_help()).
 """
 import json
 
@@ -13,7 +13,7 @@ from anetbbs.models import db, LoginModule
 
 MODULE_TYPE_CHOICES = [
     "wall", "lastcallers", "ansi", "file_bulletin", "shell",
-    "door_native", "door_python",
+    "door_native", "door_python", "fsxnet_ibol", "fsxnet_iblc",
 ]
 EVENT_TYPE_CHOICES = ["logon", "logoff"]
 
@@ -25,6 +25,8 @@ PARAMS_HELP = {
     "shell": '{"command": "/path/to/script.sh"}',
     "door_native": '{"path": "/path/to/door", "args": "--node $NODE"}',
     "door_python": '{"module": "anetbbs.doors.mything", "func": "run"}',
+    "fsxnet_ibol": '{}',
+    "fsxnet_iblc": '{}',
 }
 
 FIELDS = [
@@ -39,7 +41,7 @@ FIELDS = [
 ]
 
 HELP = [
-    "Params by type: wall/lastcallers/file_bulletin={} "
+    "Params by type: wall/lastcallers/file_bulletin/fsxnet_ibol/fsxnet_iblc={} "
     "ansi={\"slot\":\"welcome\"} shell={\"command\":\"...\"} "
     "door_native={\"path\":\"...\",\"args\":\"...\"} door_python={\"module\":\"...\",\"func\":\"...\"}",
 ]

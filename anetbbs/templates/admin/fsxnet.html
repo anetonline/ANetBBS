@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}fsxNet IBOL/IBLC Admin{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-diagram-3-fill"></i> fsxNet IBOL / IBLC</h1>
+</div>
+<p class="text-muted">
+    Real wire-format InterBBS Oneliners (IBOL) and Last Callers (IBLC) over
+    fsxNet's shared <code>FSX_DAT</code> echo area — separate from this
+    install's own private InterBBS Wall/Last Callers sync. See
+    <a href="{{ url_for('docs.view', slug='39-fsxnet-interbbs') }}">docs</a>
+    for setup and credits.
+</p>
+
+<div class="card p-3 mb-4">
+    <h6 class="mb-2">Settings</h6>
+    <form method="post" action="{{ url_for('fsxnet_admin.settings') }}" class="d-flex gap-3 align-items-start flex-wrap">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="ibol_enabled"
+                   id="ibol_enabled" {{ 'checked' if ibol_enabled }}>
+            <label class="form-check-label" for="ibol_enabled">
+                Enable IBOL (InterBBS Oneliners)
+            </label>
+        </div>
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="iblc_enabled"
+                   id="iblc_enabled" {{ 'checked' if iblc_enabled }}>
+            <label class="form-check-label" for="iblc_enabled">
+                Enable IBLC (InterBBS Last Callers)
+            </label>
+        </div>
+
+        <hr class="w-100">
+
+        <div class="d-flex align-items-center gap-2">
+            <label for="network_id" class="form-label mb-0">fsxNet network:</label>
+            <select class="form-select form-select-sm w-auto" name="network_id" id="network_id">
+                <option value="">— pick a network —</option>
+                {% for net in networks %}
+                <option value="{{ net.id }}" {{ 'selected' if network_id|string == net.id|string }}>{{ net.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-text w-100">BinkP networks only — QWK areas are identified by conference number, not by name, so a QWK network can never carry FSX_DAT's data.</div>
+
+        <div class="d-flex align-items-center gap-2">
+            <label for="area_tag" class="form-label mb-0">Area tag:</label>
+            <input type="text" class="form-control form-control-sm w-auto" name="area_tag"
+                   id="area_tag" value="{{ area_tag }}" placeholder="FSX_DAT">
+        </div>
+        <div class="form-text w-100">Must match your configured EchoArea's internal tag for the InterBBS Data echo — usually <code>FSX_DAT</code>.</div>
+
+        <div class="d-flex align-items-center gap-2">
+            <label for="system_name" class="form-label mb-0">System name override:</label>
+            <input type="text" class="form-control form-control-sm w-auto" name="system_name"
+                   id="system_name" value="{{ system_name }}" placeholder="(defaults to BBS name)">
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <label for="telnet_port" class="form-label mb-0">Telnet port (if not 23):</label>
+            <input type="text" class="form-control form-control-sm w-auto" name="telnet_port"
+                   id="telnet_port" value="{{ telnet_port }}" placeholder="23">
+        </div>
+
+        <div class="form-check w-100">
+            <input class="form-check-input" type="checkbox" name="hide_sysop"
+                   id="hide_sysop" {{ 'checked' if hide_sysop }}>
+            <label class="form-check-label" for="hide_sysop">
+                Hide sysop logins from IBLC (same as the local Last Callers setting)
+            </label>
+        </div>
+
+        <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+    </form>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <h6>Oneliners (IBOL)</h6>
+        {% if oneliners.items %}
+        <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead><tr><th>#</th><th>Author</th><th>BBS</th><th>Text</th><th>Posted</th><th></th></tr></thead>
+            <tbody>
+                {% for row in oneliners.items %}
+                <tr>
+                    <td>{{ row.id }}</td>
+                    <td>{{ row.author }}</td>
+                    <td><span class="badge bg-info text-dark">{{ row.source_bbs }}</span></td>
+                    <td><code>{{ row.body }}</code></td>
+                    <td><small>{{ row.created_at|eastern('%Y-%m-%d %H:%M') }}</small></td>
+                    <td>
+                        <form method="post" action="{{ url_for('fsxnet_admin.delete_oneliner', oneliner_id=row.id) }}"
+                              onsubmit="return confirm('Delete oneliner #{{ row.id }}?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% if oneliners.pages > 1 %}
+        <nav><ul class="pagination pagination-sm">
+            {% for p in oneliners.iter_pages() %}
+                {% if p %}
+                <li class="page-item {{ 'active' if p == oneliners.page }}">
+                    <a class="page-link" href="{{ url_for('fsxnet_admin.index', oneliner_page=p) }}">{{ p }}</a>
+                </li>
+                {% else %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+            {% endfor %}
+        </ul></nav>
+        {% endif %}
+        {% else %}
+        <p class="text-muted">No oneliners yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="col-lg-6">
+        <h6>Last Callers (IBLC)</h6>
+        {% if lastcallers.items %}
+        <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead><tr><th>#</th><th>Alias</th><th>BBS</th><th>Location</th><th>OS</th><th>Received</th><th></th></tr></thead>
+            <tbody>
+                {% for row in lastcallers.items %}
+                <tr>
+                    <td>{{ row.id }}</td>
+                    <td>{{ row.alias }}</td>
+                    <td><span class="badge bg-info text-dark">{{ row.bbs_name }}</span></td>
+                    <td>{{ row.location or '' }}</td>
+                    <td>{{ row.os or '' }}</td>
+                    <td><small>{{ row.created_at|eastern('%Y-%m-%d %H:%M') }}</small></td>
+                    <td>
+                        <form method="post" action="{{ url_for('fsxnet_admin.delete_lastcaller', lastcaller_id=row.id) }}"
+                              onsubmit="return confirm('Delete entry #{{ row.id }}?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="btn btn-sm btn-outline-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% if lastcallers.pages > 1 %}
+        <nav><ul class="pagination pagination-sm">
+            {% for p in lastcallers.iter_pages() %}
+                {% if p %}
+                <li class="page-item {{ 'active' if p == lastcallers.page }}">
+                    <a class="page-link" href="{{ url_for('fsxnet_admin.index', lastcaller_page=p) }}">{{ p }}</a>
+                </li>
+                {% else %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}
+            {% endfor %}
+        </ul></nav>
+        {% endif %}
+        {% else %}
+        <p class="text-muted">No last-caller entries yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

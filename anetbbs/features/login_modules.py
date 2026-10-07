@@ -10,6 +10,12 @@ Supported module_type values:
   shell        — run a shell command (params: {"command": "/path/script.sh"})
   door_native  — run a native Linux door binary (params: {"path": "...", "args": "..."})
   door_python  — import and call a Python door (params: {"module": "pkg.mod", "func": "run"})
+  fsxnet_ibol  — fsxNet InterBBS Oneliners wall (params: none; see features/fsxnet_ibol.py)
+  fsxnet_iblc  — fsxNet InterBBS Last Callers + BBS directory (params: none; see
+                 features/fsxnet_iblc.py) -- display only; the actual login-event
+                 POST to FSX_DAT happens unconditionally elsewhere (core/session.py's
+                 and web/auth.py's CallerLog hook), never gated by this module or by
+                 fast-logon -- same precedent as the existing ANET_LASTCALLERS relay.
 """
 from __future__ import annotations
 
@@ -102,6 +108,14 @@ async def _dispatch(session, module_type: str, params: dict) -> None:
 
     elif module_type == 'door_python':
         await _run_door_python(session, params)
+
+    elif module_type == 'fsxnet_ibol':
+        from .fsxnet_ibol import show_oneliner_wall
+        await show_oneliner_wall(session)
+
+    elif module_type == 'fsxnet_iblc':
+        from .fsxnet_iblc import show_last_callers
+        await show_last_callers(session)
 
 
 async def _run_shell(session, params: dict) -> None:
