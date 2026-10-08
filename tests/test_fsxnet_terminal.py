@@ -9,6 +9,7 @@ already duplicated across this test suite (e.g.
 tests/test_door_games_menu_layout.py), not imported.
 """
 import os
+import re
 import sys
 import unittest
 from datetime import datetime, timedelta
@@ -87,6 +88,27 @@ class IbolPipeTranslationTests(unittest.TestCase):
         out = _pipe_to_ansi('before\x07bell\x00null after')
         self.assertNotIn('\x07', out)
         self.assertNotIn('\x00', out)
+
+    def test_format_entry_converts_pipe_codes_in_author_and_source(self):
+        """Real sysop screenshot (2026-10-08): a source BBS name posted
+        with per-letter rainbow pipe-color codes ("The Quantum Wormhole
+        BBS") came through as literal unconverted |NN text, because
+        _format_entry() only ran the BODY through _pipe_to_ansi() --
+        Author/Source are the same free-text fields the real ibol.js
+        lets a sysop color too."""
+        from anetbbs.features.fsxnet_ibol import _format_entry
+        lines = _format_entry(
+            'filip', '|11T|03h|11e |03Q|11u|03a|11n|03t|11u|03m |11W|03o|11r|03m|11h|03o|11l|03e BBS',
+            'knwkaj', 20, 50)
+        joined = '\n'.join(lines)
+        self.assertNotIn('|11', joined)
+        self.assertNotIn('|03', joined)
+        # Colors are correctly interleaved per-letter (real rainbow
+        # pipe-coding), so check the plain text survives with ANSI
+        # stripped rather than as one contiguous colored substring.
+        plain = re.sub(r'\x1b\[[0-9;]*m', '', joined)
+        self.assertIn('The Quantum Wormhole BBS', plain)
+        self.assertIn('\x1b[1;36m', joined)  # |11 == bright cyan
 
 
 class IblcAggregationTests(unittest.TestCase):

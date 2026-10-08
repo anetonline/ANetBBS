@@ -151,15 +151,28 @@ def _format_entry(author: str, source_bbs: str, body: str, field_w: int, text_w:
     author right-justified in a field_w-wide column (bold cyan),
     first line of wrapped text beside it; source BBS right-justified
     the same way on the next line (plain cyan), remaining wrapped
-    text beside/under it; a horizontal rule after."""
+    text beside/under it; a horizontal rule after.
+
+    Author/Source are themselves free-text fields posted by a sysop
+    (the real ibol.js's own `user.alias`/`system.name`) -- they can
+    carry the same pipe-color codes a oneliner's body can, and a real
+    sysop screenshot (2026-10-08) showed a rainbow-colored "The
+    Quantum Wormhole BBS" source name coming through as literal
+    unconverted `|NN` codes because only the body was ever run through
+    _pipe_to_ansi(). Both fields are converted here too; the padding
+    math uses the post-conversion VISIBLE width (_visible_len strips
+    the ANSI _pipe_to_ansi() produces), not raw len(), since the pipe
+    codes themselves are never part of what's actually displayed."""
     # Wrap on the pipe-code-stripped plain text so width math is right
     # (pipe codes become invisible color escapes, not display chars),
     # then colorize each resulting line's content afterward.
     plain_lines = _word_wrap(_strip_untrusted(body).replace('\n', ' '), text_w) if body.strip() else ['']
+    author_c = _pipe_to_ansi(author)
+    source_c = _pipe_to_ansi(source_bbs)
     out = []
-    out.append(f'{" " * max(0, field_w - len(author))}{_CY}{author}{_GRY}: {_RST}{_WH}'
+    out.append(f'{" " * max(0, field_w - _visible_len(author_c))}{_CY}{author_c}{_GRY}: {_RST}{_WH}'
                f'{_pipe_to_ansi(plain_lines[0])}{_RST}')
-    out.append(f'{" " * max(0, field_w - len(source_bbs))}{_CY_N}{source_bbs}{_GRY}: {_RST}{_WH}'
+    out.append(f'{" " * max(0, field_w - _visible_len(source_c))}{_CY_N}{source_c}{_GRY}: {_RST}{_WH}'
                f'{_pipe_to_ansi(plain_lines[1]) if len(plain_lines) > 1 else ""}{_RST}')
     for extra in plain_lines[2:]:
         out.append(f'{" " * field_w}{_GRY}: {_RST}{_WH}{_pipe_to_ansi(extra)}{_RST}')

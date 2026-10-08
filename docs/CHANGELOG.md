@@ -1,11 +1,29 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.29`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.30`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.30 — fsxNet IBOL: fix pipe-color codes in Author/Source fields (October 2026)
+
+A real sysop screenshot from live fsxNet traffic found that a source
+BBS name posted with per-letter rainbow pipe-color codes came through
+on the Oneliner wall as literal unconverted `|NN` text instead of
+actual colors — `_format_entry()` only ever ran the oneliner's body
+through the pipe-to-ANSI converter, never the Author/Source fields
+themselves, even though those are the same kind of free-text field a
+sysop can color exactly like the body. Both fields are now converted,
+with right-justification padding corrected to use the post-conversion
+visible width rather than raw character count.
+
+Also investigated a report of missing Location data on some ANetBBS
+entries in the Last Callers feed — confirmed not a bug: `location` is
+an optional profile field, and other ANetBBS users' entries already
+carry it through correctly when set, so a blank Location just means
+that particular account hasn't filled one in.
 
 ## v1.1.29 — fsxNet IBOL + IBLC: real InterBBS Oneliners + Last Callers (October 2026)
 
