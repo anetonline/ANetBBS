@@ -1,11 +1,15 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.34`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.35`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.35 — DOOM/Duke3D follow-up #2: the WASM core also loads itself from a blob: URL (October 2026)
+
+A second same-day follow-up: with eval now allowed, a sysop browser console turned up a third CSP gap in the same dos-frame policy — EmulatorJS's game-core loader fetches the WASM core, wraps it in a Blob, and runs it via a dynamically-created `<script src="blob:...">` tag (a standard Emscripten pattern). `worker-src` and `img-src` already allowed `blob:` for this same underlying reason; `script-src` was the one directive still missing it. Added, with the regression test extended to cover it.
 
 ## v1.1.34 — DOOM/Duke3D follow-up: the WASM core needs real eval too (October 2026)
 

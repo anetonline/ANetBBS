@@ -989,8 +989,18 @@ def create_app(config_name=None):
         # change from here, so 'unsafe-eval' is added too, scoped only to
         # this one already-isolated route (COOP/COEP + its own CSP), not
         # site-wide.
+        #
+        # blob: -- second same-day follow-up (sysop browser console):
+        # EmulatorJS's own game-core loader fetches the WASM core, wraps
+        # it in a Blob, and runs it via a dynamically-created
+        # <script src="blob:..."> tag (a standard Emscripten pattern,
+        # confirmed via the real error: "Loading the script
+        # 'blob:https://.../<uuid>' violates ... script-src", at
+        # emulator.min.js's initGameCore). worker-src/img-src already
+        # allowed blob: for this same reason; script-src was the one
+        # directive that still didn't.
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' "
-        "https://cdn.emulatorjs.org; "
+        "blob: https://cdn.emulatorjs.org; "
         # Real live bug (sysop browser console, 2026-10-09): every OTHER
         # directive here allows the CDN, but style-src didn't -- EmulatorJS
         # loads its own stylesheet (emulator.min.css/emulator.css) from

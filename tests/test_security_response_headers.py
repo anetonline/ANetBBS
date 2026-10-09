@@ -170,6 +170,14 @@ class SecurityResponseHeadersTests(unittest.TestCase):
                           if d.strip().startswith('script-src'))
         self.assertIn("'unsafe-eval'", script_src)
         self.assertIn("'wasm-unsafe-eval'", script_src)
+        # Third same-day follow-up: EmulatorJS's game-core loader fetches
+        # the WASM core, wraps it in a Blob, and runs it via a
+        # dynamically-created <script src="blob:..."> tag (confirmed via
+        # the real error: "Loading the script 'blob:https://.../<uuid>'
+        # violates ... script-src", at emulator.min.js's initGameCore).
+        # worker-src/img-src already allow blob: for the same underlying
+        # reason -- script-src was the one directive still missing it.
+        self.assertIn('blob:', script_src)
         # Also still isolated via COOP/COEP, same as the module docstring
         # describes -- a quick sanity check this test is on the right page.
         self.assertEqual(resp.headers.get('Cross-Origin-Opener-Policy'), 'same-origin')

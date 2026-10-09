@@ -1,3 +1,7 @@
+# ANetBBS v1.1.35 — DOOM/Duke3D follow-up #2: the WASM core also loads itself from a blob: URL (October 2026)
+
+A second same-day follow-up: with eval now allowed, a sysop browser console turned up a third CSP gap in the same dos-frame policy — EmulatorJS's game-core loader fetches the WASM core, wraps it in a Blob, and runs it via a dynamically-created `<script src="blob:...">` tag (a standard Emscripten pattern). `worker-src` and `img-src` already allowed `blob:` for this same underlying reason; `script-src` was the one directive still missing it. Added, with the regression test extended to cover it.
+
 # ANetBBS v1.1.34 — DOOM/Duke3D follow-up: the WASM core needs real eval too (October 2026)
 
 A same-day follow-up to v1.1.33: with the stylesheet now loading, a sysop browser console turned up a second CSP gap — EmulatorJS's Emscripten-generated WASM glue code calls real `eval()`/`new Function()` for some of its dynamic symbol binding (confirmed via the traceback: `Object.cwrap`, Emscripten's own runtime wrapper utility), which `'wasm-unsafe-eval'` doesn't cover — that keyword only permits WebAssembly *compilation*, not general JS string evaluation. Added `'unsafe-eval'` to the dos-frame route's `script-src`, scoped only to that one already-isolated route (its own COOP/COEP headers, separate CSP from the rest of the site) rather than loosened anywhere else — confirmed by a new test that the site-wide default policy never gets it.
