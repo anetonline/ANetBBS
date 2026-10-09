@@ -1009,11 +1009,32 @@ def create_app(config_name=None):
         # (TypeError: Cannot read properties of undefined (reading 'AL')),
         # breaking DOOM/Duke3D entirely with nothing logged server-side --
         # a pure client-side CSP block never reaches Flask's access log.
-        "style-src 'self' 'unsafe-inline' https://cdn.emulatorjs.org; "
+        "style-src 'self' 'unsafe-inline' blob: https://cdn.emulatorjs.org; "
         "worker-src 'self' blob: https://cdn.emulatorjs.org; "
-        "connect-src 'self' https://cdn.emulatorjs.org; "
+        # blob: -- third same-day follow-up (sysop browser console):
+        # Emscripten's own WASM loader (instantiateAsync/readAsync, both
+        # named directly in the real error/traceback) fetches the actual
+        # .wasm binary itself via a blob: URL too, not just the glue
+        # script blob: added to script-src above -- fetch() to a blob:
+        # URL needs explicit connect-src permission, same as any other
+        # scheme. Without this the wasm fetch fails outright ("Aborted
+        # (both async and sync fetching of the wasm failed)"), so the
+        # game never starts even though every earlier blocker was fixed.
+        "connect-src 'self' blob: https://cdn.emulatorjs.org; "
         "img-src 'self' data: blob: https://cdn.emulatorjs.org; "
-        "font-src 'self' data:; "
+        "font-src 'self' data: blob: https://cdn.emulatorjs.org; "
+        # No media-src existed at all before this -- it silently fell
+        # back to default-src 'self', which would reject any blob:
+        # audio/video the same way every OTHER resource type above
+        # needed explicit blob: permission for. Proactive, not yet
+        # individually confirmed by a browser error the way every fix
+        # above this line was -- added now, alongside font-src's blob:,
+        # specifically to get ahead of the next 1-2 rounds of this same
+        # "another Emscripten resource type needs blob: too" pattern
+        # instead of making a sysop redeploy-and-retest for each one
+        # separately. If something's still broken after this, the
+        # browser console remains the fastest way to find out what.
+        "media-src 'self' blob: https://cdn.emulatorjs.org; "
         "object-src 'none'; "
         "base-uri 'self'; "
         "frame-ancestors 'self'"

@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.35`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.36`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.36 — DOOM/Duke3D follow-up #3: connect-src needed blob: too, plus getting ahead of the pattern (October 2026)
+
+A third same-day follow-up: with the glue script now loading, a sysop browser console showed the actual `.wasm` binary fetch itself (Emscripten's `instantiateAsync`/`readAsync`) also goes through a `blob:` URL, and `connect-src` didn't allow it — `fetch()` to a `blob:` URL needs explicit `connect-src` permission, same as any other scheme, independently of the `blob:` already added to `script-src` for the glue script. Without it the WASM fetch aborted outright even though every earlier blocker was already fixed.
+
+With four straight rounds of "another EmulatorJS resource type needs `blob:` too" in the same policy, got ahead of the pattern instead of waiting for a fifth: added a `media-src` directive (there wasn't one at all before — it silently fell back to `default-src 'self'`, which would reject the same way every other resource type above needed explicit `blob:` for) and `blob:` to `font-src`, since this is a full emulator with audio and embedded fonts are plausible too. These two are proactive, not individually confirmed by a browser error the way everything above was — flagged as such so it's clear which is which if something's still broken.
 
 ## v1.1.35 — DOOM/Duke3D follow-up #2: the WASM core also loads itself from a blob: URL (October 2026)
 

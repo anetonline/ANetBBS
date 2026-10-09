@@ -152,12 +152,15 @@ class SecurityResponseHeadersTests(unittest.TestCase):
         csp = resp.headers.get('Content-Security-Policy', '')
         self.assertIn('cdn.emulatorjs.org', csp)
         for directive in ('script-src', 'style-src', 'worker-src',
-                          'connect-src', 'img-src'):
+                          'connect-src', 'img-src', 'font-src', 'media-src'):
             rule = next((d.strip() for d in csp.split(';')
                         if d.strip().startswith(directive)), None)
             self.assertIsNotNone(rule, f'{directive} missing from dos_frame CSP entirely')
             self.assertIn('https://cdn.emulatorjs.org', rule,
                           f'{directive} does not allow the EmulatorJS CDN: {rule!r}')
+            self.assertIn('blob:', rule,
+                          f'{directive} does not allow blob: -- every resource type '
+                          f'EmulatorJS loads dynamically has needed this so far: {rule!r}')
         # Real live follow-up (same day, 2026-10-09): 'wasm-unsafe-eval'
         # alone only covers WebAssembly *compilation* -- EmulatorJS's
         # Emscripten-generated glue code (confirmed via the real browser
@@ -178,6 +181,15 @@ class SecurityResponseHeadersTests(unittest.TestCase):
         # worker-src/img-src already allow blob: for the same underlying
         # reason -- script-src was the one directive still missing it.
         self.assertIn('blob:', script_src)
+        # Fourth same-day follow-up: Emscripten's own WASM loader
+        # (instantiateAsync/readAsync, both named directly in the real
+        # error/traceback) fetches the actual .wasm binary itself via a
+        # blob: URL too, not just the glue script -- fetch() to a blob:
+        # URL needs explicit connect-src permission, same as any other
+        # scheme.
+        connect_src = next(d.strip() for d in csp.split(';')
+                           if d.strip().startswith('connect-src'))
+        self.assertIn('blob:', connect_src)
         # Also still isolated via COOP/COEP, same as the module docstring
         # describes -- a quick sanity check this test is on the right page.
         self.assertEqual(resp.headers.get('Cross-Origin-Opener-Policy'), 'same-origin')
