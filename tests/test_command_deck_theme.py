@@ -250,6 +250,36 @@ class CommandDeckThemeTests(unittest.TestCase):
         self.assertIn('body[data-nav-position="bottom"] .navbar .dropdown-menu {', css)
         self.assertIn('bottom: 100% !important; top: auto !important;', css)
 
+    def test_account_group_flyout_has_its_own_top_bottom_override(self):
+        """Real sysop screenshot (2026-10-09): with nav position set to
+        top, every item in the Account dropdown except the bottommost
+        ("Logout") rendered off-screen above the viewport -- only
+        logout was visible. Root cause: the vertical rail's own
+        bottom-pinned-account-group rule
+        (`.navbar .navbar-collapse > ul.navbar-nav:last-child
+        .dropdown-menu { top: auto !important; bottom: 0 !important; }`,
+        needed there since that group sits at the bottom of a vertical
+        list) has 5 class-level selectors, beating the generic
+        `body[data-nav-position="top"] .navbar .dropdown-menu`
+        override's 3 -- !important only breaks ties on EQUAL
+        specificity, so the vertical-rail rule kept winning even in
+        top/bottom mode and anchored the menu to grow upward from a
+        bottom:0 point near the top of a 64px-tall bar, pushing almost
+        everything off-screen. Fixed with a same-selector-shape
+        override scoped to each position, matching or exceeding that
+        specificity. Verified with a real headless-Chrome render
+        before/after (not just this text check) -- see the fix's own
+        commit/changelog entry."""
+        css_path = (Path(__file__).resolve().parent.parent /
+                   'anetbbs' / 'static' / 'css' / 'command_deck_theme.css')
+        css = css_path.read_text()
+        self.assertIn(
+            'body[data-nav-position="top"] .navbar .navbar-collapse > '
+            'ul.navbar-nav:last-child .dropdown-menu {', css)
+        self.assertIn(
+            'body[data-nav-position="bottom"] .navbar .navbar-collapse > '
+            'ul.navbar-nav:last-child .dropdown-menu {', css)
+
     def test_top_and_bottom_use_a_horizontal_bar_not_a_vertical_rail(self):
         css_path = (Path(__file__).resolve().parent.parent /
                    'anetbbs' / 'static' / 'css' / 'command_deck_theme.css')

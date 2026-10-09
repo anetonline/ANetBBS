@@ -395,6 +395,19 @@ class BBSSession:
         # game-server target, which hangs up silently rather than showing
         # BBS chrome the caller never asked to see.
         self._direct_door_launched = False
+        # True only for the exact window a door subprocess (door_runner.py's
+        # play_door_game_telnet) is actively pumping its own raw PTY output
+        # to this session's screen -- set/cleared there, around out_task/
+        # in_task. Lets _start_presence_alert_watchdog (below) know it must
+        # not raw-write a "*** X just logged in ***" notice into whatever
+        # the door is currently drawing: unlike MRC chat (which has its own
+        # known screen layout and a safe sink to route through, see
+        # _mrc_chat_notice_sink), an arbitrary door's screen state is
+        # unknown to us, so there's no safe row to land a notice on --
+        # confirmed live via a real uMRC-as-a-door screenshot showing
+        # exactly this corruption (a login notice's raw write landing mid-
+        # screen and colliding with uMRC's own status bar redraw).
+        self._in_door = False
         # CP437 — the encoding ANSI BBSes have always spoken. SyncTERM,
         # NetRunner, mTelnet, and modern terminals all support it (most
         # auto-detect via the IBM-PC font). v172 briefly flipped this to
@@ -1344,7 +1357,19 @@ class BBSSession:
                         # paint over it. Route through MRC's own
                         # _show_transient_notice when it's the active
                         # screen (self-clears after 30s); otherwise fall
-                        # back to the plain raw write exactly as before.
+                        # back to the plain raw write exactly as before --
+                        # UNLESS a door subprocess currently owns the
+                        # screen (self._in_door), in which case even the
+                        # raw-write fallback is skipped entirely: a door's
+                        # screen layout is unknown to us (unlike MRC chat's
+                        # own known layout), so there's no safe row to land
+                        # a notice on at all. Confirmed live: a user
+                        # running uMRC as a door got this notice's raw
+                        # write colliding with uMRC's own status-bar
+                        # redraw, corrupting the screen with no way for
+                        # either side to clean it up.
+                        if getattr(self, '_in_door', False):
+                            continue
                         sink = getattr(self, '_mrc_chat_notice_sink', None)
                         try:
                             if sink is not None:

@@ -2476,6 +2476,11 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
                 continue
             send_input(sid, ch)
 
+    # From here until the finally: block below, this door subprocess owns
+    # the screen -- see BBSSession._in_door's own docstring (core/
+    # session.py) for why the cross-protocol presence-alert watchdog needs
+    # to know not to raw-write into it.
+    session._in_door = True
     out_task = asyncio.ensure_future(_output_pump())
     in_task = asyncio.ensure_future(_input_pump())
 
@@ -2524,6 +2529,7 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
                 idle_timeout_hit = True
                 break
     finally:
+        session._in_door = False
         # Real Medium finding from a security/performance audit
         # (2026-09-02): out_queue is fed from the PTY-reader background
         # THREAD via loop.call_soon_threadsafe() -- there's no
@@ -3036,6 +3042,10 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
             except Exception:
                 break
 
+    # From here until _in_door is reset below, this remote session owns
+    # the screen -- see BBSSession._in_door's own docstring (core/
+    # session.py).
+    session._in_door = True
     out_task = asyncio.ensure_future(_output_pump())
     in_task = asyncio.ensure_future(_input_pump())
 
@@ -3057,6 +3067,7 @@ async def play_rlogin_telnet(game, user, session, bbs_name='ANetBBS',
                 pass
     except Exception:
         pass
+    session._in_door = False
 
     try:
         writer.close()
@@ -3320,6 +3331,10 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
             except Exception:
                 break
 
+    # From here until _in_door is reset below, this remote session owns
+    # the screen -- see BBSSession._in_door's own docstring (core/
+    # session.py).
+    session._in_door = True
     out_task = asyncio.ensure_future(_output_pump())
     in_task = asyncio.ensure_future(_input_pump())
 
@@ -3336,6 +3351,7 @@ async def play_telnet_terminal(game, user, session, bbs_name='ANetBBS',
                 pass
     except Exception:
         pass
+    session._in_door = False
 
     try:
         writer.close()

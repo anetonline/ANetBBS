@@ -393,6 +393,67 @@ class PresenceAlertsTests(unittest.TestCase):
             any('bob' in line and 'logged in' in line for line in sunk),
             f'expected a "bob just logged in" line via the sink, got: {sunk}')
 
+    def test_presence_alert_watchdog_skips_entirely_while_in_a_door(self):
+        """Real sysop screenshot (2026-10-09): a user running uMRC as a
+        door got this watchdog's raw-write fallback landing mid-screen
+        and colliding with uMRC's own status-bar redraw -- uMRC has no
+        way to know about or safely absorb an out-of-band write like
+        MRC chat's own _mrc_chat_notice_sink does, since its screen
+        layout is entirely unknown to us. Fixed by having
+        BBSSession._in_door (set by door_runner.py for the exact window
+        a door subprocess/remote session owns the screen) suppress the
+        notice outright rather than routing it anywhere -- same
+        construction pattern as the sibling sink test above."""
+        import asyncio
+        from anetbbs.core.session import BBSSession
+
+        fake = object.__new__(BBSSession)
+        fake.user = {'id': self.alice_id}
+        fake._in_door = True
+        written = []
+        sunk = []
+
+        async def _fake_write(text):
+            written.append(text)
+
+        async def _fake_sink(text):
+            sunk.append(text)
+
+        fake.write = _fake_write
+        fake._mrc_chat_notice_sink = _fake_sink
+
+        async def _drive():
+            call_count = {'n': 0}
+
+            async def _fast_sleep(_secs):
+                call_count['n'] += 1
+                if call_count['n'] == 1:
+                    with self.app.app_context():
+                        from anetbbs.models import db, PresenceEvent
+                        db.session.add(PresenceEvent(
+                            user_id=self.bob_id, username='bob',
+                            kind='login', protocol='ssh'))
+                        db.session.commit()
+                    return
+                raise asyncio.CancelledError()
+
+            with patch('anetbbs.core.session.asyncio.sleep', _fast_sleep), \
+                 patch('anetbbs.features.bbs_ui._app', lambda: self.app):
+                fake._start_presence_alert_watchdog()
+                task = fake._presence_alert_task
+                try:
+                    await asyncio.wait_for(task, timeout=5)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+        asyncio.run(_drive())
+
+        self.assertEqual(written, [],
+            f'raw self.write() must not fire while in a door: {written}')
+        self.assertEqual(sunk, [],
+            f'the MRC sink must not fire either while in a door (a door '
+            f'subprocess, not MRC chat, owns the screen): {sunk}')
+
     def test_presence_alert_task_is_cancelled_on_session_teardown(self):
         """Real gap found in a security/performance audit (2026-08-31):
         unlike _hb_task/_kick_task/_budget_task, all cancelled in

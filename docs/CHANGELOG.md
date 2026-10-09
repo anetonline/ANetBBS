@@ -1,11 +1,38 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.31`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.32`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.32 — Login alert vs. doors; Command Deck top/bottom account menu (October 2026)
+
+A real sysop screenshot found the classic "*** X just logged in/out
+***" cross-protocol alert (v1.1.1 fixed it sticking on screen inside
+ANetBBS's own terminal MRC client) colliding with uMRC's own status
+bar when a user ran uMRC as a door — the watchdog that prints this
+alert keeps running no matter where a caller currently is in the BBS,
+and its raw-write fallback has no way to know a door subprocess
+currently owns the screen. Since a door's own screen layout is
+unknown to us (unlike MRC chat's own, which the existing fix routes
+through safely), the notice is now skipped outright for the exact
+window any door or remote-bridged session (door games, rlogin/telnet
+game-server bridges) owns the screen, rather than risking a corrupted
+write into content we don't control.
+
+Also fixed a real bug in the Command Deck web theme: with the nav
+rail docked to the top or bottom of the screen (Profile → Edit → Nav
+Position), opening the account menu (click your name) showed only
+"Logout" — every other option rendered off-screen. A CSS rule meant
+only for the rail's default vertical layout (anchoring that one
+dropdown to grow upward from the bottom of its trigger, needed there
+since the account group sits at the bottom of a vertical list) was
+more specific than the rule meant to redirect it for a horizontal
+bar, so it kept winning the cascade and pushed the menu off the top
+of the screen. Given its own equally-specific override for both
+positions, confirmed with a real before/after browser render.
 
 ## v1.1.31 — MRC bridge: stop silently dropping long chat messages (October 2026)
 

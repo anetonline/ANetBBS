@@ -573,6 +573,21 @@ a:hover { color: var(--cd-blue-dark); }
   body[data-nav-position="top"] .navbar.navbar-expand-lg + .bg-dark.border-bottom { margin-left: 0; }
   body[data-nav-position="top"] body > .container,
   body[data-nav-position="top"] body > .footer { margin-left: 20px; margin-right: 20px; }
+  /* Real sysop screenshot (2026-10-09): the vertical rail's own
+     bottom-pinned-account-group rule just above this media query
+     (.navbar .navbar-collapse > ul.navbar-nav:last-child .dropdown-menu,
+     "anchor to bottom edge, grow upward" -- needed there since that
+     group sits at the bottom of a vertical list) has 5 class-level
+     selectors to this block's own .navbar .dropdown-menu override's 3,
+     so it was STILL winning the cascade here despite coming first in
+     the file -- !important only breaks ties on EQUAL specificity, it
+     doesn't override specificity itself. With the top bar's trigger
+     only ~64px tall near the very top of the viewport, "grow upward
+     from bottom:0" pushed every item except the bottommost ("Logout")
+     off-screen above y=0. Needs its own equally-specific override. */
+  body[data-nav-position="top"] .navbar .navbar-collapse > ul.navbar-nav:last-child .dropdown-menu {
+    top: 100% !important; bottom: auto !important;
+  }
 
   /* ---- BOTTOM specifically — dropdowns must open upward; there's no
      room below a bar pinned to the viewport's own bottom edge. ---- */
@@ -587,6 +602,13 @@ a:hover { color: var(--cd-blue-dark); }
   body[data-nav-position="bottom"] .navbar.navbar-expand-lg + .bg-dark.border-bottom { margin-left: 0; }
   body[data-nav-position="bottom"] body > .container,
   body[data-nav-position="bottom"] body > .footer { margin-left: 20px; margin-right: 20px; }
+  /* Same specificity fix as TOP above -- here the account group's
+     bottom:0 anchor doesn't push it fully off-screen (the bar itself
+     is already pinned to the viewport bottom), but it still overlaps
+     the trigger row instead of sitting cleanly above it. */
+  body[data-nav-position="bottom"] .navbar .navbar-collapse > ul.navbar-nav:last-child .dropdown-menu {
+    bottom: 100% !important; top: auto !important;
+  }
 }
 
 /* ─────────────────────────────────────────
