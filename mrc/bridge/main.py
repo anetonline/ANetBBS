@@ -124,12 +124,6 @@ def _resolve_message_template(sess: dict, tpl_key: str, global_default: str,
     return _truncate_wire_message(msg)
 
 
-def _dm_wrapper(sender_display: str, message: str) -> str:
-    sender_display = sender_display.strip()
-    message        = message.strip()
-    return f"|15* |08(|15{sender_display}|08/|14DirectMsg|08) |07{message}"
-
-
 def _dm_wrapper_prefix(sender_display: str) -> str:
     """Return only the prefix portion of a DM wrapper (everything before the message text)."""
     return f"|15* |08(|15{sender_display.strip()}|08/|14DirectMsg|08) |07"
@@ -288,6 +282,54 @@ def _ctcp_build_reply(cmd: str, bbs_name: str = "ANetBBS") -> str:
 def _truncate_wire_message(body: str, max_len: int = MRC_MAX_MESSAGE_LEN) -> str:
     b = body or ""
     return b if len(b) <= max_len else b[:max_len]
+
+
+def _split_long_message(text: str, cap: int = MRC_MAX_MESSAGE_LEN,
+                        repeat_prefix: str = '') -> list:
+    """Split outgoing chat text into multiple wire-safe chunks (each
+    <= cap chars, INCLUDING repeat_prefix on every chunk) instead of
+    _truncate_wire_message()'s hard cut-and-discard. Real bug this
+    fixes (github.com/codefenix-dev/uMRC issue #27): a native
+    umrc-client connection sent a message that, once past this
+    bridge's wire budget, had its tail silently dropped with zero
+    indication anything was lost -- whole sentences vanished. uMRC's
+    own chunking not lining up with this bridge's exact overhead math
+    is a real, separate bug in a different project; this bridge
+    should never discard content a client sent regardless of how
+    (im)perfectly that client pre-chunked, so the fix belongs here,
+    not in every client that might ever connect.
+
+    Same word-boundary-aware splitting algorithm as
+    anetbbs/features/mrc_chat.py's own _split_for_wire() (a different
+    service/module -- ported standalone rather than imported across
+    the mrc/ <-> anetbbs/ boundary, matching this codebase's existing
+    self-contained-per-file convention for small shared helpers)."""
+    text = (text or '').rstrip('\r\n')
+    if not text:
+        return []
+    budget = max(1, cap - len(repeat_prefix))
+    if len(text) <= budget:
+        return [repeat_prefix + text]
+    inner = max(1, budget - 8)          # reserve "(99/99) " tag
+    words = text.split(' ')
+    chunks, cur = [], ''
+    for w in words:
+        while len(w) > inner:
+            if cur:
+                chunks.append(cur); cur = ''
+            chunks.append(w[:inner]); w = w[inner:]
+        if not cur:
+            cur = w
+        elif len(cur) + 1 + len(w) <= inner:
+            cur += ' ' + w
+        else:
+            chunks.append(cur); cur = w
+    if cur:
+        chunks.append(cur)
+    if len(chunks) <= 1:
+        return [repeat_prefix + c for c in chunks]
+    t = len(chunks)
+    return [f'{repeat_prefix}({i+1}/{t}) {c}' for i, c in enumerate(chunks)]
 
 
 _MIN_BACKGROUND_LOOP_INTERVAL = 5.0
@@ -2324,13 +2366,20 @@ class BridgeApp:
         if self._is_action_body(message):
             body = message.lstrip()
             if body.startswith("* "):
-                body = f"|15* |13{nick} {body[2:].strip()}|07"
+                action_text = body[2:].strip()
+                suffix = "|07"
+                cap = max(1, MRC_MAX_MESSAGE_LEN - len(suffix))
+                chunks = [c + suffix for c in _split_long_message(
+                    action_text, cap=cap, repeat_prefix=f"|15* |13{nick} ")]
+            else:
+                chunks = [_truncate_wire_message(body)]
         else:
-            body = f"{self._session_display_handle(sess)} {message}"
+            chunks = _split_long_message(
+                message, repeat_prefix=f"{self._session_display_handle(sess)} ")
 
-        body = _truncate_wire_message(body)
-        pkt  = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, "", room, body)
-        await self.mrc.send_packet(pkt)
+        for chunk in chunks:
+            pkt = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, "", room, chunk)
+            await self.mrc.send_packet(pkt)
 
     # ------------------------------------------------------------------
     # direct_message
@@ -2351,9 +2400,10 @@ class BridgeApp:
             await self._safe_send(ws, {"type": "error", "message": "Usage: /t <user> <message>"})
             return
 
-        body = _truncate_wire_message(_dm_wrapper(self._session_display_handle(sess), message))
-        pkt  = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, to_user, "", body)
-        await self.mrc.send_packet(pkt)
+        prefix = _dm_wrapper_prefix(self._session_display_handle(sess))
+        for chunk in _split_long_message(message, repeat_prefix=prefix):
+            pkt = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, to_user, "", chunk)
+            await self.mrc.send_packet(pkt)
 
     # ------------------------------------------------------------------
     # CTCP request
@@ -2677,21 +2727,29 @@ class BridgeApp:
 
         nick = self._session_effective_nick(sess)
         room = self._session_room(sess)
-        message = _truncate_wire_message(message)
 
-        if not to_user:
-            # Room broadcast -- umrc-client's default plain chat line
-            # already embeds its own styled display name into
-            # `message` itself (main.c's gDisplayChatterName prefix),
-            # so unlike _handle_send_message's WebSocket path (whose
-            # clients send plain unstyled text) this is forwarded
-            # as-is, not re-wrapped.
-            pkt = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, "", room, message)
-        else:
-            # Directed message (/t, /r) -- same reasoning, umrc-client
-            # already wrapped it with its own DirectMsg prefix.
-            pkt = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, to_user, "", message)
-        await self.mrc.send_packet(pkt)
+        # Split rather than _truncate_wire_message() -- real bug found
+        # live (github.com/codefenix-dev/uMRC issue #27): a message
+        # whose own client-side chunking didn't quite stay under this
+        # bridge's wire budget had its tail silently dropped, losing
+        # whole sentences with zero indication anything was lost.
+        # umrc-client's own plain chat line already embeds its own
+        # styled display name into `message` itself (main.c's
+        # gDisplayChatterName prefix), so unlike _handle_send_message's
+        # WebSocket path (whose clients send plain unstyled text) there
+        # is no separable prefix to re-apply per chunk here -- the
+        # nick/style only ever appears on the first chunk, same as any
+        # other client that embeds its own prefix client-side.
+        chunks = _split_long_message(message) or ['']
+
+        for chunk in chunks:
+            if not to_user:
+                # Room broadcast.
+                pkt = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, "", room, chunk)
+            else:
+                # Directed message (/t, /r).
+                pkt = MRCProtocol.create_message(nick, self.config["bridge_bbs"], room, to_user, "", chunk)
+            await self.mrc.send_packet(pkt)
 
     async def handle_mrc_tcp_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Raw-TCP counterpart of handle_websocket(), for a directly-

@@ -33,6 +33,7 @@ bearing assertion for the whole feature.
 """
 import asyncio
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -158,6 +159,12 @@ class _TcpBridgeHarness(unittest.IsolatedAsyncioTestCase):
         session_id, sess = next(iter(self.app.db.list_sessions().items()))
         return session_id, sess
 
+    async def _joined_client(self, handle, room="lobby"):
+        reader, writer = await self._connect()
+        await self._iamhere(writer, handle, room)
+        session_id, _ = await self._wait_for_single_session()
+        return reader, writer, session_id
+
 
 class MrcTcpJoinTests(_TcpBridgeHarness):
 
@@ -204,12 +211,6 @@ class MrcTcpJoinTests(_TcpBridgeHarness):
 
 
 class MrcTcpChatTests(_TcpBridgeHarness):
-
-    async def _joined_client(self, handle, room="lobby"):
-        reader, writer = await self._connect()
-        await self._iamhere(writer, handle, room)
-        session_id, _ = await self._wait_for_single_session()
-        return reader, writer, session_id
 
     async def test_room_broadcast_is_forwarded_unmodified_not_rewrapped(self):
         reader, writer, _sid = await self._joined_client("StingRay")
@@ -299,6 +300,78 @@ class MrcTcpChatTests(_TcpBridgeHarness):
 
         commands = [m["message"] for m in self.app.mrc.sent_messages()]
         self.assertIn("NEWROOM:lobby:general", commands)
+
+        writer.close()
+        await writer.wait_closed()
+
+
+class MrcTcpLongMessageSplitTests(_TcpBridgeHarness):
+    """Real bug found live (github.com/codefenix-dev/uMRC issue #27):
+    a message exceeding this bridge's MRC_MAX_MESSAGE_LEN (140) wire
+    cap had its tail silently dropped by _truncate_wire_message() --
+    whole sentences vanished with no indication anything was lost.
+    The bridge must now split an over-budget incoming message into
+    multiple wire packets that together carry the full original text,
+    rather than discarding whatever didn't fit in one packet -- this
+    must hold regardless of how (im)perfectly a connecting client's
+    own chunking lines up with our budget, since that's a bug class
+    that can recur in any client, not just this one."""
+
+    async def test_long_room_broadcast_is_split_not_truncated(self):
+        reader, writer, _sid = await self._joined_client("StingRay")
+        self.app.mrc.sent.clear()
+
+        sentences = ' '.join(f"This is sentence {i}." for i in range(1, 15))
+        long_text = (sentences + ' ').ljust(280, 'E')[:280]
+        self.assertEqual(len(long_text), 280)
+
+        await self._send(writer, "StingRay", "site", "lobby", "", "", "lobby", long_text)
+
+        ok = await self._wait_until(lambda: len(self.app.mrc.sent) >= 1, timeout=3.0)
+        self.assertTrue(ok)
+        await asyncio.sleep(0.2)  # let every chunk's packet land, not just the first
+
+        sent = self.app.mrc.sent_messages()
+        self.assertGreater(len(sent), 1, "a 280-char message must split into more than one packet")
+        for m in sent:
+            self.assertLessEqual(len(m["message"]), 140)
+
+        reassembled = ' '.join(m["message"] for m in sent)
+        # Strip the "(N/T) " continuation tags this bridge adds before
+        # checking every original word survived somewhere in the
+        # reassembled stream -- the real guarantee is no data loss, not
+        # a byte-for-byte reconstruction.
+        reassembled_plain = re.sub(r'\(\d+/\d+\)\s*', '', reassembled)
+        for word in long_text.split(' '):
+            if word:
+                self.assertIn(word, reassembled_plain)
+
+        writer.close()
+        await writer.wait_closed()
+
+    async def test_long_directed_message_is_split_not_truncated(self):
+        reader, writer, _sid = await self._joined_client("StingRay")
+        self.app.mrc.sent.clear()
+
+        long_text = ' '.join(f"word{i}" for i in range(1, 60))  # well over 140 chars
+        self.assertGreater(len(long_text), 140)
+
+        await self._send(writer, "StingRay", "site", "lobby", "NightOwl", "", "", long_text)
+
+        ok = await self._wait_until(lambda: len(self.app.mrc.sent) >= 1, timeout=3.0)
+        self.assertTrue(ok)
+        await asyncio.sleep(0.2)
+
+        sent = [m for m in self.app.mrc.sent_messages() if m["to_user"] == "NightOwl"]
+        self.assertGreater(len(sent), 1)
+        for m in sent:
+            self.assertLessEqual(len(m["message"]), 140)
+            self.assertEqual(m["to_room"], "")
+
+        reassembled_plain = re.sub(
+            r'\(\d+/\d+\)\s*', '', ' '.join(m["message"] for m in sent))
+        for word in long_text.split(' '):
+            self.assertIn(word, reassembled_plain)
 
         writer.close()
         await writer.wait_closed()

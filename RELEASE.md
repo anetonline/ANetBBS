@@ -1,3 +1,7 @@
+# ANetBBS v1.1.31 — MRC bridge: stop silently dropping long chat messages (October 2026)
+
+A real bug report against a native umrc-client connection (github.com/codefenix-dev/uMRC issue #27) found that a message exceeding the MRC bridge's 140-character wire limit had its tail silently dropped instead of carrying over — whole sentences vanished with no indication anything was lost. Rather than relying on every connecting client to pre-chunk its own messages with perfectly matching overhead math (a different project's own bug, not something this BBS can fix), the bridge itself now splits any outgoing message that would exceed the wire cap into multiple properly-sized packets that together carry the full original text, both for the native umrc-client TCP listener and the web MRC client's WebSocket path (room chat, direct messages, and `/me` actions all covered).
+
 # ANetBBS v1.1.30 — fsxNet IBOL: fix pipe-color codes in Author/Source fields (October 2026)
 
 A real sysop screenshot from live fsxNet traffic found that a source BBS name posted with per-letter rainbow pipe-color codes came through on the Oneliner wall as literal unconverted `|NN` text instead of actual colors — `_format_entry()` only ever ran the oneliner's body through the pipe-to-ANSI converter, never the Author/Source fields themselves, even though those are the same kind of free-text field a sysop can color exactly like the body. Both fields are now converted, with right-justification padding corrected to use the post-conversion visible width rather than raw character count.

@@ -1,11 +1,26 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.30`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.31`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.31 — MRC bridge: stop silently dropping long chat messages (October 2026)
+
+A real bug report against a native umrc-client connection
+(github.com/codefenix-dev/uMRC issue #27) found that a message
+exceeding the MRC bridge's 140-character wire limit had its tail
+silently dropped instead of carrying over — whole sentences vanished
+with no indication anything was lost. Rather than relying on every
+connecting client to pre-chunk its own messages with perfectly
+matching overhead math (a different project's own bug, not something
+this BBS can fix), the bridge itself now splits any outgoing message
+that would exceed the wire cap into multiple properly-sized packets
+that together carry the full original text, both for the native
+umrc-client TCP listener and the web MRC client's WebSocket path
+(room chat, direct messages, and `/me` actions all covered).
 
 ## v1.1.30 — fsxNet IBOL: fix pipe-color codes in Author/Source fields (October 2026)
 
