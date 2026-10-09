@@ -977,7 +977,19 @@ def create_app(config_name=None):
     # than loosening the site-wide policy for everyone else.
     _CSP_DOS_FRAME = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' "
+        # 'wasm-unsafe-eval' alone covers WebAssembly *compilation* only --
+        # real live bug (sysop browser console, 2026-10-09, same day as
+        # the style-src fix below): EmulatorJS's Emscripten-generated glue
+        # code (confirmed via the traceback: Object.cwrap, Emscripten's
+        # own runtime wrapper util) calls real eval()/new Function() for
+        # some of its dynamic symbol binding, which 'wasm-unsafe-eval'
+        # does NOT permit -- that's the whole point of it being a
+        # narrower, safer keyword than 'unsafe-eval'. A third-party WASM
+        # emulator's own runtime requirements aren't something we can
+        # change from here, so 'unsafe-eval' is added too, scoped only to
+        # this one already-isolated route (COOP/COEP + its own CSP), not
+        # site-wide.
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' "
         "https://cdn.emulatorjs.org; "
         # Real live bug (sysop browser console, 2026-10-09): every OTHER
         # directive here allows the CDN, but style-src didn't -- EmulatorJS

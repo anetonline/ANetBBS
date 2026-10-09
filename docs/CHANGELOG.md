@@ -1,13 +1,26 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.33`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.34`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
 
-## v1.1.33 — Fix in-browser DOOM/Duke3D: a CSP directive was missing the emulator's own CDN (October 2026)
+## v1.1.34 — DOOM/Duke3D follow-up: the WASM core needs real eval too (October 2026)
+
+A same-day follow-up to v1.1.33: with the stylesheet now loading, a
+sysop browser console turned up a second CSP gap — EmulatorJS's
+Emscripten-generated WASM glue code calls real `eval()`/`new
+Function()` for some of its dynamic symbol binding (confirmed via the
+traceback: `Object.cwrap`, Emscripten's own runtime wrapper utility),
+which `'wasm-unsafe-eval'` doesn't cover — that keyword only permits
+WebAssembly *compilation*, not general JS string evaluation. Added
+`'unsafe-eval'` to the dos-frame route's `script-src`, scoped only to
+that one already-isolated route (its own COOP/COEP headers, separate
+CSP from the rest of the site) rather than loosened anywhere else —
+confirmed by a new test that the site-wide default policy never gets
+it.
 
 A real sysop report ("DOOM and Duke Nukem 3D no longer work") traced, via the browser's own console output, to a single missing origin in the dos-frame page's Content-Security-Policy: every directive (`script-src`, `worker-src`, `connect-src`, `img-src`) allowed the EmulatorJS CDN except `style-src`, so the emulator's own stylesheet load was silently blocked. That cascaded into EmulatorJS's "minified files missing" fallback path, which then crashed outright — breaking both games completely, with nothing visible in server-side logs at all (a pure client-side CSP block never reaches Flask's access log, which is exactly why this went unnoticed for a while). Fixed by adding the CDN to `style-src` too, with a new regression test checking every directive generically rather than just the one that broke this time.
 

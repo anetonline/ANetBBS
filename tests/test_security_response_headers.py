@@ -84,6 +84,11 @@ class SecurityResponseHeadersTests(unittest.TestCase):
         self.assertEqual(resp.headers.get('Referrer-Policy'),
                          'strict-origin-when-cross-origin')
         self.assertIn('Permissions-Policy', resp.headers)
+        # 'unsafe-eval' is a real, deliberate relaxation scoped ONLY to
+        # the isolated games.dos_frame route (see that test below) for a
+        # third-party WASM emulator's own runtime needs -- must never
+        # leak into the site-wide default policy.
+        self.assertNotIn("'unsafe-eval'", resp.headers['Content-Security-Policy'])
 
     def test_watch_page_stays_embeddable_from_any_origin(self):
         """The regression guard watch.py's own docstring asks for: this
@@ -153,6 +158,18 @@ class SecurityResponseHeadersTests(unittest.TestCase):
             self.assertIsNotNone(rule, f'{directive} missing from dos_frame CSP entirely')
             self.assertIn('https://cdn.emulatorjs.org', rule,
                           f'{directive} does not allow the EmulatorJS CDN: {rule!r}')
+        # Real live follow-up (same day, 2026-10-09): 'wasm-unsafe-eval'
+        # alone only covers WebAssembly *compilation* -- EmulatorJS's
+        # Emscripten-generated glue code (confirmed via the real browser
+        # traceback: Object.cwrap, Emscripten's own runtime wrapper)
+        # calls real eval()/new Function() too, which that narrower
+        # keyword does not permit. 'unsafe-eval' is scoped only to this
+        # one already-isolated route, not site-wide -- confirmed by the
+        # ordinary-page test above never seeing it.
+        script_src = next(d.strip() for d in csp.split(';')
+                          if d.strip().startswith('script-src'))
+        self.assertIn("'unsafe-eval'", script_src)
+        self.assertIn("'wasm-unsafe-eval'", script_src)
         # Also still isolated via COOP/COEP, same as the module docstring
         # describes -- a quick sanity check this test is on the right page.
         self.assertEqual(resp.headers.get('Cross-Origin-Opener-Policy'), 'same-origin')
