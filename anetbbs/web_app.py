@@ -979,7 +979,15 @@ def create_app(config_name=None):
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' "
         "https://cdn.emulatorjs.org; "
-        "style-src 'self' 'unsafe-inline'; "
+        # Real live bug (sysop browser console, 2026-10-09): every OTHER
+        # directive here allows the CDN, but style-src didn't -- EmulatorJS
+        # loads its own stylesheet (emulator.min.css/emulator.css) from
+        # there, and the blocked load cascaded into its "minified files
+        # missing" fallback path, which then crashed outright
+        # (TypeError: Cannot read properties of undefined (reading 'AL')),
+        # breaking DOOM/Duke3D entirely with nothing logged server-side --
+        # a pure client-side CSP block never reaches Flask's access log.
+        "style-src 'self' 'unsafe-inline' https://cdn.emulatorjs.org; "
         "worker-src 'self' blob: https://cdn.emulatorjs.org; "
         "connect-src 'self' https://cdn.emulatorjs.org; "
         "img-src 'self' data: blob: https://cdn.emulatorjs.org; "

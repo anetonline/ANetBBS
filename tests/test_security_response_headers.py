@@ -45,12 +45,25 @@ class SecurityResponseHeadersTests(unittest.TestCase):
         os.environ['FLASK_ENV'] = 'testing'
 
         from anetbbs.web_app import create_app
-        from anetbbs.models import db
+        from anetbbs.models import db, User
         cls.app = create_app('testing')
         cls.app.config['TESTING'] = True
         cls.app.config['PUBLIC_WATCH_ENABLED'] = True
         with cls.app.app_context():
             db.create_all()
+            u = User(username='csptester', email='csptester@example.com',
+                     is_active=True)
+            u.set_password('password12345')
+            db.session.add(u)
+            db.session.commit()
+            cls.user_id = u.id
+
+    def _logged_in_client(self):
+        client = self.app.test_client()
+        with client.session_transaction() as sess:
+            sess['_user_id'] = str(self.user_id)
+            sess['_fresh'] = True
+        return client
 
     @classmethod
     def tearDownClass(cls):
@@ -100,6 +113,50 @@ class SecurityResponseHeadersTests(unittest.TestCase):
         csp = resp.headers.get('Content-Security-Policy', '')
         img_src = next((d for d in csp.split(';') if d.strip().startswith('img-src')), '')
         self.assertIn('blob:', img_src)
+
+    def test_dos_frame_csp_allows_the_emulatorjs_cdn_in_every_directive(self):
+        """Real live bug (sysop browser console, 2026-10-09): every OTHER
+        directive here allowed https://cdn.emulatorjs.org, but style-src
+        didn't -- EmulatorJS loads its own stylesheet from there, and the
+        blocked load cascaded into its "minified files missing" fallback
+        path, which then crashed outright, breaking DOOM/Duke3D entirely
+        with nothing logged server-side (a pure client-side CSP block
+        never reaches Flask's access log, which is exactly why this
+        slipped by unnoticed -- the games.dos_frame docstring this file's
+        own module docstring already references had no actual test
+        covering it). Checks every directive generically instead of just
+        style-src, so the same gap in any OTHER directive would also be
+        caught, not just a repeat of this one specific bug."""
+        from anetbbs.models import db, Game
+        with self.app.app_context():
+            game = Game.query.filter_by(slug='doom').first()
+            if game is None:
+                game = Game.query.filter_by(game_type='door_dos_browser').first()
+            if game is None:
+                self.skipTest('no door_dos_browser game seeded (doom.zip/'
+                             'duke3d.zip missing from data/dos-games/) -- '
+                             'nothing to test the CSP against')
+            slug = game.slug
+            if not game.is_active:
+                game.is_active = True
+                db.session.commit()
+
+        client = self._logged_in_client()
+        resp = client.get(f'/games/dos-frame/{slug}')
+        self.assertEqual(resp.status_code, 200)
+        csp = resp.headers.get('Content-Security-Policy', '')
+        self.assertIn('cdn.emulatorjs.org', csp)
+        for directive in ('script-src', 'style-src', 'worker-src',
+                          'connect-src', 'img-src'):
+            rule = next((d.strip() for d in csp.split(';')
+                        if d.strip().startswith(directive)), None)
+            self.assertIsNotNone(rule, f'{directive} missing from dos_frame CSP entirely')
+            self.assertIn('https://cdn.emulatorjs.org', rule,
+                          f'{directive} does not allow the EmulatorJS CDN: {rule!r}')
+        # Also still isolated via COOP/COEP, same as the module docstring
+        # describes -- a quick sanity check this test is on the right page.
+        self.assertEqual(resp.headers.get('Cross-Origin-Opener-Policy'), 'same-origin')
+        self.assertEqual(resp.headers.get('Cross-Origin-Embedder-Policy'), 'credentialless')
 
     def test_no_hsts_over_plain_http(self):
         client = self.app.test_client()
