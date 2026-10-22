@@ -121,12 +121,25 @@ class GeneratedUnitDirectiveTests(unittest.TestCase):
         for forbidden in TERMINAL_MUST_NOT_HAVE:
             self.assertNotIn(forbidden, directive_only)
 
-    def test_install_sh_readwritepaths_point_at_data_and_logs(self):
+    def test_install_sh_readwritepaths_still_carve_out_data_and_logs(self):
+        # Real gap found in a later audit, fixed, then refined once
+        # more after a follow-up review asked whether the fix granted
+        # more write access than necessary: only anetbbs-web.service
+        # (which already needs full tree write for its self-upgrade
+        # feature, /home or not) uses the broad $RWPATHS variable now.
+        # The other 4 units keep this exact original literal
+        # unconditionally, and separately gain a conditional
+        # ReadOnlyPaths= line (see
+        # tests/test_protecthome_home_install_rwpaths.py for the full
+        # behavioral verification of both carve-outs).
         for unit in ('anetbbs-mrc-bridge', 'anetbbs-binkp', 'anetbbs-finger',
-                     'anetbbs-web'):
+                     'anetbbs'):
             body = _extract_heredoc(self.install_sh, unit)
             self.assertIn('ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs',
                            body, f'{unit} has the wrong ReadWritePaths')
+        web_body = _extract_heredoc(self.install_sh, 'anetbbs-web')
+        self.assertIn('ReadWritePaths=$RWPATHS', web_body,
+                      'anetbbs-web should use the broad $RWPATHS')
 
 
 class DeployTemplateDirectiveTests(unittest.TestCase):
