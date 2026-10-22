@@ -902,13 +902,50 @@ class BBSSession:
         behavior, unchanged).
 
         Raises CarrierLost if the transport has gone away — callers
-        must not confuse this with bare-Enter (both used to look like '')."""
+        must not confuse this with bare-Enter (both used to look like '').
+
+        Real gap found in a live compatibility review (2026-10-22): this
+        used to call `_read_byte_maybe_spinning()` directly instead of
+        `read_raw()`, skipping `handle_telnet_command()`'s own telnet IAC
+        parsing entirely -- unlike read_line()/read_password(), which
+        both go through read_raw() and therefore already got this for
+        free. A NAWS resize (or any other IAC negotiation) arriving while
+        a single-key "Choice:" menu was active got read one raw byte at
+        a time with none of the usual IAC/SB/SE stripping: non-printable
+        bytes mostly got silently dropped by the checks below, but
+        WHICHEVER byte of the sequence happened to be printable ASCII
+        (true for most real terminal widths/heights -- e.g. width 80's
+        low byte is 0x50 = 'P') got treated as a real keystroke, firing
+        an unintended menu selection. Confirmed live: a real NAWS(80,24)
+        sequence sent at a main-menu "Choice:" prompt produced two
+        spurious "Unknown choice '?'" redraws (from the IAC/SB bytes
+        decoding to the U+FFFD replacement character under utf-8
+        errors='replace', which the CP437 write layer renders as '?')
+        followed by an unintended jump into the PM Inbox screen (from
+        the payload's 'P' byte). Never crashed or hung the session --
+        confirmed via the same live review -- just silently misnavigated
+        it, which is arguably worse.
+
+        Fixed by switching to read_raw(), the exact same primitive
+        read_line()/read_password() already use -- no new/duplicate
+        parsing logic. This also means read_key() now automatically
+        inherits the IAC SB payload cap (_MAX_SB_PAYLOAD_BYTES, see
+        handle_telnet_command()'s own docstring) for free, though it was
+        never vulnerable to that specific bug itself (it held no
+        cross-call buffer to grow unboundedly in the first place -- a
+        different, narrower problem than read_line()'s). An escaped IAC
+        IAC pair (or any other byte handle_telnet_command() fully
+        consumes as negotiation) now correctly produces no keystroke at
+        all, matching read_line()'s own already-reviewed behavior for
+        that same pre-existing, separately-tracked gap -- not "fixed" in
+        the RFC-854-collapse-to-0xFF sense, but no longer capable of
+        leaking into a menu selection either."""
         if prompt:
             await self.write(prompt)
         self._spy_flush()
         while True:
             try:
-                ch = await self._read_byte_maybe_spinning(1, allow_afk=True)
+                ch = await self.read_raw(1, allow_afk=True)
             except _AFKInterrupted:
                 # AFK warning/screensaver just ended -- the dismissing
                 # keystroke is consumed, not treated as this prompt's
@@ -926,26 +963,17 @@ class BBSSession:
                 elif prompt:
                     await self.write(prompt)
                 continue
-            except (ConnectionError, BrokenPipeError, EOFError) as e:
-                raise CarrierLost(str(e)) from e
-            except TimeoutError as e:
-                # Real gap found via a no-network regression harness (an
-                # operator's own tooling): read_key() calls
-                # _read_byte_maybe_spinning() directly rather than going
-                # through read_raw() -- so it never got read_raw()'s own
-                # stored-reader-exception handling. With AFK disabled
-                # (the common case), _read_byte_maybe_spinning() takes a
-                # fast path with no wait_for wrapper at all, so a stored
-                # connection exception (see _reader_stored_exception's
-                # docstring) came straight out of self.reader.read() as
-                # a raw TimeoutError, uncaught here -- not a spin by
-                # itself, but inconsistent with every other disconnect
-                # path in this codebase (always CarrierLost), and one
-                # bad caller-side except clause away from being swallowed
-                # into the same busy-loop shape already fixed elsewhere.
-                raise CarrierLost(str(e)) from e
             if not ch:
-                raise CarrierLost('client disconnected')
+                # read_raw() already raises CarrierLost itself for a
+                # real disconnect (EOF) before ever returning normally --
+                # an empty return here means a byte WAS received but was
+                # fully consumed as telnet negotiation (one byte of a
+                # multi-byte IAC sequence, an IAC SB subnegotiation's own
+                # terminator, an escaped IAC IAC pair, etc.), not a lost
+                # connection. Just keep waiting for the next real
+                # keystroke, same as read_line() already does for this
+                # exact scenario.
+                continue
             # Bare Enter: no-op (lets menus redraw without selecting).
             if ch in (b'\r', b'\n'):
                 await self.write('\r\n')
@@ -985,11 +1013,24 @@ class BBSSession:
 
         CSI sequences (PgUp = ESC [ 5 ~, PgDn = ESC [ 6 ~, etc.) are read
         byte-by-byte until the VT final byte (0x40–0x7E) so they are never
-        fragmented by a partial stream.read() return."""
+        fragmented by a partial stream.read() return.
+
+        Same fix and reasoning as read_key() (see its own docstring for
+        the full incident) applied here -- this function has the
+        identical bypass-of-handle_telnet_command() shape, and drives
+        every lightbar-style menu (e.g. the login menu's "Up/Dn Move,
+        Enter Select, 1-3 Direct" screen) -- just as reachable in real
+        use as a single-key "Choice:" prompt. The ESC/CSI/SS3
+        continuation-byte reads further down intentionally keep using
+        raw self.reader.read() calls, unchanged -- those are genuine
+        escape-sequence continuation bytes once already inside a known
+        sequence, not telnet negotiation, matching
+        _read_byte_maybe_spinning()'s own documented principle that only
+        the FIRST byte of a new keystroke needs this handling."""
         self._spy_flush()
         while True:
             try:
-                ch = await self._read_byte_maybe_spinning(1, allow_afk=True)
+                ch = await self.read_raw(1, allow_afk=True)
             except _AFKInterrupted:
                 # No prompt owned at this level -- if the caller gave us
                 # a redraw hook, use it (a lightbar-style menu still
@@ -1004,14 +1045,10 @@ class BBSSession:
                     except Exception:
                         pass
                 continue
-            except (ConnectionError, BrokenPipeError, EOFError) as e:
-                raise CarrierLost(str(e)) from e
-            except TimeoutError as e:
-                # Same gap as read_key()'s identical handler -- see its
-                # comment for the full reasoning.
-                raise CarrierLost(str(e)) from e
             if not ch:
-                raise CarrierLost('client disconnected')
+                # Telnet-consumed, not a disconnect -- see read_key()'s
+                # identical check for the full reasoning.
+                continue
             if ch == b'\r':
                 return 'ENTER'
             if ch == b'\n':
