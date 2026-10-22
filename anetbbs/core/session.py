@@ -328,6 +328,14 @@ MSSP = bytes([70])   # MUD Server Status Protocol
 MCCP2 = bytes([86])  # MUD Client Compression Protocol v2
 GMCP = bytes([201])  # Generic MUD Communication Protocol
 
+# Hard cap on an IAC SB subnegotiation's payload length (see
+# BBSSession.handle_telnet_command()'s docstring) -- generous for every
+# subnegotiation this code actually parses or sends (NAWS is 4 bytes,
+# TTYPE a short string, MSSP/MCCP2/GMCP all small), but small enough to
+# bound how much an unterminated/malicious one can cost before it's
+# abandoned.
+_MAX_SB_PAYLOAD_BYTES = 2048
+
 class BBSSession:
     def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                  config: Dict[str, Any], prefill_username: Optional[str] = None,
@@ -441,6 +449,16 @@ class BBSSession:
         self._prefill_authenticated_user = prefill_authenticated_user or None
         self.buffer = bytearray()
         self.telnet_command_buffer = bytearray()
+        # Set by handle_telnet_command() when an IAC SB subnegotiation's
+        # payload exceeds _MAX_SB_PAYLOAD_BYTES without an IAC SE
+        # terminator ever showing up -- see that method's docstring.
+        self._telnet_sb_overflow = False
+        # True only while _telnet_sb_overflow is also True AND the very
+        # last discarded byte was IAC -- lets the terminator be found
+        # even when it arrives split as IAC in one 1-byte read and SE
+        # in the next (the normal read pattern for this module), while
+        # still never re-buffering more than this one extra byte.
+        self._telnet_sb_overflow_had_iac = False
         # MUD telnet protocol extensions (MSSP/MCCP2/GMCP) -- off by
         # default for every ordinary BBS session, flipped on only by a
         # door that wants to speak them (see
@@ -2644,8 +2662,79 @@ class BBSSession:
         correctly resumes exactly where the previous call left off,
         regardless of how the sequence happens to be split across
         reads.
+
+        Second real gap found in a later security audit: the above
+        fix has no size cap. A client that sends IAC SB <option> and
+        then simply never sends the terminating IAC SE grows
+        self.telnet_command_buffer by one byte per call forever (every
+        real caller reads one byte at a time), and each call re-scans
+        the whole thing from byte zero looking for IAC SE -- O(n)
+        memory and O(n^2) total CPU for n bytes streamed, pre-
+        authentication, from a single slow attacker (even one byte
+        every few seconds). Because this is driven by bytes arriving
+        rather than idle time, read_raw()'s own idle-timeout never
+        fires, and because every session shares one asyncio event
+        loop, a bad enough backlog can start starving every other
+        logged-in user's reads too.
+
+        Fixed the same way read_password()'s _MAX_PASSWORD_CHARS and
+        rlogin_server.py's _MAX_HEADER_BYTES already bound their own
+        per-call accumulation: once an in-progress SB payload exceeds
+        _MAX_SB_PAYLOAD_BYTES without finding IAC SE, abandon it rather
+        than keep carrying the (ever-growing) raw span forward in
+        telnet_command_buffer. "Abandon" means switching to
+        self._telnet_sb_overflow -- a single bool, not a buffer -- so
+        from that point on we're just scanning each new chunk of bytes
+        for the eventual IAC SE (discarding everything else, never
+        re-accumulating it) until it shows up, or forever if it never
+        does; either way memory use is O(1) regardless of how long an
+        attacker keeps streaming, and CPU per call is proportional only
+        to that call's own (typically 1-byte) chunk, never to how much
+        garbage has already gone by. No real client ever needs this:
+        the only subnegotiations this code actually parses or sends are
+        NAWS (4 payload bytes), TTYPE (a short terminal-name string),
+        and the MUD-protocol trio MSSP/MCCP2/GMCP (see
+        mud_protocol_negotiate_start()) -- GMCP payloads inbound from a
+        real MUD client aren't even consumed below (no option==GMCP[0]
+        branch exists), so there is nothing a legitimate client could
+        ever lose by hitting this cap.
         """
-        data = bytes(self.telnet_command_buffer) + bytes(data)
+        if self._telnet_sb_overflow:
+            # Still discarding bytes from a previously-abandoned,
+            # unterminated subnegotiation -- look for its IAC SE
+            # terminator in this new chunk without ever re-buffering
+            # what's already gone by (see docstring above). Also check
+            # for the terminator split exactly across the call
+            # boundary (IAC as the very last byte discarded last call,
+            # SE as the very first byte of this one) -- the dominant
+            # real-world read pattern here is one byte per call, so
+            # without this check a terminator that happens to land
+            # that way would never be recognized and every later byte
+            # of the session would be discarded as "still inside the
+            # subnegotiation" forever. Tracking just this one extra
+            # byte's worth of state keeps memory use O(1), same as the
+            # rest of this fix.
+            data = bytes(data)
+            if self._telnet_sb_overflow_had_iac and data[:1] == SE:
+                self._telnet_sb_overflow = False
+                self._telnet_sb_overflow_had_iac = False
+                data = data[1:]
+                if not data:
+                    return b''
+            else:
+                se_pos = data.find(IAC + SE)
+                if se_pos == -1:
+                    self._telnet_sb_overflow_had_iac = data[-1:] == IAC if data else False
+                    return b''
+                self._telnet_sb_overflow = False
+                self._telnet_sb_overflow_had_iac = False
+                data = data[se_pos + 2:]
+                if not data:
+                    return b''
+        else:
+            data = bytes(data)
+
+        data = bytes(self.telnet_command_buffer) + data
         self.telnet_command_buffer = bytearray()
         if not data:
             return b''
@@ -2697,26 +2786,47 @@ class BBSSession:
                         break
                     option = data[i]
                     i += 1
-                    # Collect payload bytes until IAC SE
+                    # Collect payload bytes until IAC SE, capped at
+                    # _MAX_SB_PAYLOAD_BYTES (see docstring above) --
+                    # past that we stop accumulating and just keep
+                    # scanning for the terminator instead.
                     payload = bytearray()
                     found_se = False
+                    overflowed = False
                     while i < len(data):
                         if data[i:i+1] == IAC and i + 1 < len(data) and data[i+1:i+2] == SE:
                             i += 2
                             found_se = True
                             break
-                        payload.append(data[i])
+                        if len(payload) < _MAX_SB_PAYLOAD_BYTES:
+                            payload.append(data[i])
+                        else:
+                            overflowed = True
                         i += 1
                     if not found_se:
-                        # Ran out of data mid-payload -- resume from the
-                        # very start of this SB sequence next time (the
-                        # full IAC SB <option> prefix, not just the
-                        # unconsumed payload tail), since a freshly
-                        # re-entered outer loop needs that prefix to
-                        # know it's still inside a subnegotiation rather
-                        # than looking at ordinary bytes.
-                        self.telnet_command_buffer = bytearray(data[sb_start:])
+                        if overflowed:
+                            # Already past the cap with no terminator
+                            # in sight -- abandon it (O(1) going
+                            # forward) rather than keep carrying this
+                            # ever-growing span in telnet_command_buffer.
+                            self._telnet_sb_overflow = True
+                        else:
+                            # Still within the cap -- ran out of data
+                            # mid-payload, the normal/expected case.
+                            # Resume from the very start of this SB
+                            # sequence next time (the full IAC SB
+                            # <option> prefix, not just the unconsumed
+                            # payload tail), since a freshly re-entered
+                            # outer loop needs that prefix to know it's
+                            # still inside a subnegotiation rather than
+                            # looking at ordinary bytes.
+                            self.telnet_command_buffer = bytearray(data[sb_start:])
                         break
+                    if overflowed:
+                        # Terminator eventually showed up, but we
+                        # discarded payload past the cap -- nothing
+                        # meaningful survived to act on.
+                        continue
                     # NAWS: cols-hi cols-lo rows-hi rows-lo
                     if option == NAWS[0] and len(payload) >= 4:
                         cols = (payload[0] << 8) | payload[1]
