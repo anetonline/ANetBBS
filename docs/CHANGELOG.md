@@ -1,11 +1,34 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.53`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.54`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.54 — Telnet negotiation hardening and installer fix (October 2026)
+
+- Hardened the telnet protocol negotiation handler against malformed
+  or oversized input: a subnegotiation sequence is now bounded to a
+  fixed maximum size before being abandoned, rather than being allowed
+  to grow without limit while waiting for its terminator. Normal
+  terminal-resize, terminal-type, and MUD-protocol negotiation are
+  unaffected.
+- Fixed single-keystroke menu prompts (the main "Choice:" menus and
+  lightbar-style navigation screens) so that telnet protocol
+  negotiation — most commonly a terminal-resize notification — can no
+  longer be misread as a real keystroke. Previously, a resize arriving
+  while one of these menus was on screen could occasionally be
+  misinterpreted as a menu selection; it is now handled the same way
+  normal text-entry prompts already handled it, with no effect on
+  real keystrokes, arrow-key navigation, or terminal resizing itself.
+- Fixed the installer/updater's systemd unit generation so that an
+  install located under a user's home directory no longer risks
+  failing to start after an update or a fresh install — a sandboxing
+  directive meant to restrict filesystem access didn't account for
+  that install location. Installs using the default system location
+  are unaffected.
 
 ## v1.1.53 — BinkP hub-recognition fix for FTN point notation (October 2026)
 
