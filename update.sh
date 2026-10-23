@@ -272,31 +272,48 @@ fi
 # services aren't stopped yet (that's Step 3) so the DB might be
 # mid-write; cp can produce a torn snapshot that fails to open with
 # "database disk image is malformed", while .backup uses the WAL to
-# produce a consistent snapshot under concurrent writes. Fall back to
-# cp only if sqlite3(1) isn't installed.
+# produce a consistent snapshot under concurrent writes.
+#
+# Real gap found in a follow-up review: this used to fall back to a
+# raw cp(1) if sqlite3 wasn't installed OR if .backup itself failed --
+# a raw copy of a LIVE, possibly mid-write WAL-mode database can
+# silently omit committed transactions still sitting in the -wal file,
+# producing a backup that opens fine but is quietly missing data,
+# while this function still reported success. No fallback anymore:
+# sqlite3 is now REQUIRED, .backup must succeed, and the resulting
+# backup file must then pass its own PRAGMA integrity_check (exactly
+# "ok", not merely "didn't error") before this function reports
+# success -- a backup that opens but fails integrity_check is treated
+# identically to one that failed to create at all.
 #
 # Returns 0 if the source doesn't exist (nothing to back up, not a
-# failure) or the backup succeeded; 1 only when the source file exists
-# but every backup method failed -- the caller aborts on that, since a
-# DB that exists but couldn't be backed up means no real rollback
-# point exists for it. Doesn't try to guess which of anetbbs.db /
-# anetbbs_dev.db is the "real" one in use (some installs run against
-# either via DATABASE_URL) -- both are treated as equally critical.
+# failure) or the backup succeeded AND passed integrity_check; 1 if
+# sqlite3 isn't installed, if .backup fails, or if the resulting
+# backup fails integrity_check -- the caller aborts on any of these,
+# since a DB that exists but couldn't be safely backed up means no
+# real rollback point exists for it. Doesn't try to guess which of
+# anetbbs.db / anetbbs_dev.db is the "real" one in use (some installs
+# run against either via DATABASE_URL) -- both are treated as equally
+# critical.
 backup_sqlite() {
     local src="$1" dst="$2" label="$3"
     [[ -f "$src" ]] || return 0
-    if command -v sqlite3 >/dev/null 2>&1; then
-        if sqlite3 "$src" ".backup '$dst'" 2>/dev/null; then
-            ok "Backed up $label (sqlite3 .backup, $(du -h "$dst" | cut -f1))"
-            return 0
-        fi
-        warn "sqlite3 .backup of $label failed — falling back to cp"
+    if ! command -v sqlite3 >/dev/null 2>&1; then
+        warn "sqlite3(1) is not installed — cannot safely back up $label (a raw copy of a live database can silently omit committed WAL transactions, so there is no safe fallback)"
+        return 1
     fi
-    if cp "$src" "$dst"; then
-        ok "Backed up $label (cp)"
-        return 0
+    if ! sqlite3 "$src" ".backup '$dst'" 2>/dev/null; then
+        warn "sqlite3 .backup of $label failed"
+        return 1
     fi
-    return 1
+    local _integrity
+    _integrity=$(sqlite3 "$dst" "PRAGMA integrity_check;" 2>/dev/null)
+    if [[ "$_integrity" != "ok" ]]; then
+        warn "$label backup failed integrity_check (expected 'ok', got: ${_integrity:-<empty>})"
+        return 1
+    fi
+    ok "Backed up $label (sqlite3 .backup, integrity_check ok, $(du -h "$dst" | cut -f1))"
+    return 0
 }
 if ! backup_sqlite "$INSTALL_DIR/data/anetbbs.db" "$BACKUP_DIR/anetbbs.db.bak" "production DB"; then
     fail "Could not back up data/anetbbs.db — aborting before touching anything live."
