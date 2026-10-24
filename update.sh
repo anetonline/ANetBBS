@@ -1667,6 +1667,72 @@ SVCEOF
     ok "anetbbs-finger.service installed"
 fi
 
+# Retrofit systemd sandboxing directives onto units that predate them.
+# Real gap found during v1.1.54 Pi staging: every unit-creation block
+# above only runs "if the unit file doesn't exist yet" -- so an install
+# that has only ever run update.sh (never a fresh install.sh) since the
+# sandboxing directives were added across two earlier security audits
+# never actually received them. A systemd drop-in override is used
+# here instead of rewriting the main unit file, so this never touches
+# or risks any other line (ExecStart, a sysop's own edit, etc.) already
+# in that file -- a drop-in only ever adds on top, which is exactly
+# what override.conf is for. Gated on the main unit file itself still
+# missing ProtectHome= -- a unit this script just freshly installed
+# above, or one a future install.sh already hardens directly, is left
+# alone rather than getting a redundant drop-in.
+_retrofit_hardening() {
+    local svc="$1"
+    local unit_file="/etc/systemd/system/${svc}.service"
+    [[ -f "$unit_file" ]] || return 0
+    grep -q '^ProtectHome=' "$unit_file" && return 0
+    local dropin_dir="${unit_file}.d"
+    mkdir -p "$dropin_dir"
+    shift
+    {
+        echo "[Service]"
+        printf '%s\n' "$@"
+    } > "$dropin_dir/10-security-hardening.conf"
+    ok "${svc}.service: added security-hardening drop-in (pre-existing install, main unit left untouched)"
+}
+
+# NoNewPrivileges intentionally omitted here -- the Service Control
+# Center's sudo-based restart/upgrade actions need to keep escalating.
+_retrofit_hardening anetbbs-web \
+    "PrivateTmp=yes" "ProtectHome=yes" "ProtectKernelTunables=yes" \
+    "ProtectKernelModules=yes" "ProtectKernelLogs=yes" "ProtectControlGroups=yes" \
+    "RestrictSUIDSGID=yes" "RestrictNamespaces=yes" "RestrictRealtime=yes" \
+    "LockPersonality=yes" "SystemCallArchitectures=native" "ProtectSystem=full" \
+    "ReadWritePaths=$RWPATHS" "ProtectClock=yes" "ProtectHostname=yes" \
+    "MemoryDenyWriteExecute=yes" "SystemCallFilter=@system-service" \
+    "SystemCallErrorNumber=EPERM"
+
+# No ProtectSystem=/MemoryDenyWriteExecute=/SystemCallFilter= here --
+# this unit launches sysop-configured door-game subprocesses that can
+# live anywhere on disk and may need writable+executable memory
+# (DOSBox's dynamic recompiler core), matching the fresh-install
+# heredoc above exactly.
+_retrofit_hardening anetbbs \
+    "NoNewPrivileges=yes" "PrivateTmp=yes" "ProtectHome=yes" \
+    "ProtectKernelTunables=yes" "ProtectKernelModules=yes" "ProtectKernelLogs=yes" \
+    "ProtectControlGroups=yes" "RestrictSUIDSGID=yes" "RestrictNamespaces=yes" \
+    "RestrictRealtime=yes" "LockPersonality=yes" "SystemCallArchitectures=native" \
+    "ProtectClock=yes" "ProtectHostname=yes" \
+    "${HOME_ROPATH:+ReadOnlyPaths=$HOME_ROPATH}" \
+    "ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs"
+
+for _strict_svc in anetbbs-mrc-bridge anetbbs-binkp anetbbs-finger; do
+    _retrofit_hardening "$_strict_svc" \
+        "NoNewPrivileges=yes" "PrivateTmp=yes" "ProtectHome=yes" \
+        "ProtectKernelTunables=yes" "ProtectKernelModules=yes" "ProtectKernelLogs=yes" \
+        "ProtectControlGroups=yes" "RestrictSUIDSGID=yes" "RestrictNamespaces=yes" \
+        "RestrictRealtime=yes" "LockPersonality=yes" "SystemCallArchitectures=native" \
+        "ProtectSystem=strict" "${HOME_ROPATH:+ReadOnlyPaths=$HOME_ROPATH}" \
+        "ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs" "ProtectClock=yes" \
+        "ProtectHostname=yes" "MemoryDenyWriteExecute=yes" \
+        "SystemCallFilter=@system-service" "SystemCallErrorNumber=EPERM"
+done
+unset _strict_svc
+
 # Ensure MRC bridge config.json exists
 if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
     info "Generating MRC bridge config.json ..."
