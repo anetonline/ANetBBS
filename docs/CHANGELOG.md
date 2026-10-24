@@ -27,8 +27,18 @@ release is preserved in
   install located under a user's home directory no longer risks
   failing to start after an update or a fresh install — a sandboxing
   directive meant to restrict filesystem access didn't account for
-  that install location. Installs using the default system location
-  are unaffected.
+  that install location, and a first revision of this fix did not yet
+  work correctly in every case. This now also applies automatically to
+  an already-existing install that has only ever been upgraded, not
+  just a fresh install. Installs using the default system location are
+  unaffected either way.
+- Improved the updater's database backup step so that it always
+  verifies a backup's integrity before reporting success, with no
+  fallback to a less safe copy method if the normal one is ever
+  unavailable.
+- Fixed the web file areas listing so that categories are displayed in
+  their configured order, rather than an order influenced by which
+  area happened to be listed first.
 
 ## v1.1.53 — BinkP hub-recognition fix for FTN point notation (October 2026)
 
