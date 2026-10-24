@@ -17,6 +17,23 @@ missing `ProtectHome=` so a unit this same update.sh run just freshly
 installed (which already has everything inline) doesn't get a
 redundant drop-in.
 
+A same-day follow-up (still 2026-10-24) found the ProtectHome=yes
+directive itself -- not just this retrofit mechanism -- didn't work
+the way it was assumed to for a /home-rooted install: ProtectHome=yes
++ ReadOnlyPaths=<whole tree> (carving a readable hole back through the
+masked /home) was verified only via a manual mount-namespace
+reproduction, which didn't match real systemd's behavior. A real
+throwaway systemd unit on production (systemd 249, Ubuntu
+249.11-0ubuntu3.23) confirmed ProtectHome=yes unconditionally blocks
+exec under the carved-out path regardless of the carve-out -- causing
+a real ~5 minute production outage. The fix, also empirically verified
+against real systemd units rather than reasoned about: use
+ProtectHome=read-only instead of ProtectHome=yes for a home-rooted
+install (via the $PROTECTHOME_MODE variable this retrofit, and
+install.sh/update.sh's own fresh-install heredocs, now share) -- read-
+only mode never masks the tree in the first place, so no separate
+ReadOnlyPaths= carve-out is needed at all.
+
 These tests extract the REAL `_retrofit_hardening()` function and its
 3 real call sites out of update.sh and run them in actual bash against
 a throwaway fake "/etc/systemd/system" directory -- not a
@@ -24,7 +41,11 @@ reimplementation, and never against a real system path. The one
 substitution made for testing (the literal `/etc/systemd/system` path)
 is counted and asserted before use, so a future edit to the real path
 reference would fail this test loudly rather than silently testing
-nothing.
+nothing. Note this file's own limitation, the same one that let the
+production outage happen: it only checks the TEXT written to a
+drop-in, never whether a real systemd unit with that text actually
+starts -- see tests/test_protecthome_systemd_unit_integration.py for
+the real-unit-level check added after the outage to close that gap.
 """
 import os
 import re
@@ -70,7 +91,8 @@ class _Harness(unittest.TestCase):
     def _write_unit(self, svc, body='[Unit]\nDescription=fake\n'):
         (self.fake_root / f'{svc}.service').write_text(body)
 
-    def _run(self, install_dir='/opt/anetbbs', rwpaths=None, home_ropath=''):
+    def _run(self, install_dir='/opt/anetbbs', rwpaths=None,
+            protecthome_mode='yes'):
         if rwpaths is None:
             rwpaths = f'{install_dir}/data {install_dir}/logs'
         retargeted = self.block.replace(
@@ -79,7 +101,7 @@ class _Harness(unittest.TestCase):
             'ok() { echo "OK: $*"; }\n'
             f'INSTALL_DIR={install_dir!r}\n'
             f'RWPATHS={rwpaths!r}\n'
-            f'HOME_ROPATH={home_ropath!r}\n'
+            f'PROTECTHOME_MODE={protecthome_mode!r}\n'
             f'{retargeted}\n'
         )
         result = subprocess.run([_BASH, '-c', script],
@@ -136,32 +158,40 @@ class ExistingUnitGetsDropinTests(_Harness):
                 self.assertIn('SystemCallFilter=@system-service', text)
 
 
-class HomeRootedInstallReadOnlyPathsTests(_Harness):
-    """Same ReadOnlyPaths/ReadWritePaths split already verified for the
-    original install.sh/update.sh fix -- the retrofit path must apply
-    the identical policy, not just the web unit's broad grant."""
+class HomeRootedInstallProtectHomeModeTests(_Harness):
+    """ProtectHome=read-only for a home-rooted install, not the
+    ProtectHome=yes+ReadOnlyPaths= carve-out the original fix tried
+    first -- that combination was confirmed, via a real throwaway
+    systemd unit on production (systemd 249), to unconditionally block
+    exec regardless of the carve-out, causing a real ~5 minute
+    production outage during v1.1.54 staging. ProtectHome=read-only
+    needs no separate ReadOnlyPaths= carve-out at all -- the whole tree
+    stays readable+executable by default in that mode."""
 
-    def test_non_web_units_get_readonlypaths_when_home_rooted(self):
+    def test_non_web_units_get_readonly_mode_when_home_rooted(self):
         self._write_unit('anetbbs')
         self._run(install_dir='/home/stingray/anetbbs',
-                  home_ropath='/home/stingray/anetbbs')
+                  protecthome_mode='read-only')
         text = self._dropin_path('anetbbs').read_text()
-        self.assertIn('ReadOnlyPaths=/home/stingray/anetbbs', text)
+        self.assertIn('ProtectHome=read-only', text)
+        self.assertNotIn('ReadOnlyPaths=', text)
         self.assertIn('ReadWritePaths=/home/stingray/anetbbs/data '
                       '/home/stingray/anetbbs/logs', text)
 
-    def test_default_install_has_no_readonlypaths_line_at_all(self):
+    def test_default_install_uses_yes_mode_and_no_readonlypaths_line(self):
         self._write_unit('anetbbs')
-        self._run(install_dir='/opt/anetbbs', home_ropath='')
+        self._run(install_dir='/opt/anetbbs', protecthome_mode='yes')
         text = self._dropin_path('anetbbs').read_text()
+        self.assertIn('ProtectHome=yes', text)
         self.assertNotIn('ReadOnlyPaths=', text)
 
     def test_web_unit_never_gets_readonlypaths_even_when_home_rooted(self):
         self._write_unit('anetbbs-web')
         self._run(install_dir='/home/stingray/anetbbs',
                   rwpaths='/home/stingray/anetbbs',
-                  home_ropath='/home/stingray/anetbbs')
+                  protecthome_mode='read-only')
         text = self._dropin_path('anetbbs-web').read_text()
+        self.assertIn('ProtectHome=read-only', text)
         self.assertNotIn('ReadOnlyPaths=', text)
 
 

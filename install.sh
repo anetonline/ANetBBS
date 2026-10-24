@@ -1968,45 +1968,66 @@ systemctl daemon-reload 2>/dev/null || true
 # unusual for a non-root service user) would have its own venv/binary
 # masked out from under it, failing ExecStart with ENOENT.
 #
-# Two different carve-outs are needed, not one, to avoid granting more
-# write access than each unit actually needs (verified against a real
-# mount-namespace reproduction of systemd's own ProtectHome mechanism,
-# not just reasoned about):
+# First fix attempt (now known broken, kept here as a documented
+# lesson): ProtectHome=yes + ReadOnlyPaths=<whole tree> (to carve a
+# readable hole back through the empty/masked /home) + each unit's own
+# narrow ReadWritePaths=data/logs. This was verified against a manual
+# `unshare --mount --user --map-root-user` mount-namespace reproduction
+# of the mechanism, which reported EXEC/READ/WRITE-to-data all
+# succeeding and WRITE-to-code correctly failing. That reproduction did
+# NOT match real systemd's own behavior: confirmed via an actual
+# throwaway systemd unit on production (systemd 249, Ubuntu
+# 249.11-0ubuntu3.23) that ProtectHome=yes unconditionally blocks exec
+# of a binary under the carved-out path regardless of ReadOnlyPaths=/
+# ReadWritePaths= -- this caused a real ~5 minute production outage
+# during v1.1.54 staging (all 5 services failed to start with
+# "Failed to locate executable ...: No such file or directory") before
+# being caught and fixed.
+#
+# Actual fix, empirically verified against real systemd units on that
+# same production host (not just reasoned about): ProtectHome=read-only
+# instead of ProtectHome=yes for a home-rooted install. In read-only
+# mode, systemd does not mask /home as empty at all -- the whole tree
+# (including $INSTALL_DIR) stays readable and executable by default,
+# so no "hide everything, then carve a hole back" mechanism is needed
+# just to make exec work. ReadWritePaths= alone is then sufficient to
+# carve out the write exceptions each unit actually needs -- confirmed
+# via three real throwaway systemd units: (1) ProtectHome=read-only +
+# narrow ReadWritePaths=data/logs -> exec succeeds, (2)
+# ProtectHome=read-only + broad ReadWritePaths=<whole tree> -> exec
+# succeeds, (3) ProtectHome=read-only with NO ReadWritePaths at all ->
+# a write to data/ correctly fails with "Read-only file system",
+# proving the write restriction is real and not just coincidentally
+# permissive.
+#
+# This also means the separate HOME_ROPATH/ReadOnlyPaths= carve-out
+# this fix used to need is gone entirely -- read-only mode makes it
+# redundant. Two things still vary by install location, not one:
 #   - RWPATHS: the WHOLE install tree, read-write. Used ONLY by
 #     anetbbs-web.service, which already needs this outside the /home
 #     case too -- its own ProtectSystem=full (not strict) comment
 #     explains why: the Service Control Center's self-upgrade feature
 #     writes across the whole tree (git pull / docker build), not just
 #     data/.
-#   - HOME_ROPATH: the whole install tree, READ-ONLY -- used by every
-#     OTHER generated unit (terminal/mrc-bridge/finger/binkp), none of
-#     which ever write to their own code. Combined with each of their
-#     own unchanged, narrow ReadWritePaths=$INSTALL_DIR/data
-#     $INSTALL_DIR/logs line (systemd applies the more specific,
-#     later-listed path when they overlap), this makes the venv/code
-#     visible and executable without granting write access to it --
-#     confirmed empirically to behave exactly this way (EXEC/READ/
-#     WRITE-to-data all succeed, WRITE-to-code fails with "Read-only
-#     file system") via a real unprivileged mount+user namespace
-#     reproduction of this exact ProtectHome+ReadOnlyPaths+
-#     ReadWritePaths combination. Empty string (and therefore the
-#     ReadOnlyPaths= line below omitted entirely, via the ${VAR:+...}
-#     expansion) for the default, non-/home case -- no behavior change
-#     there.
+#   - PROTECTHOME_MODE: "read-only" for a home-rooted install (so the
+#     venv/code tree stays readable+executable without being masked),
+#     "yes" otherwise (default /opt/anetbbs install, entirely outside
+#     ProtectHome's scope regardless -- no behavior change there, and
+#     "yes" remains the stronger setting when it's safe to use).
 #
 # ProtectHome's protection against every OTHER /home subdirectory
-# (another user's home, /root) stays fully intact in both cases either
-# way, since this only widens the one already-explicit exception for
-# $INSTALL_DIR itself.
+# (another user's home, /root) stays intact in both modes -- "yes"
+# hides them entirely, "read-only" still blocks writing to them, which
+# is the only thing that actually mattered here.
 _INSTALL_DIR_REAL="$(realpath -m "$INSTALL_DIR" 2>/dev/null || printf '%s' "$INSTALL_DIR")"
 case "$_INSTALL_DIR_REAL" in
     /home/*|/root|/root/*|/run/user/*|/run/user)
         RWPATHS="$_INSTALL_DIR_REAL"
-        HOME_ROPATH="$_INSTALL_DIR_REAL"
+        PROTECTHOME_MODE="read-only"
         ;;
     *)
         RWPATHS="$INSTALL_DIR/data $INSTALL_DIR/logs"
-        HOME_ROPATH=""
+        PROTECTHOME_MODE="yes"
         ;;
 esac
 # and all paths are absolute so services work regardless of cwd.
@@ -2043,7 +2064,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 # symlink-attack fixes elsewhere (deploy/run_restore.sh, install.sh's
 # Mystic-installer download) -- an isolated /tmp, not a restricted one.
 PrivateTmp=yes
-ProtectHome=yes
+ProtectHome=$PROTECTHOME_MODE
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -2120,7 +2141,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # calls sudo, so NoNewPrivileges=yes is safe here (unlike web).
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectHome=yes
+ProtectHome=$PROTECTHOME_MODE
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -2141,15 +2162,15 @@ SystemCallArchitectures=native
 # writable+executable memory that MemoryDenyWriteExecute would block.
 ProtectClock=yes
 ProtectHostname=yes
-# This unit has no ProtectSystem= at all (see above), but ProtectHome=
-# above is still independently in effect -- this unit never writes to
-# its own code (door-game paths live elsewhere, per the comment
-# above), so it only needs the whole tree back as READ-only (plus its
-# own unchanged data/logs write access below) when $INSTALL_DIR lives
-# under /home -- see the HOME_ROPATH/RWPATHS computation earlier in
-# this script, and its own comment for why this unit specifically
-# does NOT get the broader $RWPATHS a self-upgrading unit would.
-${HOME_ROPATH:+ReadOnlyPaths=$HOME_ROPATH}
+# This unit has no ProtectSystem= at all (see above). ProtectHome=
+# above (read-only for a /home-rooted install, yes otherwise) already
+# keeps the whole tree readable+executable without masking it -- this
+# unit never writes to its own code (door-game paths live elsewhere,
+# per the comment above) so it only needs its own unchanged data/logs
+# write access below, same regardless of install location -- see the
+# PROTECTHOME_MODE/RWPATHS computation earlier in this script, and its
+# own comment for why this unit specifically does NOT get the broader
+# $RWPATHS a self-upgrading unit would.
 ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs
 ExecStart=$VENV_DIR/bin/anetbbs
 Restart=always
@@ -2175,7 +2196,7 @@ WorkingDirectory=$INSTALL_DIR
 Environment=MRC_BRIDGE_CONFIG=$INSTALL_DIR/mrc/bridge/config.json
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectHome=yes
+ProtectHome=$PROTECTHOME_MODE
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -2191,7 +2212,6 @@ SystemCallArchitectures=native
 # above is only ever read by this process (this script writes it once,
 # outside this unit), so it needs no ReadWritePaths entry of its own.
 ProtectSystem=strict
-${HOME_ROPATH:+ReadOnlyPaths=$HOME_ROPATH}
 ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs
 ProtectClock=yes
 ProtectHostname=yes
@@ -2226,7 +2246,7 @@ EnvironmentFile=$INSTALL_DIR/.env
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectHome=yes
+ProtectHome=$PROTECTHOME_MODE
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -2240,7 +2260,6 @@ SystemCallArchitectures=native
 # strict baseline (found missing in a follow-up audit, matching
 # deploy/anetbbs-mrc-irc-bridge@.service's own template).
 ProtectSystem=strict
-${HOME_ROPATH:+ReadOnlyPaths=$HOME_ROPATH}
 ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs
 ProtectClock=yes
 ProtectHostname=yes
@@ -2279,7 +2298,7 @@ WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectHome=yes
+ProtectHome=$PROTECTHOME_MODE
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -2293,7 +2312,6 @@ SystemCallArchitectures=native
 # strict baseline (found missing in a follow-up audit, matching
 # deploy/anetbbs-mrc-irc-bridge@.service's own template).
 ProtectSystem=strict
-${HOME_ROPATH:+ReadOnlyPaths=$HOME_ROPATH}
 ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs
 ProtectClock=yes
 ProtectHostname=yes
