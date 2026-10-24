@@ -416,15 +416,17 @@ def index():
     categories = FileAreaCategory.query.order_by(
         FileAreaCategory.sort_order, FileAreaCategory.name).all()
     cat_names = {c.slug: c.name for c in categories}
+    cat_names['other'] = 'Other'
     grouped = {}
     for row in rows:
         grouped.setdefault(row['area'].category or 'other', []).append(row)
-    cat_order = []
-    seen = set()
-    for row in rows:
-        slug = row['area'].category or 'other'
-        if slug not in seen:
-            seen.add(slug)
+    # Walk categories in THEIR configured sort_order, not in the order
+    # their areas happen to appear -- a category could otherwise render
+    # out of its configured position if an area in a later category
+    # happened to sort earlier by its own FileArea.sort_order/tag.
+    cat_order = [c.slug for c in categories if c.slug in grouped]
+    for slug in grouped:
+        if slug not in cat_order:
             cat_order.append(slug)
     return render_template('file_areas/index.html', rows=rows, grouped=grouped,
                            cat_order=cat_order, cat_names=cat_names)

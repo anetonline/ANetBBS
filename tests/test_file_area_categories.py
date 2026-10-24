@@ -617,5 +617,99 @@ class PetsciiTerminalCategoryDrillDownTests(unittest.TestCase):
         self.assertEqual(mock_browse.call_args.args[2], 'Petscii Drill Area One')
 
 
+class WebIndexCategoryOrderingTests(unittest.TestCase):
+    """Regression test for a real bug found in GitHub PR #31 (external
+    contribution): the web file-areas index route used to build
+    cat_order by walking FileAreas in THEIR OWN sort_order and taking
+    each category slug in first-seen order -- not by each
+    FileAreaCategory's own configured sort_order. A category with a
+    later sort_order could still render first if one of its areas
+    happened to have a lower FileArea.sort_order than an area in an
+    earlier-configured category. Fixed by walking `categories` (already
+    queried in FileAreaCategory.sort_order order) directly, appending
+    any uncategorized/fallback ('other') areas at the very end
+    regardless of their own sort_order.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._orig_db_uri = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+        cls._tmp_db = str(Path(__file__).resolve().parent / '.file_area_web_index_order_test.db')
+        if os.path.exists(cls._tmp_db):
+            os.remove(cls._tmp_db)
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = f'sqlite:///{cls._tmp_db}'
+        os.environ['FLASK_ENV'] = 'testing'
+        from anetbbs.web_app import create_app
+        from anetbbs.models import db, User, FileArea, FileAreaCategory
+        cls.app = create_app('testing')
+        cls.app.config['TESTING'] = True
+        cls.app.config['WTF_CSRF_ENABLED'] = False
+        with cls.app.app_context():
+            db.create_all()
+            user = User(username='webindexorderuser',
+                       email='webindexorderuser@example.com',
+                       password_hash='x', access_level=10)
+            db.session.add(user)
+            db.session.commit()
+            cls.user_id = user.id
+
+            # Category B is configured to sort FIRST (sort_order=1),
+            # category A SECOND (sort_order=2) -- but area tags/sort
+            # orders are set up so a buggy first-seen-by-area walk would
+            # produce the opposite order.
+            db.session.add_all([
+                FileAreaCategory(name='Cat B', slug='web-order-cat-b', sort_order=1),
+                FileAreaCategory(name='Cat A', slug='web-order-cat-a', sort_order=2),
+            ])
+            # Lowest FileArea.sort_order of all three is the UNCATEGORIZED
+            # one -- under the old bug this would make 'other' render
+            # FIRST, when it must always render LAST.
+            db.session.add_all([
+                FileArea(tag='WEBORD.OTH', name='Other Area',
+                        category=None, sort_order=0),
+                FileArea(tag='WEBORD.AAA', name='Cat A Area',
+                        category='web-order-cat-a', sort_order=1),
+                FileArea(tag='WEBORD.ZZZ', name='Cat B Area',
+                        category='web-order-cat-b', sort_order=2),
+            ])
+            db.session.commit()
+
+    @classmethod
+    def tearDownClass(cls):
+        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig_db_uri
+        for suffix in ('', '-wal', '-shm'):
+            path = cls._tmp_db + suffix
+            if os.path.exists(path):
+                os.remove(path)
+
+    def _client(self):
+        client = self.app.test_client()
+        with client.session_transaction() as sess:
+            sess['_user_id'] = str(self.user_id)
+            sess['_fresh'] = True
+        return client
+
+    def test_cat_order_follows_category_sort_order_not_area_first_seen(self):
+        from unittest.mock import patch
+        import anetbbs.web.file_areas as file_areas_mod
+        captured = {}
+
+        def _fake_render(template_name, **kwargs):
+            captured.update(kwargs)
+            return ''
+
+        client = self._client()
+        with patch.object(file_areas_mod, 'render_template', side_effect=_fake_render):
+            resp = client.get('/file-areas/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            captured.get('cat_order'),
+            ['web-order-cat-b', 'web-order-cat-a', 'other'],
+            msg='categories must appear in their own configured sort_order '
+                '(Cat B=1 before Cat A=2), with the uncategorized fallback '
+                "('other') always last regardless of its area's own "
+                'sort_order')
+
+
 if __name__ == '__main__':
     unittest.main()
