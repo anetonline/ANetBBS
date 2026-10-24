@@ -413,22 +413,33 @@ def index():
     # the terminal's as_submenu drill-down, a web page has no "typed
     # number" constraint, so every category just gets its own section
     # header here, collapsed or not.
+     
+    # 1. Fetch categories sorted by database sort_order
     categories = FileAreaCategory.query.order_by(
         FileAreaCategory.sort_order, FileAreaCategory.name).all()
+
+    # 2. Build category names mapping including fallback for uncategorized items
     cat_names = {c.slug: c.name for c in categories}
+    cat_names['other'] = 'Other'
+
+    # 3. Group rows by area category slug
     grouped = {}
     for row in rows:
         grouped.setdefault(row['area'].category or 'other', []).append(row)
+
+    # 4. Build cat_order strictly following the category sort_order
     cat_order = []
-    seen = set()
-    for row in rows:
-        slug = row['area'].category or 'other'
-        if slug not in seen:
-            seen.add(slug)
-            cat_order.append(slug)
+    for c in categories:
+        if c.slug in grouped:
+            cat_order.append(c.slug)
+
+    # 5. Append uncategorized / fallback areas at the very end
+    for slug in grouped:
+        if slug not in cat_order:
+            cat_order.append(slug)        
+            
     return render_template('file_areas/index.html', rows=rows, grouped=grouped,
                            cat_order=cat_order, cat_names=cat_names)
-
 
 @file_areas_bp.route('/<int:area_id>')
 @login_required

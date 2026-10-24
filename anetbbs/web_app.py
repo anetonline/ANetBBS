@@ -19,6 +19,7 @@ import secrets
 import logging
 import json
 from datetime import datetime
+from math import log
 from flask import Flask, request, render_template
 from flask_login import LoginManager, current_user
 from flask_migrate import Migrate
@@ -66,6 +67,21 @@ def create_app(config_name=None):
     
     config_class = get_config(config_name)
     app.config.from_object(config_class)
+
+    def filesize_format(num):
+        """Formats bytes into human-readable strings using logarithmic scaling."""
+        if not num or num <= 0:
+            return "0 Bytes"
+        if num == 1:
+            return "1 Byte"
+        
+        units = [('Bytes', 0), ('KB', 0), ('MB', 1), ('GB', 2), ('TB', 2), ('PB', 2)]
+        exponent = min(int(log(num, 1024)), len(units) - 1)
+        quotient = float(num) / (1024 ** exponent)
+        unit, decimals = units[exponent]
+        
+        return f"{quotient:.{decimals}f} {unit}"
+    app.jinja_env.filters['filesize_format'] = filesize_format
 
     # Real gap found in a full auth-security audit: without this,
     # request.remote_addr behind install.sh's own generated nginx reverse

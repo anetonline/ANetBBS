@@ -50,7 +50,7 @@
                             <i class="bi bi-download"></i> {{ f.name }}
                         </a>
                     </td>
-                    <td>{{ '%.1f'|format(f.size / 1024) }} KB</td>
+                    <td>{{ f.size | filesize_format }}</td>
                     <td>{{ f.mtime|eastern('%Y-%m-%d') }}</td>
                     <td>
                         {% if f.description %}

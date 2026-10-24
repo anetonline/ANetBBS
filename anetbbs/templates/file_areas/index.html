@@ -34,7 +34,8 @@
                         <td><code><a href="{{ url_for('file_areas.view_area', area_id=r.area.id) }}">{{ r.area.tag }}</a></code></td>
                         <td>{{ r.area.name or '' }}</td>
                         <td>{{ r.count }}</td>
-                        <td>{{ '%.1f'|format(r.total_size / 1024) }} KB</td>
+                        <!-- <td>{{ '%.1f'|format(r.total_size / 1024) }} KB</td> -->
+                        <td>{{ r.total_size | filesize_format }}</td>
                         <td><small class="text-muted">{{ r.area.description or '' }}</small></td>
                     </tr>
                 {% endfor %}

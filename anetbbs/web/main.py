@@ -227,9 +227,33 @@ def index():
     # Get pinned messages/bulletins
     bulletins = Message.query.filter_by(is_pinned=True).order_by(Message.created_at.desc()).limit(5).all()
 
-    # Get board statistics
-    boards = [b for b in Board.query.filter_by(is_active=True).order_by(Board.order).all()
-             if evaluate_access(current_user, b.min_access_level, bypass_admin=True)]
+    from sqlalchemy import func
+
+    # Load all boards accessible to the user
+    accessible_boards = [
+        b for b in Board.query.filter_by(is_active=True).all()
+        if evaluate_access(current_user, b.min_access_level, bypass_admin=True)
+    ]
+    accessible_ids = [b.id for b in accessible_boards]
+
+    # Sort boards by number of topics/posts & retrieve the top 10
+    if accessible_ids:
+        board_counts = (
+            db.session.query(Board.id, func.count(Post.id).label('post_count'))
+            .outerjoin(Post, Board.id == Post.board_id)
+            .filter(Board.id.in_(accessible_ids))
+            .group_by(Board.id)
+            .order_by(func.count(Post.id).desc(), Board.order.asc())
+            .limit(10)
+            .all()
+        )
+        
+        # Map as board objects in the correct order
+        top_ids = [b_id for b_id, _ in board_counts]
+        board_dict = {b.id: b for b in accessible_boards}
+        boards = [board_dict[b_id] for b_id in top_ids if b_id in board_dict]
+    else:
+        boards = []
     
     # "Active Users" = non-banned users who have logged in within the
     # last 30 days. Matches the admin dashboard's definition. Previously
@@ -285,14 +309,16 @@ def index():
         'new_users': _safe(lambda: User.query
                            .filter(User.created_at >= today).count(), 0),
     }
-    # Active poll teaser (most recently created open poll)
+    # Active poll teaser (random open poll)
     active_poll = None
     try:
+        from sqlalchemy.sql import func
         from ..models import Poll
+        
         active_poll = (Poll.query.filter_by(is_active=True)
                        .filter(db.or_(Poll.closes_at.is_(None),
                                       Poll.closes_at > datetime.utcnow()))
-                       .order_by(Poll.created_at.desc()).first())
+                       .order_by(func.random()).first())
     except Exception:
         db.session.rollback()
 

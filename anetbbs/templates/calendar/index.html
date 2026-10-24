@@ -21,10 +21,22 @@
         <ul class="list-group list-group-flush">
         {% for e in upcoming %}
             <li class="list-group-item">
-                <strong>{{ e.title }}</strong>
-                <span class="text-muted ms-2">{{ e.starts_at|eastern('%a %Y-%m-%d %H:%M %Z') }}</span>
-                {% if e.location %}<span class="badge bg-secondary ms-2">{{ e.location }}</span>{% endif %}
-                {% if e.description %}<div class="text-muted small">{{ e.description }}</div>{% endif %}
+                <strong>{{ e.title }}</strong><br>       
+				<span class="text-muted ms-2">
+					{{ e.starts_at|eastern('%a %Y-%m-%d %H:%M') }}
+					{% if e.ends_at %}
+						{% if e.starts_at.strftime('%Y-%m-%d') == e.ends_at.strftime('%Y-%m-%d') %}
+							– {{ e.ends_at|eastern('%H:%M %Z') }}
+						{% else %}
+							– {{ e.ends_at|eastern('%a %Y-%m-%d %H:%M %Z') }}
+						{% endif %}
+					{% else %}
+						{{ e.starts_at|eastern('%Z') }}
+					{% endif %}
+				</span>	
+                {% if e.location %}<span class="badge bg-secondary ms-2">{{ e.location }}</span>
+				{% endif %}
+                {% if e.description %}<div class="text-muted small"><br>{{ e.description }}</div>{% endif %}
                 {% if current_user.is_authenticated and (current_user.is_admin or e.created_by_id == current_user.id) %}
                 <form method="post" action="{{ url_for('calendar.delete', event_id=e.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

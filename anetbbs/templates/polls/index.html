@@ -19,13 +19,18 @@
     <div class="card-body p-0">
     {% if active %}
         <table class="table table-sm mb-0">
-            <thead><tr><th>Question</th><th>By</th><th>Votes</th><th>Created</th></tr></thead>
+            <thead><tr><th>Question</th><th>By</th><th>Votes</th><th>Options</th><th>Created</th></tr></thead>
             <tbody>
             {% for p in active %}
                 <tr>
                     <td><a href="{{ url_for('polls.view_poll', poll_id=p.id) }}">{{ p.question }}</a></td>
                     <td>{{ p.creator.username }}</td>
-                    <td>{{ p.options.count() }} options</td>
+					{% set total_votes = namespace(value=0) %}
+					{% for opt in p.options %}
+						{% set total_votes.value = total_votes.value + opt.votes.count() %}
+					{% endfor %}
+					<td>{{ total_votes.value }}</td>
+                    <td>{{ p.options.count() }}</td>
                     <td>{{ p.created_at|eastern('%Y-%m-%d') }}</td>
                 </tr>
             {% endfor %}
