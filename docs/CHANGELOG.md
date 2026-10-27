@@ -1,11 +1,58 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.56`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.58`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.58 — Correct fix for the sudo escalation outage (October 2026)
+
+**This supersedes v1.1.56 and v1.1.57's fix for the sudo "no new
+privileges" error — both of those releases shipped a fix that did not
+actually work.** If your Install/Restart/Backup buttons are currently
+failing with that error, this release still cannot be applied through
+the web upgrade button itself, for the same reason as before. Apply it
+manually: download the tarball and run `sudo bash update.sh` from an
+SSH session.
+
+Background: v1.1.56 added an explicit `NoNewPrivileges=no` to the web
+service's systemd unit, believing that would override the implicit
+force several other hardening directives trigger. It didn't — confirmed
+on live production by restarting the service and reading
+`/proc/<pid>/status`, which still showed the kernel's privilege-block
+flag set despite the override. v1.1.57 then removed the directives that
+looked like the obvious seccomp-backed culprits, which also didn't
+fully fix it. A real bisection against the live production unit — each
+directive tested alone, through a real restart and a real `/proc` read,
+not reasoned about — found that `ProtectKernelTunables=`,
+`ProtectKernelModules=`, `ProtectKernelLogs=`, `ProtectClock=`, and
+`ProtectHostname=` each independently force the flag too, since each
+blocks a specific kernel syscall via its own seccomp filter layered on
+top of its mount/capability restriction — not something the systemd
+documentation makes obvious up front. Only `PrivateTmp=`, `ProtectHome=`,
+`ProtectSystem=`, `ReadWritePaths=`, and `ProtectControlGroups=` are
+actually safe to keep on this one unit, which needs to retain the
+ability to escalate privileges via sudo. This release removes the five
+directives that were still silently breaking it.
+
+- Fixed the web service's systemd unit to only include sandboxing
+  directives confirmed safe for a unit that also needs sudo escalation.
+  The updater self-heals any existing install automatically on the next
+  manual update.
+- Corrected the admin Preflight Checklist page's guidance text, which
+  previously suggested a fix (`sudo systemctl edit anetbbs-web`) that
+  does not work on its own if a seccomp-backed directive is present
+  elsewhere on the unit.
+
+## v1.1.57 — File Areas column alignment fix (October 2026)
+
+- Fixed the web File Areas listing rendering each category's table
+  with independently auto-sized columns, so the Tag/Name/Files/Total
+  Size/Description columns landed at different horizontal positions
+  from one category group to the next. Columns now use fixed,
+  consistent widths across every group, on every theme.
 
 ## v1.1.56 — Fix a real sudo escalation outage for the Service Control Center (October 2026)
 

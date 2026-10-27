@@ -1297,40 +1297,34 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 # the longer version of this comment.
 #
 # NoNewPrivileges=no is set EXPLICITLY (unlike the other units this
-# script generates) -- a real live outage (2026-10-27) found that
-# merely OMITTING the line, as this unit used to do, does NOT actually
-# prevent it: per systemd.exec(5), NoNewPrivileges=yes is IMPLIED by
-# several of the other hardening directives below (SystemCallFilter=,
-# RestrictNamespaces=, ProtectKernelTunables=, ProtectKernelModules=,
-# ProtectKernelLogs=, MemoryDenyWriteExecute=, RestrictRealtime=,
-# LockPersonality=) unless NoNewPrivileges=no is explicitly specified
-# to override that -- which then blocks every sudo call the Service
-# Control Center's restart/upgrade/backup features make from this
-# process.
+# script generates). A real live outage (2026-10-27) went through THREE
+# fix attempts -- see install.sh's matching unit for the full writeup.
+# Short version: omitting the line let it default on (several
+# directives imply it). An explicit NoNewPrivileges=no did NOT fix that
+# either -- confirmed live, a fresh restart with the override in place
+# still showed NoNewPrivs: 1 in /proc. Removing just the obviously-
+# seccomp directives (SystemCallFilter=, RestrictNamespaces=, etc.)
+# ALSO didn't fix it -- a real bisection against the live production
+# unit found ProtectKernelTunables=, ProtectKernelModules=,
+# ProtectKernelLogs=, ProtectClock=, and ProtectHostname= each
+# independently still force the flag too, since each blocks a specific
+# kernel syscall via its own seccomp filter on top of its mount/
+# capability restriction. Only PrivateTmp=, ProtectHome=, ProtectSystem=,
+# ReadWritePaths=, and ProtectControlGroups= are actually safe on an
+# unprivileged unit with no CAP_SYS_ADMIN -- confirmed via that real
+# bisection, each directive tested alone through a real restart +
+# /proc/<pid>/status read, not reasoned about.
 NoNewPrivileges=no
 PrivateTmp=yes
 ProtectHome=$PROTECTHOME_MODE
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
 ProtectControlGroups=yes
-RestrictSUIDSGID=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-LockPersonality=yes
-SystemCallArchitectures=native
 # ProtectSystem=full (not strict) -- the Service Control Center's
 # self-upgrade feature writes across the whole \$INSTALL_DIR tree (git
 # pull / docker build), not just data/, so strict confinement here
 # would break it. full still locks down /usr, /boot, /etc. Found in a
-# follow-up audit, same round that added the other 4 directives below.
+# follow-up audit, same round that added the other directives above.
 ProtectSystem=full
 ReadWritePaths=$RWPATHS
-ProtectClock=yes
-ProtectHostname=yes
-MemoryDenyWriteExecute=yes
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
 ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/deploy/serve.py
 Restart=always
 RestartSec=5
@@ -1756,16 +1750,28 @@ _retrofit_hardening() {
     ok "${svc}.service: added security-hardening drop-in (pre-existing install, main unit left untouched)"
 }
 
-# NoNewPrivileges intentionally omitted here -- the Service Control
-# Center's sudo-based restart/upgrade actions need to keep escalating.
+# NoNewPrivileges=no is explicit here, and only 5 of the 14 directives
+# the other units get are included -- see install.sh's matching unit
+# for the full writeup of why (three fix attempts, the first two wrong).
+# Short version: an explicit NoNewPrivileges=no cannot override the
+# implicit force several of these directives trigger on an unprivileged
+# unit, confirmed via a real bisection against the live production
+# unit -- SystemCallFilter=, RestrictNamespaces=, RestrictRealtime=,
+# RestrictSUIDSGID=, MemoryDenyWriteExecute=, LockPersonality=,
+# SystemCallArchitectures=, SystemCallErrorNumber=, ProtectKernelTunables=,
+# ProtectKernelModules=, ProtectKernelLogs=, ProtectClock=, and
+# ProtectHostname= EACH independently still force the flag, each via
+# its own seccomp filter layered on top of its mount/capability
+# restriction. Only PrivateTmp=, ProtectHome=, ProtectSystem=,
+# ReadWritePaths=, and ProtectControlGroups= are actually safe, which is
+# this unit's whole list below. This function fully overwrites
+# 10-security-hardening.conf on every run (its own gate only checks the
+# MAIN unit file, which never has these directives), so this also
+# self-heals any existing install that picked up a broken directive set
+# from an earlier release.
 _retrofit_hardening anetbbs-web \
-    "PrivateTmp=yes" "ProtectHome=$PROTECTHOME_MODE" "ProtectKernelTunables=yes" \
-    "ProtectKernelModules=yes" "ProtectKernelLogs=yes" "ProtectControlGroups=yes" \
-    "RestrictSUIDSGID=yes" "RestrictNamespaces=yes" "RestrictRealtime=yes" \
-    "LockPersonality=yes" "SystemCallArchitectures=native" "ProtectSystem=full" \
-    "ReadWritePaths=$RWPATHS" "ProtectClock=yes" "ProtectHostname=yes" \
-    "MemoryDenyWriteExecute=yes" "SystemCallFilter=@system-service" \
-    "SystemCallErrorNumber=EPERM"
+    "NoNewPrivileges=no" "PrivateTmp=yes" "ProtectHome=$PROTECTHOME_MODE" \
+    "ProtectControlGroups=yes" "ProtectSystem=full" "ReadWritePaths=$RWPATHS"
 
 # No ProtectSystem=/MemoryDenyWriteExecute=/SystemCallFilter= here --
 # this unit launches sysop-configured door-game subprocesses that can
@@ -1793,33 +1799,17 @@ for _strict_svc in anetbbs-mrc-bridge anetbbs-binkp anetbbs-finger; do
 done
 unset _strict_svc
 
-# Dedicated, unconditional fix for a real live production outage
-# (2026-10-27): despite the "NoNewPrivileges intentionally omitted"
-# comment on the anetbbs-web retrofit above, merely OMITTING
-# NoNewPrivileges= does NOT actually keep it off. Per systemd.exec(5),
-# NoNewPrivileges=yes is IMPLIED by several of the directives that
-# retrofit writes (SystemCallFilter=, RestrictNamespaces=,
-# ProtectKernelTunables=, ProtectKernelModules=, ProtectKernelLogs=,
-# MemoryDenyWriteExecute=, RestrictRealtime=, LockPersonality=) unless
-# NoNewPrivileges=no is explicitly specified to override that -- the
-# unprivileged service user has no CAP_SYS_ADMIN, so the kernel only
-# allows systemd to install the SystemCallFilter= seccomp filter by
-# also setting the kernel's own no_new_privs flag. That flag then
-# makes every sudo call the Service Control Center's process makes
-# (restart/upgrade/backup) fail with "sudo: The 'no new privileges'
-# flag is set". Written unconditionally every run (idempotent, same
-# content every time) in its own drop-in, deliberately kept outside
-# _retrofit_hardening()'s own gated call above (which only fires once
-# per unit and would otherwise never revisit an install that already
-# received a hardening drop-in before this specific directive was
-# known to be needed -- exactly the install this bug was found on).
-# The daemon-reload and service restart later in this script pick this
-# up along with everything else.
-if [[ -f /etc/systemd/system/anetbbs-web.service ]]; then
-    mkdir -p /etc/systemd/system/anetbbs-web.service.d
-    printf '%s\n' "[Service]" "NoNewPrivileges=no" \
-        > /etc/systemd/system/anetbbs-web.service.d/20-nonewprivileges-override.conf
-fi
+# A prior fix for the 2026-10-27 outage (shipped as v1.1.56/v1.1.57)
+# wrote a separate 20-nonewprivileges-override.conf drop-in here,
+# believing an explicit NoNewPrivileges=no would override the implicit
+# force from the seccomp-backed directives above. It didn't -- see the
+# _retrofit_hardening anetbbs-web call above for the real fix and full
+# writeup. That call now writes NoNewPrivileges=no directly into
+# 10-security-hardening.conf, which is the only drop-in this unit needs,
+# so the separate override file is removed here if a prior release left
+# one behind -- two drop-ins both setting the same key is harmless, but
+# a stale one that nobody is writing to anymore is just confusing.
+rm -f /etc/systemd/system/anetbbs-web.service.d/20-nonewprivileges-override.conf
 
 # Ensure MRC bridge config.json exists
 if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then

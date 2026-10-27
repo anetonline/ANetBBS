@@ -25,16 +25,22 @@ EnvironmentFile=/opt/anetbbs/.env
 # (used by the Service Control Center) can still escalate.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 # NoNewPrivileges=no is set EXPLICITLY (unlike the other units, which
-# omit the line and let it default on) -- a real live outage
-# (2026-10-27) found that merely OMITTING the line, as this unit used
-# to do, does NOT actually keep it off. Per systemd.exec(5),
-# NoNewPrivileges=yes is IMPLIED by several of the directives below
-# (SystemCallFilter=, RestrictNamespaces=, ProtectKernelTunables=,
-# ProtectKernelModules=, ProtectKernelLogs=, MemoryDenyWriteExecute=,
-# RestrictRealtime=, LockPersonality=) unless NoNewPrivileges=no is
-# explicitly specified to override that -- which then blocks every
-# sudo call the Service Control Center's restart/upgrade/backup
-# features make from this process.
+# omit the line and let it default on). A real live outage (2026-10-27)
+# went through THREE fix attempts -- see install.sh's matching unit for
+# the full writeup. Short version: omitting the line let it default on
+# (several directives imply it). An explicit NoNewPrivileges=no did NOT
+# fix that either -- confirmed live, a fresh restart with the override
+# in place still showed NoNewPrivs: 1 in /proc. Removing just the
+# obviously-seccomp directives ALSO didn't fix it -- a real bisection
+# against the live production unit found ProtectKernelTunables=,
+# ProtectKernelModules=, ProtectKernelLogs=, ProtectClock=, and
+# ProtectHostname= each independently still force the flag too, since
+# each blocks a specific kernel syscall via its own seccomp filter on
+# top of its mount/capability restriction. Only PrivateTmp=,
+# ProtectHome=, ProtectSystem=, ReadWritePaths=, and ProtectControlGroups=
+# are actually safe on an unprivileged unit with no CAP_SYS_ADMIN --
+# confirmed via that real bisection, each directive tested alone
+# through a real restart + /proc/<pid>/status read, not reasoned about.
 NoNewPrivileges=no
 # PrivateTmp=yes is still safe and reinforces this same audit's own
 # /tmp symlink-attack fixes elsewhere (deploy/run_restore.sh,
@@ -42,27 +48,14 @@ NoNewPrivileges=no
 # restricted one.
 PrivateTmp=yes
 ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
 ProtectControlGroups=yes
-RestrictSUIDSGID=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-LockPersonality=yes
-SystemCallArchitectures=native
 # ProtectSystem=full (not strict) -- the Service Control Center's
 # self-upgrade feature writes across the whole /opt/anetbbs tree (git
 # pull / docker build), not just data/, so strict confinement here
 # would break it. full still locks down /usr, /boot, /etc. Found in a
-# follow-up audit, same round that added the other 4 directives below.
+# follow-up audit, same round that added the other directives above.
 ProtectSystem=full
 ReadWritePaths=/opt/anetbbs/data /opt/anetbbs/logs
-ProtectClock=yes
-ProtectHostname=yes
-MemoryDenyWriteExecute=yes
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
 ExecStart=/opt/anetbbs/venv/bin/python /opt/anetbbs/deploy/serve.py
 Restart=always
 RestartSec=5

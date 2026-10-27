@@ -2059,48 +2059,71 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 # via a code-execution vulnerability.
 #
 # NoNewPrivileges=no is set EXPLICITLY here (unlike the other 4 units
-# below, which omit it to let it default on) -- a real live outage
-# (2026-10-27) found that merely OMITTING the line, as this unit used
-# to do, does NOT actually prevent it: per systemd.exec(5),
-# NoNewPrivileges=yes is IMPLIED by several of the other hardening
-# directives below (SystemCallFilter=, RestrictNamespaces=,
-# ProtectKernelTunables=, ProtectKernelModules=, ProtectKernelLogs=,
-# MemoryDenyWriteExecute=, RestrictRealtime=, LockPersonality=) unless
-# NoNewPrivileges=no is explicitly specified to override that. The
-# unprivileged service user has no CAP_SYS_ADMIN, so installing the
-# seccomp filter SystemCallFilter= requires at the kernel level, and
-# systemd silently sets the kernel's no_new_privs flag to satisfy that
-# -- which also then makes every sudo call from this process (the
-# Service Control Center's restart/upgrade/backup features) fail with
-# "sudo: The 'no new privileges' flag is set". NoNewPrivileges=no
-# overrides the implication and restores the original intent.
+# below, which omit it to let it default on). A real live outage
+# (2026-10-27) went through THREE fix attempts before landing on the
+# correct one -- worth recording all three so this doesn't get "fixed"
+# back to a broken version by a future edit:
+#
+# Attempt 1 (WRONG, shipped as v1.1.56/v1.1.57): just omitting the
+# NoNewPrivileges= line let it default on, because several hardening
+# directives imply it. The fix added an explicit NoNewPrivileges=no to
+# override that implication. This did NOT work -- confirmed live, by
+# restarting the actual service and reading /proc/<pid>/status, with
+# the override in place and a brand new PID, NoNewPrivs still read 1.
+#
+# Root cause: this is not a systemd *policy* default that an explicit
+# setting can override. It's a hard KERNEL requirement. Installing a
+# seccomp BPF filter via the seccomp(2)/prctl(PR_SET_SECCOMP) syscalls
+# requires the calling process to either hold CAP_SYS_ADMIN or have the
+# kernel's own no_new_privs bit already set -- and this service
+# deliberately runs as an unprivileged user with no CAP_SYS_ADMIN
+# (that's the whole point of a dropped-privilege service account). A
+# real systemd commit ("core: set NoNewPrivileges for seccomp if we
+# don't have CAP_SYS_ADMIN") hardcodes this: if a unit without
+# CAP_SYS_ADMIN requests ANY seccomp-backed directive, systemd forces
+# the kernel flag on regardless of what NoNewPrivileges= says. There is
+# no config escape hatch -- the only fix is to not request a
+# seccomp-backed directive on a unit that also needs to escalate
+# privileges via sudo.
+#
+# Attempt 2 (STILL WRONG): removed the obviously-seccomp directives
+# (SystemCallFilter=, SystemCallErrorNumber=, SystemCallArchitectures=,
+# RestrictNamespaces=, RestrictRealtime=, RestrictSUIDSGID=,
+# MemoryDenyWriteExecute=, LockPersonality=), on the assumption that
+# every OTHER directive (the Protect*= family) was purely mount-
+# namespace-based and therefore safe. This was also confirmed WRONG
+# live, via a real bisection on production: ProtectKernelTunables=,
+# ProtectKernelModules=, ProtectKernelLogs=, ProtectClock=, and
+# ProtectHostname= EACH independently still forced the flag on too --
+# each of them blocks a specific kernel syscall (sysctl, module load/
+# unload, syslog, clock set, hostname set respectively) via its OWN
+# seccomp filter, layered on top of its mount/capability restriction,
+# which the systemd documentation does not make obvious up front.
+#
+# Attempt 3 (the actual fix, confirmed via a real bisection against the
+# live production unit, each directive tested alone via a real restart
+# + /proc/<pid>/status read, not reasoned about): only 5 of the
+# original 14 hardening directives are actually safe on an unprivileged
+# unit with no CAP_SYS_ADMIN -- PrivateTmp=, ProtectHome=, ProtectSystem=,
+# ReadWritePaths=, and ProtectControlGroups= (confirmed: none of these
+# five, alone or together, force the flag). Every other directive this
+# script would otherwise apply is seccomp-backed in some way and must
+# stay OFF this one unit. The OTHER 4 units (anetbbs, anetbbs-mrc-bridge,
+# anetbbs-binkp, anetbbs-finger) never need sudo and keep the full set.
 NoNewPrivileges=no
 # PrivateTmp=yes is safe and reinforces this same audit's own /tmp
 # symlink-attack fixes elsewhere (deploy/run_restore.sh, install.sh's
 # Mystic-installer download) -- an isolated /tmp, not a restricted one.
 PrivateTmp=yes
 ProtectHome=$PROTECTHOME_MODE
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
 ProtectControlGroups=yes
-RestrictSUIDSGID=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-LockPersonality=yes
-SystemCallArchitectures=native
 # ProtectSystem=full (not strict) -- the Service Control Center's
 # self-upgrade feature writes across the whole \$INSTALL_DIR tree (git
 # pull / docker build), not just data/, so strict confinement here
 # would break it. full still locks down /usr, /boot, /etc. Found in a
-# follow-up audit, same round that added the other 4 directives below.
+# follow-up audit, same round that added the other directives above.
 ProtectSystem=full
 ReadWritePaths=$RWPATHS
-ProtectClock=yes
-ProtectHostname=yes
-MemoryDenyWriteExecute=yes
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
 ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/deploy/serve.py
 Restart=always
 RestartSec=5

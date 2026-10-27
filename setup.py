@@ -37,7 +37,7 @@ def _read_requirements():
 
 setup(
     name="anetbbs",
-    version="1.1.56",
+    version="1.1.58",
     packages=find_packages(),
     # Matches install.sh's own already-documented real floor (it probes
     # for python3.12/3.11/3.10 in that order and accepts 3.10+) -- found

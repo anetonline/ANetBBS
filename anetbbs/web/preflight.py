@@ -121,17 +121,25 @@ def _check_sudo_escalation(cfg):
 
        A real live outage (2026-10-27) found that checking for a
        literal ``NoNewPrivileges=yes`` line in the unit file — what
-       this function used to do — isn't enough: per systemd.exec(5),
-       several OTHER hardening directives (``SystemCallFilter=``,
-       ``RestrictNamespaces=``, ``ProtectKernelTunables=``,
-       ``ProtectKernelModules=``, ``ProtectKernelLogs=``,
-       ``MemoryDenyWriteExecute=``, ``RestrictRealtime=``,
-       ``LockPersonality=``) each IMPLICITLY force NoNewPrivileges=yes
-       unless ``NoNewPrivileges=no`` is explicitly set to override it —
-       so a unit whose files never literally mention
-       ``NoNewPrivileges=`` at all can still have it effectively on. A
-       text-only check can't know this; querying systemd's own
-       computed ``NoNewPrivileges`` property (``systemctl show -p
+       this function used to do — isn't enough: several seccomp-backed
+       hardening directives (``SystemCallFilter=``,
+       ``SystemCallArchitectures=``, ``RestrictNamespaces=``,
+       ``RestrictRealtime=``, ``RestrictSUIDSGID=``,
+       ``MemoryDenyWriteExecute=``, ``LockPersonality=``) each require
+       the kernel's own ``no_new_privs`` bit to install their seccomp
+       filter on a unit with no ``CAP_SYS_ADMIN`` (which this unit
+       deliberately has none of), so systemd forces
+       ``NoNewPrivileges=yes`` for real regardless of what the unit
+       file says — confirmed by a real fresh restart on live
+       production still showing ``NoNewPrivs: 1`` in
+       ``/proc/<pid>/status`` with an explicit ``NoNewPrivileges=no``
+       already in place. This is a hard kernel constraint, not a
+       systemd policy default — there is no config override, which is
+       why ``anetbbs-web.service`` must never carry any of those
+       directives in the first place (see install.sh/update.sh's own
+       unit-generation code for the full writeup). A text-only check
+       can't know any of this; querying systemd's own computed
+       ``NoNewPrivileges`` property (``systemctl show -p
        NoNewPrivileges --value``) can, since systemd itself applies
        that implication when computing it. No privileges needed for
        this query either.
@@ -185,12 +193,18 @@ def _check_sudo_escalation(cfg):
     if bad_directives:
         return _check('sudo escalation from web service', 'fail',
                       'unit hardening blocks sudo: ' + '; '.join(bad_directives),
-                      'Add NoNewPrivileges=no via a systemd drop-in '
-                      '(sudo systemctl edit anetbbs-web, or re-run sudo bash '
-                      'update.sh which does this automatically) and/or add '
-                      'CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE to '
-                      'CapabilityBoundingSet. Then sudo systemctl daemon-reload '
-                      '&& systemctl restart anetbbs-web.')
+                      'Re-run sudo bash update.sh over SSH -- it removes the '
+                      'seccomp-backed directives that force this on this '
+                      'unit and restarts the service. Manually adding '
+                      'NoNewPrivileges=no via systemctl edit alone will NOT '
+                      'fix this if a seccomp-backed directive '
+                      '(SystemCallFilter=, RestrictNamespaces=, etc.) is '
+                      'still present elsewhere on the unit -- that forces '
+                      'the flag back on regardless of an explicit override. '
+                      'If a CapabilityBoundingSet= is also listed above, '
+                      'add CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE to it too, '
+                      'then sudo systemctl daemon-reload && systemctl '
+                      'restart anetbbs-web.')
 
     # Unit looks fine — now check that sudoers actually grants the wrapper.
     if not os.path.isfile(wrapper):

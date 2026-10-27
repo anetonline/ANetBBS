@@ -29,20 +29,54 @@ STRICT_DIRECTIVES = (
 
 WEB_DIRECTIVES = (
     'ProtectSystem=full',
-    'ProtectClock=yes',
-    'ProtectHostname=yes',
-    'MemoryDenyWriteExecute=yes',
-    'SystemCallFilter=@system-service',
-    'SystemCallErrorNumber=EPERM',
-    # Real live outage (2026-10-27): merely OMITTING NoNewPrivileges=
-    # (the previous convention here) does NOT keep it off -- several
-    # of the OTHER directives above (SystemCallFilter=, MemoryDeny
-    # WriteExecute=, and the RestrictNamespaces=/ProtectKernel*=/
-    # RestrictRealtime=/LockPersonality= directives asserted
-    # elsewhere) each imply NoNewPrivileges=yes per systemd.exec(5)
-    # unless NoNewPrivileges=no is explicitly set to override it. An
-    # explicit "no" is required here, not just an absent line.
+    'ProtectControlGroups=yes',
+    # Real live outage (2026-10-27), THREE fix attempts before landing
+    # here -- see install.sh's matching unit for the full writeup.
+    # Attempt 1: merely OMITTING NoNewPrivileges= doesn't keep it off,
+    # since several directives imply it. Attempt 2: an explicit
+    # NoNewPrivileges=no doesn't override that implication either
+    # (confirmed live: a fresh restart with the override in place still
+    # showed NoNewPrivs: 1 in /proc) -- installing a seccomp filter
+    # requires CAP_SYS_ADMIN or the kernel's no_new_privs bit, and
+    # systemd hardcodes the latter for any unprivileged unit requesting
+    # a seccomp-backed directive, not overridable via config. Attempt 3
+    # (this one): a real bisection against the live production unit,
+    # each directive tested alone via a real restart + /proc read, found
+    # ProtectKernelTunables=, ProtectKernelModules=, ProtectKernelLogs=,
+    # ProtectClock=, and ProtectHostname= EACH independently force the
+    # flag too (each blocks a specific kernel syscall via its own
+    # seccomp filter) -- only the 5 directives in WEB_DIRECTIVES are
+    # actually safe. See WEB_MUST_NOT_HAVE for everything that isn't.
     'NoNewPrivileges=no',
+)
+
+# Confirmed via a real bisection against the live production unit, each
+# directive tested alone through a real restart + /proc/<pid>/status
+# read -- every one of these independently forces the kernel's
+# no_new_privs flag on, regardless of an explicit NoNewPrivileges=no,
+# because each either installs its own seccomp filter directly
+# (SystemCallFilter=, SystemCallArchitectures=, RestrictNamespaces=,
+# RestrictRealtime=, RestrictSUIDSGID=, MemoryDenyWriteExecute=,
+# LockPersonality=) or blocks a specific kernel syscall via a seccomp
+# filter layered on top of its mount/capability restriction
+# (ProtectKernelTunables=, ProtectKernelModules=, ProtectKernelLogs=,
+# ProtectClock=, ProtectHostname=). anetbbs-web runs as an unprivileged
+# user with no CAP_SYS_ADMIN and needs sudo escalation to work, so none
+# of these can ever appear on this unit.
+WEB_MUST_NOT_HAVE = (
+    'SystemCallFilter=',
+    'SystemCallErrorNumber=',
+    'SystemCallArchitectures=',
+    'RestrictNamespaces=',
+    'RestrictRealtime=',
+    'RestrictSUIDSGID=',
+    'MemoryDenyWriteExecute=',
+    'LockPersonality=',
+    'ProtectKernelTunables=',
+    'ProtectKernelModules=',
+    'ProtectKernelLogs=',
+    'ProtectClock=',
+    'ProtectHostname=',
 )
 
 TERMINAL_DIRECTIVES = (
@@ -103,12 +137,24 @@ class GeneratedUnitDirectiveTests(unittest.TestCase):
         for directive in WEB_DIRECTIVES:
             self.assertIn(directive, body, f'anetbbs-web missing {directive}')
         self.assertNotIn('ProtectSystem=strict', body)
+        directive_only = _directive_lines(body)
+        for forbidden in WEB_MUST_NOT_HAVE:
+            self.assertNotIn(
+                forbidden, directive_only,
+                f'anetbbs-web must not have {forbidden} -- it is '
+                'seccomp-backed and systemd forces NoNewPrivileges=yes '
+                'for it regardless of an explicit override, which '
+                'breaks the Service Control Center\'s sudo escalation')
 
     def test_update_sh_web_unit_has_full_not_strict(self):
         body = _extract_heredoc(self.update_sh, 'anetbbs-web')
         for directive in WEB_DIRECTIVES:
             self.assertIn(directive, body, f'anetbbs-web missing {directive}')
         self.assertNotIn('ProtectSystem=strict', body)
+        directive_only = _directive_lines(body)
+        for forbidden in WEB_MUST_NOT_HAVE:
+            self.assertNotIn(forbidden, directive_only,
+                              f'anetbbs-web must not have {forbidden}')
 
     def test_install_sh_terminal_unit_has_safe_subset_only(self):
         body = _extract_heredoc(self.install_sh, 'anetbbs')
@@ -169,6 +215,10 @@ class DeployTemplateDirectiveTests(unittest.TestCase):
         for directive in WEB_DIRECTIVES:
             self.assertIn(directive, body)
         self.assertNotIn('ProtectSystem=strict', body)
+        directive_only = _directive_lines(body)
+        for forbidden in WEB_MUST_NOT_HAVE:
+            self.assertNotIn(forbidden, directive_only,
+                              f'anetbbs-web must not have {forbidden}')
 
     def test_terminal_template_has_safe_subset_only(self):
         body = self._read('deploy/anetbbs.service')

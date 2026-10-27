@@ -124,11 +124,48 @@ class ExistingUnitGetsDropinTests(_Harness):
         self.assertIn('ProtectHome=yes', text)
         self.assertIn('[Service]', text)
 
-    def test_web_unit_omits_nonewprivileges_for_sudo_escalation(self):
+    def test_web_unit_gets_explicit_nonewprivileges_no(self):
+        # Real live outage (2026-10-27), THREE fix attempts: this unit
+        # used to OMIT NoNewPrivileges= entirely (the original
+        # assumption being that an absent line keeps it off), which
+        # didn't work since other directives implied it. An explicit
+        # NoNewPrivileges=no was tried next and ALSO confirmed live not
+        # to work. Removing just the obviously-seccomp directives (see
+        # the next test) ALSO wasn't enough on its own -- see
+        # test_web_unit_never_gets_seccomp_backed_directives for the
+        # full list a real bisection against the live production unit
+        # found, each tested alone via a real restart + /proc read.
         self._write_unit('anetbbs-web')
         self._run()
         text = self._dropin_path('anetbbs-web').read_text()
-        self.assertNotIn('NoNewPrivileges', text)
+        self.assertIn('NoNewPrivileges=no', text)
+
+    def test_web_unit_never_gets_seccomp_backed_directives(self):
+        # Confirmed via a real bisection against the live production
+        # unit, each directive tested alone through a real restart +
+        # /proc/<pid>/status read -- every one of these independently
+        # forces the kernel's no_new_privs flag on regardless of an
+        # explicit NoNewPrivileges=no, because each either installs its
+        # own seccomp filter directly, or blocks a specific kernel
+        # syscall (sysctl, module load/unload, syslog, clock set,
+        # hostname set) via a seccomp filter layered on top of its
+        # mount/capability restriction. This unit runs unprivileged and
+        # needs sudo escalation for the Service Control Center, so none
+        # of these can ever appear here -- only PrivateTmp=, ProtectHome=,
+        # ProtectSystem=, ReadWritePaths=, and ProtectControlGroups= are
+        # actually safe (see the next test).
+        self._write_unit('anetbbs-web')
+        self._run()
+        text = self._dropin_path('anetbbs-web').read_text()
+        for forbidden in ('SystemCallFilter', 'SystemCallErrorNumber',
+                           'SystemCallArchitectures', 'RestrictNamespaces',
+                           'RestrictRealtime', 'RestrictSUIDSGID',
+                           'MemoryDenyWriteExecute', 'LockPersonality',
+                           'ProtectKernelTunables', 'ProtectKernelModules',
+                           'ProtectKernelLogs', 'ProtectClock',
+                           'ProtectHostname'):
+            self.assertNotIn(forbidden, text,
+                              f'anetbbs-web drop-in must not have {forbidden}')
 
     def test_web_unit_gets_protectsystem_full_and_broad_rwpaths(self):
         self._write_unit('anetbbs-web')
@@ -137,6 +174,7 @@ class ExistingUnitGetsDropinTests(_Harness):
         text = self._dropin_path('anetbbs-web').read_text()
         self.assertIn('ProtectSystem=full', text)
         self.assertIn('ReadWritePaths=/home/stingray/anetbbs', text)
+        self.assertIn('ProtectControlGroups=yes', text)
 
     def test_terminal_unit_gets_nonewprivileges_no_protectsystem(self):
         self._write_unit('anetbbs')
