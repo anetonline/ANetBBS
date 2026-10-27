@@ -1,11 +1,39 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.58`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.59`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.59 — Fix the web auto-update button itself (October 2026)
+
+v1.1.58 fixed the underlying sudo privilege-escalation outage, but the
+web-triggered "Check for Updates → Install" button had a second, separate
+bug: it could pass every preflight check and still silently die partway
+through an upgrade, leaving the box on the old version with no error
+shown. Manually running `sudo bash update.sh` over SSH was never
+affected by this — only the browser button was.
+
+Root cause: the button launched the privileged upgrade wrapper via
+`systemd-run --scope`, intended to let the wrapper escape the web
+service's own process group so that update.sh's own restart of the web
+service couldn't kill the upgrade along with it. Per systemd-run's own
+documentation, `--scope` actually makes `systemd-run` itself the parent
+process of the wrapper — so the wrapper remained a descendant of the
+same process tree it was supposed to escape, and could still be killed
+as collateral damage when the web service stopped.
+
+Fixed by launching the wrapper as a fully independent transient
+service instead (the default `systemd-run` mode, not `--scope`), which
+is never a descendant of the calling process at all, with `--wait`
+restoring completion tracking without re-introducing that coupling.
+Applying this release through the web button itself should work now
+that v1.1.58 fixed the underlying sudo issue, but carries a small
+chance of hitting the exact bug this release fixes on the way in — a
+manual `sudo bash update.sh` over SSH sidesteps that risk entirely and
+is the safer way to pick up this specific release.
 
 ## v1.1.58 — Correct fix for the sudo escalation outage (October 2026)
 

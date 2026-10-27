@@ -522,21 +522,49 @@ def _install_container(target, upstream):
 
 def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
                    *, label: str) -> None:
-    """Spawn the privileged upgrade wrapper in its own systemd scope.
+    """Spawn the privileged upgrade wrapper as an independent systemd
+    service, NOT a scope -- a real live outage (2026-10-27) found
+    ``--scope`` is not actually reliable for this.
 
-    Why a scope: the wrapper inherits the cgroup of whatever spawned it
-    (gunicorn for the web service). When ``update.sh`` later runs
-    ``systemctl stop anetbbs-web`` in Step 3, systemd terminates every
-    process in the unit's cgroup — including our running wrapper. The
-    upgrade halts at the service-stop step, leaving the box on the old
-    version with anetbbs-web down. ``systemd-run --scope`` creates a
-    transient scope under system.slice (when invoked via sudo as root)
-    so the wrapper escapes the unit's cgroup and survives the stop.
+    Why a scope wasn't enough: the wrapper inherits the cgroup of
+    whatever spawned it (gunicorn for the web service). When
+    ``update.sh`` later runs ``systemctl stop anetbbs-web`` in Step 3,
+    systemd terminates every process in the unit's cgroup — including
+    our running wrapper, halting the upgrade mid-flight. ``systemd-run
+    --scope`` was added to dodge this by creating a transient scope the
+    wrapper escapes into -- but per systemd-run(1), ``--scope`` makes
+    ``systemd-run`` ITSELF the parent process of the wrapper ("the
+    command will inherit the execution environment of the caller"),
+    so the wrapper is still a descendant of the very process tree
+    we're trying to escape. Confirmed broken live: the auto-update
+    button still failed to complete an upgrade after NoNewPrivileges
+    was fixed, with no privilege error at all -- it just silently died
+    partway through, version unchanged.
+
+    The fix: omit ``--scope`` entirely. Per systemd-run(1), the
+    DEFAULT mode runs the command as a transient *service* with "the
+    service manager [PID 1] as its parent process" -- never a
+    descendant of the caller at all, so killing anetbbs-web's cgroup
+    cannot touch it regardless of timing. ``--wait`` gets completion
+    tracking back without re-introducing the coupling: it makes
+    ``systemd-run`` block by *monitoring* the unit via the service
+    manager, not by being part of its process tree -- so even if our
+    ``sudo``/``systemd-run`` waiter itself gets killed as collateral
+    damage, the actual upgrade keeps running and finishes on its own.
+    ``--property=StandardOutput=/StandardError=append:<path>`` is
+    needed because a plain transient service's output goes to the
+    journal by default, not to our pipe the way ``--scope`` mode's did
+    (the launched command directly inherited systemd-run's own stdout
+    there) -- redirect both back to the same upgrade log file so the
+    web UI's log tail keeps working exactly as before.
 
     Sudoers ships an entry granting exactly this command shape.
     """
     cmd = ['sudo', '-n',
-           '/usr/bin/systemd-run', '--scope', '--collect', '--quiet',
+           '/usr/bin/systemd-run', '--unit=anetbbs-upgrade',
+           '--collect', '--quiet', '--wait',
+           f'--property=StandardOutput=append:{_UPGRADE_LOG_PATH}',
+           f'--property=StandardError=append:{_UPGRADE_LOG_PATH}',
            wrapper, target, url, sha256]
 
     def _runner():
