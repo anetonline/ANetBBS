@@ -1,11 +1,23 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.59`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.60`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.60 — CI-only test fix (October 2026)
+
+v1.1.59's new test coverage for the auto-update button fix included a
+check that cross-references `deploy/sudoers.anetbbs` against the
+upgrade command the web button builds. That file is deliberately
+excluded from the Docker image (`.dockerignore` — it's a bare-metal-only
+concern), so the Docker-build CI workflow's in-container test run failed
+with a missing-file error. Fixed by skipping that specific check when
+the file isn't present, matching the same exclusion already documented
+in `.dockerignore`. No functional/runtime code changed; this release
+exists purely to keep the Docker-build CI check accurate.
 
 ## v1.1.59 — Fix the web auto-update button itself (October 2026)
 

@@ -124,7 +124,16 @@ class SudoersGrantMatchesSpawnCommandTests(unittest.TestCase):
     denial with zero code-level test coverage otherwise."""
 
     def setUp(self):
-        self.sudoers_text = (REPO_ROOT / 'deploy' / 'sudoers.anetbbs').read_text()
+        sudoers_path = REPO_ROOT / 'deploy' / 'sudoers.anetbbs'
+        if not sudoers_path.exists():
+            # .dockerignore deliberately excludes this file from the
+            # Docker image (it's a bare-metal-only concern -- see its
+            # own comment there), so the Docker-build CI workflow runs
+            # this suite without it present. Nothing to cross-check in
+            # that environment.
+            self.skipTest('deploy/sudoers.anetbbs not present in this build '
+                          '(excluded from the Docker image by .dockerignore)')
+        self.sudoers_text = sudoers_path.read_text()
 
     def _upgrade_cmd_tokens(self):
         fake_proc = MagicMock()
