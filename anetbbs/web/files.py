@@ -5,7 +5,7 @@ File gallery blueprint
 import os
 import uuid
 import mimetypes
-from flask import Blueprint, render_template, redirect, url_for, flash, send_from_directory, abort, current_app, request
+from flask import Blueprint, render_template, redirect, url_for, flash, send_from_directory, abort, current_app, request, session as flask_session
 from flask_login import login_required, current_user
 from wtforms import TextAreaField, SubmitField, SelectField
 from wtforms.validators import Optional
@@ -259,11 +259,20 @@ def download(file_id):
     # with no per-event timestamped row, so there was no way to compute
     # a real "downloads today" number. This is the only new write needed
     # to make that field live up to its own documented convention.
+    #
+    # A second real gap found live (broader logging audit, 2026-10-26):
+    # this originally left out caller_log_id, so the row was written
+    # (stats counts were right) but never showed up in the admin
+    # caller-log drill-down -- same correlation auth.py's own
+    # _log_activity() always sets, via the same flask_session-stashed id.
+    # None for an anonymous download (no login_required on this route),
+    # same as user_id above.
     db.session.add(UserActivity(
         user_id=(current_user.id if current_user.is_authenticated else None),
         activity_type='file_download',
         details=f'file_upload_id={upload_obj.id}: {upload_obj.original_filename}',
-        service='web'))
+        service='web', ip_address=request.remote_addr,
+        caller_log_id=flask_session.get('caller_log_id')))
     db.session.commit()
     consume_quota(current_user, upload_obj.file_size or 0)
 

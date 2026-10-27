@@ -271,7 +271,16 @@ def create_app(config_name=None):
                 return redirect(url_for('auth.login'))
 
             if user_session is None:
-                user_session = UserSession(user_id=current_user.id, session_key=key)
+                # caller_log_id: correlates this presence row back to the
+                # CallerLog row the login route created (same
+                # flask_session-stashed id auth.py's own _log_activity
+                # uses) so cleanup_stale_sessions() can backfill
+                # duration_seconds for a connection that never hits
+                # /logout -- see UserSession.caller_log_id's model
+                # comment for why this matters.
+                user_session = UserSession(
+                    user_id=current_user.id, session_key=key,
+                    caller_log_id=_flask_session.get('caller_log_id'))
                 db.session.add(user_session)
 
             # Real bug found live (2026-09-01, reported by Jerry): a
@@ -1414,6 +1423,10 @@ def _lightweight_migrate(app):
                   'caller_log_id')
     _ensure_index('echomail_poll_logs', 'ix_echomail_poll_logs_node_id',
                   'node_id')
+    # UserSession.caller_log_id (see that column's own model comment) --
+    # same reasoning, same auto-sweep-adds-the-column-not-the-index gap.
+    _ensure_index('user_sessions', 'ix_user_sessions_caller_log_id',
+                  'caller_log_id')
 
     # Real gap found in a security/performance audit: GameScore.game_id
     # and GameSession's (game_id, status) pair are both filtered on in

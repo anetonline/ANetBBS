@@ -29,11 +29,28 @@ import anetbbs.config as cfg_mod
 class _FakeSession:
     """Feeds a queue of canned read_line() responses (one per call, in
     order) and captures every write() call as a joined transcript."""
-    def __init__(self, user, responses):
+    def __init__(self, user, responses, caller_log_id=None):
         self.user = user
         self._responses = list(responses)
         self.written = []
         self._forced_width = 40
+        # Mirrors the real Session._log_activity() signature/behavior --
+        # needed since _echo_compose()/_pm_compose() now log activity
+        # rows on success (logging-audit gap found live, 2026-10-26).
+        self._caller_log_id = caller_log_id
+        self._proto = 'telnet'
+
+    def _log_activity(self, activity_type, details=None):
+        from anetbbs.models import db, UserActivity
+        from anetbbs.features.bbs_ui import _app
+        if not self.user:
+            return
+        with _app().app_context():
+            db.session.add(UserActivity(
+                user_id=self.user.get('id'), activity_type=activity_type,
+                details=details, service=self._proto,
+                caller_log_id=self._caller_log_id))
+            db.session.commit()
 
     async def write(self, text):
         self.written.append(text)
@@ -232,17 +249,29 @@ class PrivateMessageScreenTests(PetsciiScreensTestCase):
         # N(new) -> to -> subject -> body -> /send -> ''(press ENTER after
         # "Sent.") -> Q(exit inbox)
         session = _FakeSession(self._alice_user(),
-                               ['N', 'bob', 'Hey Bob', 'a private note', '/send', '', 'Q'])
+                               ['N', 'bob', 'Hey Bob', 'a private note', '/send', '', 'Q'],
+                               caller_log_id=3322)
         with self._patched_app():
             asyncio.run(_pm_menu(session))
         with self.app.app_context():
-            from anetbbs.models import PrivateMessage, Notification
+            from anetbbs.models import PrivateMessage, Notification, UserActivity
             pm = PrivateMessage.query.filter_by(subject='Hey Bob').first()
             self.assertIsNotNone(pm)
             self.assertEqual(pm.sender_id, self.alice_id)
             self.assertEqual(pm.recipient_id, self.bob_id)
             notif = Notification.query.filter_by(user_id=self.bob_id, kind='pm').first()
             self.assertIsNotNone(notif)
+
+            # Logging-audit gap (2026-10-26): the PETSCII PM composer
+            # never logged a UserActivity row.
+            activity = UserActivity.query.filter_by(
+                activity_type='pm_sent').first()
+            self.assertIsNotNone(
+                activity, 'a successful PETSCII PM send must log a '
+                'pm_sent UserActivity row')
+            self.assertEqual(activity.user_id, self.alice_id)
+            self.assertEqual(activity.caller_log_id, 3322)
+            self.assertNotIn('a private note', activity.details or '')
 
     def test_compose_to_nonexistent_user_shows_error_not_crash(self):
         from anetbbs.features.petscii_ui import _pm_compose

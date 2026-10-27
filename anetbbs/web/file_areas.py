@@ -21,10 +21,11 @@ import os
 import secrets
 import datetime
 from flask import (Blueprint, render_template, abort, send_from_directory,
-                   redirect, url_for, flash, request, current_app, send_file)
+                   redirect, url_for, flash, request, current_app, send_file,
+                   session as flask_session)
 from flask_login import login_required, current_user
 
-from ..models import db, FileArea, TicFile, SharedFileLink
+from ..models import db, FileArea, TicFile, SharedFileLink, UserActivity
 from ..features.archive_meta import extract_archive_description
 from ..features.access_control import evaluate_access
 from ..features.rate_limit import rate_limit, _user_or_ip
@@ -559,6 +560,29 @@ def download(area_id, filename):
         current_app.logger.exception(
             'download ratio-counter bump crashed for user %s', current_user.id)
     consume_quota(current_user, file_size)
+
+    # Real gap found live (broader logging audit, 2026-10-26): this is
+    # THE route every real web file-area download goes through, and it
+    # never wrote a UserActivity row at all -- only the FileRatio
+    # lifetime counter above, which has no per-event timestamp and
+    # can't answer "what did this caller do" or "downloads today".
+    # Logged here (about to serve), matching the same "count before
+    # transfer" convention as the ratio/quota bumps above -- so an
+    # aborted mid-stream download still counts, consistent with every
+    # other download path in this codebase. caller_log_id correlates
+    # this to the admin caller-log drill-down, same flask_session-
+    # stashed id auth.py's login route sets.
+    try:
+        db.session.add(UserActivity(
+            user_id=current_user.id, activity_type='file_download',
+            details=f'{area.name}: {filename}', service='web',
+            ip_address=_client_ip(),
+            caller_log_id=flask_session.get('caller_log_id')))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            'file_download activity log failed for user %s', current_user.id)
 
     # send_from_directory handles directory traversal safely.
     return send_from_directory(area.storage_path, filename, as_attachment=True)

@@ -29,12 +29,31 @@ import anetbbs.config as cfg_mod
 class _FakeSession:
     """Same fail-fast fake used by test_local_compose_tosses_to_downstream.py
     -- an empty response queue raises instead of silently defaulting."""
-    def __init__(self, user, responses, window_size=(80, 24)):
+    def __init__(self, user, responses, window_size=(80, 24),
+                caller_log_id=None):
         self.user = user
         self._responses = list(responses)
         self.written = []
         self._forced_width = 40
         self.window_size = window_size
+        # Mirrors the real Session._log_activity() signature/behavior --
+        # needed since _compose_echomail()/_echo_compose() now log an
+        # activity row on success (logging-audit gap found live,
+        # 2026-10-26).
+        self._caller_log_id = caller_log_id
+        self._proto = 'telnet'
+
+    def _log_activity(self, activity_type, details=None):
+        from anetbbs.models import db, UserActivity
+        from anetbbs.features.bbs_ui import _app
+        if not self.user:
+            return
+        with _app().app_context():
+            db.session.add(UserActivity(
+                user_id=self.user.get('id'), activity_type=activity_type,
+                details=details, service=self._proto,
+                caller_log_id=self._caller_log_id))
+            db.session.commit()
 
     async def write(self, text):
         self.written.append(text)

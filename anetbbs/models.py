@@ -551,6 +551,23 @@ class UserSession(db.Model):
                                 index=True)
     kick_reason = db.Column(db.String(200))
 
+    # Correlates this presence row back to the CallerLog row the same
+    # login created (web/auth.py stashes CallerLog.id in the Flask
+    # session as 'caller_log_id', same idiom as presence_session_key
+    # above). Added so events/handlers.py::cleanup_stale_sessions can
+    # backfill CallerLog.duration_seconds for a web user who never hit
+    # /logout (closed the tab, walked away) -- the overwhelmingly
+    # common case, and the real reason most web CallerLog rows showed
+    # 0 seconds: duration_seconds was previously only ever written by
+    # the explicit /logout route, with no fallback for a connection
+    # that just goes quiet. Nullable: terminal sessions' own
+    # SessionPresence (core/presence.py) doesn't set this -- they
+    # already get duration_seconds written unconditionally in
+    # core/session.py's finally: block regardless of how the
+    # connection ends, so they don't need this backstop.
+    caller_log_id = db.Column(db.Integer, db.ForeignKey('caller_log.id'),
+                              nullable=True, index=True)
+
     # Cascade-delete this user's session row(s) when the user is
     # deleted. Without this, SQLAlchemy defaults to "set FK to NULL" on
     # user delete -- but user_id is NOT NULL, so the parent delete

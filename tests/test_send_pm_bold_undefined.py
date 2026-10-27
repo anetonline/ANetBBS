@@ -20,10 +20,15 @@ import anetbbs.config as cfg_mod
 
 
 class _FakeSession:
-    def __init__(self, user, responses):
+    def __init__(self, user, responses, caller_log_id=None):
         self.user = user
         self._responses = list(responses)
         self.written = []
+        # Mirrors the real Session._log_activity() signature/behavior --
+        # needed since _send_pm() now logs a 'pm_sent' activity row on
+        # successful send (logging-audit gap found live, 2026-10-26).
+        self._caller_log_id = caller_log_id
+        self._proto = 'telnet'
 
     async def write(self, text):
         self.written.append(text)
@@ -35,6 +40,18 @@ class _FakeSession:
 
     def transcript(self):
         return ''.join(self.written)
+
+    def _log_activity(self, activity_type, details=None):
+        from anetbbs.models import db, UserActivity
+        from anetbbs.features.bbs_ui import _app
+        if not self.user:
+            return
+        with _app().app_context():
+            db.session.add(UserActivity(
+                user_id=self.user.get('id'), activity_type=activity_type,
+                details=details, service=self._proto,
+                caller_log_id=self._caller_log_id))
+            db.session.commit()
 
 
 class SendPmBoldUndefinedTests(unittest.TestCase):
@@ -77,7 +94,8 @@ class SendPmBoldUndefinedTests(unittest.TestCase):
 
         session = _FakeSession(
             user={'id': sender_id, 'username': 'pmsender', 'access_level': 100},
-            responses=['pmrecipient', 'Test subject'])
+            responses=['pmrecipient', 'Test subject'],
+            caller_log_id=5566)
         ui = BBSMenuUI(session)
 
         with patch('anetbbs.features.bbs_ui._app', return_value=self.app), \
@@ -93,6 +111,21 @@ class SendPmBoldUndefinedTests(unittest.TestCase):
             self.assertIsNotNone(pm)
             self.assertEqual(pm.subject, 'Test subject')
             self.assertEqual(pm.body, 'Test body')
+
+        # Logging-audit gap (2026-10-26): terminal PM send never logged a
+        # UserActivity row at all.
+        with self.app.app_context():
+            from anetbbs.models import UserActivity
+            activity = UserActivity.query.filter_by(
+                activity_type='pm_sent').first()
+            self.assertIsNotNone(
+                activity, 'a successful terminal PM send must log a '
+                'pm_sent UserActivity row')
+            self.assertEqual(activity.user_id, sender_id)
+            self.assertEqual(activity.caller_log_id, 5566)
+            self.assertNotIn('Test body', activity.details or '',
+                             'the PM body must never be logged, only the '
+                             'subject/recipient')
 
 
 if __name__ == '__main__':

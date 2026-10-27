@@ -90,6 +90,11 @@ class UsernameLookupCaseInsensitivityTests(unittest.TestCase):
                 self.user = user
                 self._responses = list(responses)
                 self.written = []
+                # Mirrors the real Session._log_activity() -- needed
+                # since _send_pm() now logs a 'pm_sent' activity row on
+                # success (logging-audit gap found live, 2026-10-26).
+                self._caller_log_id = None
+                self._proto = 'telnet'
 
             async def write(self, text):
                 self.written.append(text)
@@ -101,6 +106,19 @@ class UsernameLookupCaseInsensitivityTests(unittest.TestCase):
 
             def transcript(self):
                 return ''.join(self.written)
+
+            def _log_activity(self, activity_type, details=None):
+                from anetbbs.models import db, UserActivity
+                from anetbbs.features.bbs_ui import _app
+                if not self.user:
+                    return
+                with _app().app_context():
+                    db.session.add(UserActivity(
+                        user_id=self.user.get('id'),
+                        activity_type=activity_type, details=details,
+                        service=self._proto,
+                        caller_log_id=self._caller_log_id))
+                    db.session.commit()
 
         session = _FakeSession(
             user={'id': self.sender_id, 'username': 'pmsendercase', 'access_level': 100},

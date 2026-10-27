@@ -201,6 +201,16 @@ def area(area_id):
         abort(404)
     _check_area_access(echo_area)
 
+    # Coarse-grained activity logging: one row per area actually opened,
+    # not one per individual message read within it (see read()/thread()
+    # below, which deliberately do NOT log) -- enough for the admin
+    # caller-log drill-down to show "spent time in this area" for a long
+    # session that never posted, without flooding the log with a row per
+    # message click.
+    from ..core.activity_log import web_log_activity
+    web_log_activity(current_user.id, 'echomail_area_viewed',
+                     details=f'{echo_area.name} ({echo_area.tag})')
+
     page = request.args.get('page', 1, type=int)
     per_page = 25
 
@@ -408,8 +418,17 @@ def delete_message(area_id, message_id):
     QWKNodeLastSent.query.filter_by(last_message_id=message_id).update(
         {'last_message_id': None})
 
+    # Capture before delete() -- msg is expired/gone from the session
+    # once the delete is committed below.
+    _deleted_subject = msg.subject
+    _deleted_area_name = echo_area.name
+
     db.session.delete(msg)
     db.session.commit()
+
+    from ..core.activity_log import web_log_activity
+    web_log_activity(current_user.id, 'echomail_delete',
+                     details=f'{_deleted_area_name}: {_deleted_subject[:100]}')
 
     if pending_count:
         flash(f'Message deleted, including {pending_count} not-yet-sent '
@@ -555,6 +574,12 @@ def compose(area_id, reply_to_id=None):
         if network is not None:
             maybe_notify_recipient(msg, echo_area, network)
 
+        from ..core.activity_log import web_log_activity
+        web_log_activity(
+            current_user.id,
+            'echomail_reply' if reply_to_id else 'echomail_post',
+            details=f'{target_area.name}: {msg.subject[:100]}')
+
         flash('Message queued for sending.', 'success')
         return redirect(url_for('echomail.area', area_id=form.area_id.data))
 
@@ -674,6 +699,10 @@ def netmail_compose():
         )
         db.session.add(msg)
         db.session.commit()
+
+        from ..core.activity_log import web_log_activity
+        web_log_activity(current_user.id, 'netmail_sent',
+                         details=f'To {msg.to_name}: {msg.subject[:100]}')
 
         flash(f'Netmail to {msg.to_name} queued — will go out on next poll.',
               'success')

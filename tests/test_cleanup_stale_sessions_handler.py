@@ -109,6 +109,88 @@ class CleanupStaleSessionsHandlerTests(unittest.TestCase):
             self.assertTrue(ok, msg)
             self.assertEqual(UserSession.query.count(), 0)
 
+    def test_backfills_duration_seconds_for_a_correlated_caller_log_row(self):
+        """Real gap found live: CallerLog.duration_seconds for a web
+        login is only ever written by the explicit /logout route -- a
+        user who just closes the tab left it NULL/0 forever. This
+        handler is the backstop: when it reaps a stale UserSession row
+        that's correlated (via caller_log_id) to a CallerLog row still
+        missing its duration, it must fill it in from
+        last_seen - started_at before deleting the row."""
+        from anetbbs.models import db, UserSession, CallerLog
+        from anetbbs.events.handlers import cleanup_stale_sessions
+
+        with self.app.app_context():
+            started = datetime.utcnow() - timedelta(days=2, minutes=20)
+            last_seen = started + timedelta(minutes=17)
+            cl = CallerLog(user_id=self.user_id, username='cleanupstaletest',
+                           service='web', started_at=started)
+            db.session.add(cl)
+            db.session.commit()
+            db.session.add(UserSession(
+                user_id=self.user_id, session_key='abandoned-tab',
+                last_seen=last_seen, caller_log_id=cl.id))
+            db.session.commit()
+
+            ok, msg = cleanup_stale_sessions(self.app, {'stale_days': 1})
+
+            self.assertTrue(ok, msg)
+            refreshed = CallerLog.query.get(cl.id)
+            self.assertIsNotNone(refreshed.duration_seconds)
+            self.assertEqual(refreshed.duration_seconds, 17 * 60)
+
+    def test_does_not_overwrite_a_duration_already_recorded(self):
+        """An explicit /logout already wrote a real duration before this
+        row went stale (e.g. the user logged back in on a new tab,
+        leaving the old UserSession row to age out normally) -- the
+        backstop must never clobber a value a real logout already set."""
+        from anetbbs.models import db, UserSession, CallerLog
+        from anetbbs.events.handlers import cleanup_stale_sessions
+
+        with self.app.app_context():
+            started = datetime.utcnow() - timedelta(days=2, minutes=20)
+            cl = CallerLog(user_id=self.user_id, username='cleanupstaletest',
+                           service='web', started_at=started,
+                           duration_seconds=42)
+            db.session.add(cl)
+            db.session.commit()
+            db.session.add(UserSession(
+                user_id=self.user_id, session_key='already-logged-out',
+                last_seen=datetime.utcnow() - timedelta(days=2),
+                caller_log_id=cl.id))
+            db.session.commit()
+
+            ok, msg = cleanup_stale_sessions(self.app, {'stale_days': 1})
+
+            self.assertTrue(ok, msg)
+            refreshed = CallerLog.query.get(cl.id)
+            self.assertEqual(refreshed.duration_seconds, 42)
+
+    def test_a_recent_row_is_not_backfilled_or_deleted(self):
+        """A row inside the stale_days window must be left alone
+        entirely -- it may still be a genuinely active session."""
+        from anetbbs.models import db, UserSession, CallerLog
+        from anetbbs.events.handlers import cleanup_stale_sessions
+
+        with self.app.app_context():
+            started = datetime.utcnow() - timedelta(minutes=10)
+            cl = CallerLog(user_id=self.user_id, username='cleanupstaletest',
+                           service='web', started_at=started)
+            db.session.add(cl)
+            db.session.commit()
+            db.session.add(UserSession(
+                user_id=self.user_id, session_key='still-active',
+                last_seen=datetime.utcnow() - timedelta(minutes=1),
+                caller_log_id=cl.id))
+            db.session.commit()
+
+            ok, msg = cleanup_stale_sessions(self.app, {'stale_days': 1})
+
+            self.assertTrue(ok, msg)
+            refreshed = CallerLog.query.get(cl.id)
+            self.assertIsNone(refreshed.duration_seconds)
+            self.assertEqual(UserSession.query.count(), 1)
+
     def test_is_registered_in_the_scheduler(self):
         from anetbbs.events.handlers import REGISTRY, HANDLER_META, DEFAULT_EVENTS
         self.assertIn('cleanup_stale_sessions', REGISTRY)

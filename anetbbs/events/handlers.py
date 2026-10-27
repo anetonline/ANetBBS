@@ -267,16 +267,41 @@ def cleanup_stale_sessions(app, params):
     permanent row behind forever on a long-running install. This is
     the backstop: anything untouched for `stale_days` (default 1) is
     long past the 5-minute online window and safe to remove outright.
+
+    Real gap found live: a web login's CallerLog.duration_seconds is
+    only ever written by the explicit /logout route (web/auth.py) --
+    a user who just closes the tab (the overwhelmingly common case)
+    left it NULL/0 forever, since nothing else ever marked that call
+    as over. UserSession.caller_log_id (see that column's own model
+    comment) correlates a presence row back to the CallerLog row the
+    same login created, so before deleting a stale row this now
+    backfills duration_seconds from last_seen - CallerLog.started_at
+    for any still-NULL row it corresponds to -- a late but real number
+    (last observed activity, not a 0) instead of nothing at all.
     """
     try:
-        from ..models import db, UserSession
+        from ..models import db, UserSession, CallerLog
         from datetime import datetime, timedelta
         stale_days = int((params or {}).get('stale_days', 1))
         cutoff = datetime.utcnow() - timedelta(days=stale_days)
+        stale_rows = UserSession.query.filter(
+            UserSession.last_seen < cutoff).all()
+        backfilled = 0
+        for row in stale_rows:
+            if row.caller_log_id is None:
+                continue
+            cl = CallerLog.query.get(row.caller_log_id)
+            if cl is not None and cl.duration_seconds is None:
+                cl.duration_seconds = max(0, int(
+                    (row.last_seen - cl.started_at).total_seconds()))
+                backfilled += 1
         deleted = UserSession.query.filter(UserSession.last_seen < cutoff).delete()
         db.session.commit()
-        return True, f'Deleted {deleted} stale session row(s) older than {stale_days}d'
+        return True, (f'Deleted {deleted} stale session row(s) older than '
+                      f'{stale_days}d (backfilled {backfilled} CallerLog '
+                      f'duration(s))')
     except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
         return False, f'cleanup_stale_sessions failed: {exc!r}'
 
 

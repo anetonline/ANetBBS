@@ -30,12 +30,31 @@ class _FakeSession:
     """Same fail-fast fake used by test_petscii_ui_screens.py -- an
     empty response queue raises instead of silently defaulting, so a
     stuck while-True loop fails the test instead of hanging forever."""
-    def __init__(self, user, responses, window_size=(80, 24)):
+    def __init__(self, user, responses, window_size=(80, 24),
+                caller_log_id=None):
         self.user = user
         self._responses = list(responses)
         self.written = []
         self._forced_width = 40
         self.window_size = window_size
+        # Mirrors the real Session._log_activity() signature/behavior
+        # (same import, same fields) -- needed since _compose_echomail()
+        # now logs an 'echomail_post' activity row on successful compose
+        # (logging-audit gap found live, 2026-10-26).
+        self._caller_log_id = caller_log_id
+        self._proto = 'telnet'
+
+    def _log_activity(self, activity_type, details=None):
+        from anetbbs.models import db, UserActivity
+        from anetbbs.features.bbs_ui import _app
+        if not self.user:
+            return
+        with _app().app_context():
+            db.session.add(UserActivity(
+                user_id=self.user.get('id'), activity_type=activity_type,
+                details=details, service=self._proto,
+                caller_log_id=self._caller_log_id))
+            db.session.commit()
 
     async def write(self, text):
         self.written.append(text)
@@ -155,7 +174,8 @@ class LocalComposeTossesToDownstreamTests(unittest.TestCase):
         session = _FakeSession(
             {'id': self.user_id, 'username': 'jerryreed', 'is_admin': True,
              'access_level': 100},
-            responses=['1', 'Q'])  # pick the only network, then Q out of area lightbar
+            responses=['1', 'Q'],  # pick the only network, then Q out of area lightbar
+            caller_log_id=9988)
 
         # Drive straight past the network/area lightbar picker by patching
         # it to immediately return the known test area (matches the
@@ -186,6 +206,25 @@ class LocalComposeTossesToDownstreamTests(unittest.TestCase):
             'subscribed downstream BinkP node actually receives '
             'locally-posted mail')
 
+        # Logging-audit gap (2026-10-26): terminal echomail compose never
+        # logged a UserActivity row -- only the top-level 'menu:echo'
+        # dispatch fired, not the actual compose action.
+        with self.app.app_context():
+            from anetbbs.models import UserActivity
+            # Scoped by details (not just activity_type) -- the sibling
+            # PETSCII test in this same class writes an 'echomail_post'
+            # row to the same shared DB too, and pytest doesn't guarantee
+            # these two tests run in declaration order.
+            activity = UserActivity.query.filter(
+                UserActivity.activity_type == 'echomail_post',
+                UserActivity.details.like('%Terminal compose toss test%')
+            ).first()
+            self.assertIsNotNone(
+                activity, 'a successful terminal echomail compose must '
+                'log an echomail_post UserActivity row')
+            self.assertEqual(activity.user_id, self.user_id)
+            self.assertEqual(activity.caller_log_id, 9988)
+
     def test_petscii_compose_queues_message_for_subscribed_downstream_node(self):
         from anetbbs.features.petscii_ui import _echo_compose
 
@@ -194,7 +233,8 @@ class LocalComposeTossesToDownstreamTests(unittest.TestCase):
             {'id': self.user_id, 'username': 'jerryreed', 'is_admin': True,
              'access_level': 100},
             responses=['All', 'PETSCII compose toss test',
-                      'Hello from the PETSCII composer.', '/send', ''])
+                      'Hello from the PETSCII composer.', '/send', ''],
+            caller_log_id=7744)
 
         with patch('anetbbs.features.bbs_ui._app', return_value=self.app):
             asyncio.run(_echo_compose(session, self.petscii_area_id, 'ANN.PETTEST'))
@@ -204,6 +244,20 @@ class LocalComposeTossesToDownstreamTests(unittest.TestCase):
             'petscii_ui.py _echo_compose() must call toss_message() so a '
             'subscribed downstream BinkP node actually receives '
             'locally-posted mail')
+
+        # Logging-audit gap (2026-10-26): the PETSCII echomail composer
+        # never logged a UserActivity row either.
+        with self.app.app_context():
+            from anetbbs.models import UserActivity
+            activity = UserActivity.query.filter(
+                UserActivity.activity_type == 'echomail_post',
+                UserActivity.details.like('%PETSCII compose toss test%')
+            ).first()
+            self.assertIsNotNone(
+                activity, 'a successful PETSCII echomail compose must '
+                'log an echomail_post UserActivity row')
+            self.assertEqual(activity.user_id, self.user_id)
+            self.assertEqual(activity.caller_log_id, 7744)
 
 
 if __name__ == '__main__':

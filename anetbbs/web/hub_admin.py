@@ -31,6 +31,7 @@ from ..models import (db, BinkPNode, EchoAreaNode, BinkPHoldQueue,
                        QWKNodeRequest, NetworkJoinConfig, NetworkJoinRequest,
                        HubIdentity, _default_hub_identity_id,
                        FileEchoSubscription, FileArea)
+from ..core.activity_log import web_log_activity
 
 hub_admin_bp = Blueprint('hub_admin', __name__, url_prefix='/admin/echomail/hub')
 
@@ -278,6 +279,8 @@ def nodelist_generate_now():
         flash('No nodelist-generation event is configured.', 'danger')
         return redirect(url_for('hub_admin.index'))
     ok, out = fire(current_app._get_current_object(), event.id)
+    web_log_activity(current_user.id, 'hub_nodelist_generated',
+                     details=('ok: ' if ok else 'failed: ') + out[:150])
     flash(('Nodelist generated: ' if ok else 'Nodelist generation failed: ') + out,
           'success' if ok else 'danger')
     return redirect(url_for('hub_admin.index'))
@@ -332,6 +335,8 @@ def new_hub_identity():
         db.session.commit()
         if form.is_default.data:
             _set_default_hub_identity(identity)
+        web_log_activity(current_user.id, 'hub_identity_added',
+                         details=f'{identity.name} ({identity.slug})')
         flash(f'Hub identity {identity.name!r} created.', 'success')
         return redirect(url_for('hub_admin.hub_identities'))
     return render_template('echomail/admin/hub/hub_identity_form.html',
@@ -369,6 +374,8 @@ def edit_hub_identity(identity_id):
         db.session.commit()
         if form.is_default.data and not identity.is_default:
             _set_default_hub_identity(identity)
+        web_log_activity(current_user.id, 'hub_identity_edited',
+                         details=f'{identity.name} ({identity.slug})')
         flash(f'Hub identity {identity.name!r} updated.', 'success')
         return redirect(url_for('hub_admin.hub_identities'))
     return render_template('echomail/admin/hub/hub_identity_form.html',
@@ -392,6 +399,8 @@ def _set_default_hub_identity(identity):
 def set_default_hub_identity(identity_id):
     identity = HubIdentity.query.get_or_404(identity_id)
     _set_default_hub_identity(identity)
+    web_log_activity(current_user.id, 'hub_identity_set_default',
+                     details=f'{identity.name} ({identity.slug})')
     flash(f'{identity.name!r} is now the default hub identity.', 'success')
     return redirect(url_for('hub_admin.hub_identities'))
 
@@ -418,9 +427,12 @@ def delete_hub_identity(identity_id):
               'downstream nodes assigned to it — reassign or remove those '
               'first.', 'danger')
         return redirect(url_for('hub_admin.hub_identities'))
+    name, slug = identity.name, identity.slug
     db.session.delete(identity)
     db.session.commit()
-    flash(f'Hub identity {identity.name!r} deleted.', 'success')
+    web_log_activity(current_user.id, 'hub_identity_deleted',
+                     details=f'{name} ({slug})')
+    flash(f'Hub identity {name!r} deleted.', 'success')
     return redirect(url_for('hub_admin.hub_identities'))
 
 
@@ -480,6 +492,8 @@ def new_binkp_node():
         )
         db.session.add(node)
         db.session.commit()
+        web_log_activity(current_user.id, 'hub_binkp_node_added',
+                         details=f'{node.name} ({node.ftn_address})')
         flash(f'Node {node.ftn_address} created.', 'success')
         return redirect(url_for('hub_admin.binkp_node_detail', node_id=node.id))
     return render_template('echomail/admin/hub/binkp_node_form.html',
@@ -565,6 +579,8 @@ def edit_binkp_node(node_id):
         node.poll_interval_minutes = form.poll_interval_minutes.data or None
         node.notes = form.notes.data.strip() or None
         db.session.commit()
+        web_log_activity(current_user.id, 'hub_binkp_node_edited',
+                         details=f'{node.name} ({node.ftn_address})')
         flash('Node updated.', 'success')
         return redirect(url_for('hub_admin.binkp_node_detail', node_id=node.id))
     return render_template('echomail/admin/hub/binkp_node_form.html',
@@ -576,9 +592,12 @@ def edit_binkp_node(node_id):
 @_admin_required
 def delete_binkp_node(node_id):
     node = BinkPNode.query.get_or_404(node_id)
+    ftn_address, name = node.ftn_address, node.name
     db.session.delete(node)
     db.session.commit()
-    flash(f'Node {node.ftn_address} deleted.', 'success')
+    web_log_activity(current_user.id, 'hub_binkp_node_deleted',
+                     details=f'{name} ({ftn_address})')
+    flash(f'Node {ftn_address} deleted.', 'success')
     return redirect(url_for('hub_admin.binkp_nodes'))
 
 
@@ -608,6 +627,8 @@ def poll_binkp_node(node_id):
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
+    web_log_activity(current_user.id, 'hub_binkp_node_polled',
+                     details=f'{node.name} ({node.ftn_address})')
     flash(f'Poll of {node.name} triggered — check poll logs for results.', 'info')
     return redirect(url_for('hub_admin.binkp_node_detail', node_id=node.id))
 
@@ -839,6 +860,8 @@ def new_qwk_node():
         )
         db.session.add(node)
         db.session.commit()
+        web_log_activity(current_user.id, 'hub_qwk_node_added',
+                         details=f'{pid} ({node.name})')
         flash(f'QWK node {pid} created.', 'success')
         return redirect(url_for('hub_admin.qwk_node_detail', node_id=node.id))
     return render_template('echomail/admin/hub/qwk_node_form.html',
@@ -902,6 +925,8 @@ def edit_qwk_node(node_id):
         node.hub_identity_id = form.hub_identity_id.data or None
         node.notes = form.notes.data.strip() or None
         db.session.commit()
+        web_log_activity(current_user.id, 'hub_qwk_node_edited',
+                         details=f'{node.packet_id} ({node.name})')
         flash('QWK node updated.', 'success')
         return redirect(url_for('hub_admin.qwk_node_detail', node_id=node.id))
     return render_template('echomail/admin/hub/qwk_node_form.html',
@@ -913,9 +938,12 @@ def edit_qwk_node(node_id):
 @_admin_required
 def delete_qwk_node(node_id):
     node = QWKNode.query.get_or_404(node_id)
+    packet_id, name = node.packet_id, node.name
     db.session.delete(node)
     db.session.commit()
-    flash(f'QWK node {node.packet_id} deleted.', 'success')
+    web_log_activity(current_user.id, 'hub_qwk_node_deleted',
+                     details=f'{packet_id} ({name})')
+    flash(f'QWK node {packet_id} deleted.', 'success')
     return redirect(url_for('hub_admin.qwk_nodes'))
 
 
@@ -1207,6 +1235,8 @@ def approve_qwk_request(req_id):
     req.node_id            = node.id
     db.session.commit()
 
+    web_log_activity(current_user.id, 'hub_qwk_request_approved',
+                     details=f'{pid} ({req.bbs_name})')
     flash(f'Approved! QWK node {pid} created with auto-generated password. '
           f'Credentials will show in the applicant\'s BBS terminal.', 'success')
     return redirect(url_for('hub_admin.qwk_node_requests'))
@@ -1229,6 +1259,8 @@ def deny_qwk_request(req_id):
     req.reviewed_by = current_user.username
     req.deny_reason = reason or None
     db.session.commit()
+    web_log_activity(current_user.id, 'hub_qwk_request_denied',
+                     details=f'{req.packet_id} ({req.bbs_name})')
     flash(f'Request from {req.bbs_name} ({req.packet_id}) denied.', 'info')
     return redirect(url_for('hub_admin.qwk_node_requests'))
 
@@ -1279,6 +1311,8 @@ def join_config_save():
     cfg.binkp_zone = int(zone_raw) if zone_raw.isdigit() else None
     cfg.binkp_net = int(net_raw) if net_raw.isdigit() else None
     db.session.commit()
+    web_log_activity(current_user.id, 'hub_join_config_changed',
+                     details=f'identity {identity.name} ({identity.slug})')
     flash('Join form settings saved.', 'success')
     return redirect(url_for('hub_admin.index', gen_tab='join', join_identity=identity.id))
 

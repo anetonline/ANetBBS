@@ -2174,6 +2174,14 @@ class BBSMenuUI:
                             _network_obj = _ENet.query.get(net_id)
                             if _area_obj is not None and _network_obj is not None:
                                 maybe_notify_recipient(em, _area_obj, _network_obj)
+
+                            # Logging-audit gap (2026-10-26): this FOURTH
+                            # local-compose write path (see the
+                            # toss_message comment above for the full
+                            # incident) never logged a UserActivity row
+                            # either -- same fix as _compose_echomail()'s.
+                            self.session._log_activity(
+                                'echomail_reply', f'{tag}: {compose_subj[:100]}')
                         await self.session.write(
                             f"\r\n  {FG['grn']}{BOLD}[OK] Message queued for next poll.{RESET}\r\n")
                         await self.session.read_line(
@@ -2942,14 +2950,16 @@ class BBSMenuUI:
         # (file_areas.py's own comment: right so the count is correct
         # even if the caller aborts mid-transfer), not gated on the
         # eventual `ok` result below.
-        from anetbbs.models import db, UserActivity
-        with _app().app_context():
-            db.session.add(UserActivity(
-                user_id=self.session.user.get('id'),
-                activity_type='file_download',
-                details=f'{name} via {protocol}',
-                service=self.session.user.get('service') or 'telnet'))
-            db.session.commit()
+        #
+        # A second real gap found live (broader logging audit, 2026-10-26):
+        # this originally inserted the UserActivity row directly instead
+        # of going through session._log_activity() -- which meant it
+        # never got caller_log_id set, so the row was written (stats
+        # counts were right) but never showed up in the admin caller-log
+        # drill-down ("click a caller, see what they did"). Routing
+        # through _log_activity() here gets caller_log_id/ip_address for
+        # free, the same as every other terminal-side activity event.
+        self.session._log_activity('file_download', f'{name} via {protocol}')
 
         await self.session.write(
             f"\r\n{FG['grn']}Starting {protocol.upper()} send of {name} ...{RESET}\r\n"
@@ -4895,6 +4905,10 @@ async def _send_pm(self):
                             subject=subject[:200], body=body)
         db.session.add(pm)
         db.session.commit()
+    # Logging-audit gap (2026-10-26): terminal PM send never wrote a
+    # UserActivity row -- never logs the message body, same privacy
+    # stance as every other activity_type's `details` in this codebase.
+    self.session._log_activity('pm_sent', f'To {to_username}: {subject[:100]}')
     await self.session.write(f"\r\n  {FG['grn']}{BOLD}[OK]{RESET} Sent to {to_username}.\r\n")
     await self.session.read_line("  Press Enter...")
 BBSMenuUI.send_pm = _send_pm
@@ -5144,6 +5158,16 @@ async def _compose_echomail(self):
         _network_obj = EchomailNetwork.query.get(network_id)
         if _area_obj is not None and _network_obj is not None:
             maybe_notify_recipient(em, _area_obj, _network_obj)
+
+        # Logging-audit gap (2026-10-26): terminal echomail composition
+        # never wrote a UserActivity row -- menu_engine.py's top-level
+        # dispatch only logs 'menu:echo' once, when the Echomail menu
+        # itself is entered, not the actual compose action inside it.
+        # Matches the granularity of the web composer's equivalent fix
+        # (web/echomail.py's compose() -> 'echomail_post'/'echomail_reply').
+        self.session._log_activity('echomail_post',
+                                   f'{_area_obj.name if _area_obj else area_id}: '
+                                   f'{subject[:100]}')
 
     await self.session.write(
         f"\r\n  {FG['grn']}{BOLD}Message queued (#{saved_id}).{RESET}"

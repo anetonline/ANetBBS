@@ -10,6 +10,7 @@ from flask_wtf import FlaskForm
 from datetime import datetime, timedelta
 
 from ..models import db, User, PrivateMessage
+from ..core.activity_log import web_log_activity
 
 pm_bp = Blueprint('pm', __name__, url_prefix='/messages')
 
@@ -140,6 +141,8 @@ def compose(username=None):
         )
         db.session.add(msg)
         db.session.commit()
+        web_log_activity(current_user.id, 'pm_sent',
+                         details=f'to {recipient.username}: {(clean_subject or "")[:80]}')
         # All post-send side effects: notifications, achievements,
         # mention scanning. Each is best-effort — none of them must
         # ever 500 the response. The PM itself is already in the DB.

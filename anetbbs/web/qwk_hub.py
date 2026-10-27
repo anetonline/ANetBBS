@@ -26,6 +26,7 @@ from flask import (Blueprint, request, abort, send_file,
 
 from ..models import (db, QWKNode, QWKNodeLastSent, EchoArea,
                        EchomailNetwork, EchomailMessage)
+from ..core.activity_log import web_log_activity
 from ..echomail.qwk import _parse_messages_dat, QWK_HEADER_SIZE, QWK_BLOCK_SIZE
 from ..echomail.qwk_hub_ftp import resolve_hub_id
 from ..echomail.zip_safety import MAX_MEMBER_UNCOMPRESSED, ZipBombError
@@ -406,6 +407,13 @@ def download_qwk(packet_id_qwk: str):
     # Commit HWM immediately — the node has the data now.
     mark_qwk_sent(node.id, new_hwm)
 
+    # No web User/login session here (QWKNode auth is machine-to-machine
+    # HTTP Basic Auth, not flask_login) -- user_id=None is the documented
+    # "anon event" case on UserActivity.user_id. caller_log_id stays None
+    # too (no CallerLog row for this traffic), same as any other anon event.
+    web_log_activity(None, 'qwk_pack_downloaded',
+                     details=f'node {node.packet_id}: {total_msgs} message(s)')
+
     filename = f'{hub_id}.QWK'
     return send_file(
         io.BytesIO(packet_data),
@@ -440,6 +448,10 @@ def upload_rep(packet_id_rep: str):
         logger.exception('QWK hub REP from %s: packet-level import failure',
                          node.packet_id)
         abort(400, description='Could not parse REP packet')
+    # See download_qwk()'s identical comment -- no web User/login session
+    # here, so user_id=None (anon event) and no caller_log_id.
+    web_log_activity(None, 'qwk_rep_uploaded',
+                     details=f'node {node.packet_id}: {n} message(s) imported')
     return f'OK {n} messages imported\r\n', 200
 
 

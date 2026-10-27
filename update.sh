@@ -300,41 +300,74 @@ fi
 # a raw copy of a LIVE, possibly mid-write WAL-mode database can
 # silently omit committed transactions still sitting in the -wal file,
 # producing a backup that opens fine but is quietly missing data,
-# while this function still reported success. No fallback anymore:
-# sqlite3 is now REQUIRED, .backup must succeed, and the resulting
-# backup file must then pass its own PRAGMA integrity_check (exactly
-# "ok", not merely "didn't error") before this function reports
-# success -- a backup that opens but fails integrity_check is treated
-# identically to one that failed to create at all.
+# while this function still reported success. No cp fallback anymore:
+# .backup (or its python3 equivalent below) must succeed, and the
+# resulting backup file must then pass its own PRAGMA integrity_check
+# (exactly "ok", not merely "didn't error") before this function
+# reports success -- a backup that opens but fails integrity_check is
+# treated identically to one that failed to create at all.
+#
+# Real bug report (AloxeCorton, 2026-10-27): the sqlite3(1) CLI
+# package is never installed or verified by install.sh/update.sh --
+# it's an undocumented hard dependency this function silently assumed.
+# A sysop without it installed got stuck permanently unable to update,
+# since the only choices at that point were an unsafe cp(1) (removed
+# above for good reason) or refusing entirely. Fixed by falling back
+# to Python's stdlib sqlite3 module, which wraps the exact same SQLite
+# Online Backup API the CLI's own .backup command uses -- NOT a raw
+# cp(1), so the WAL-safety guarantee is unchanged, and still gated by
+# the same integrity_check requirement below. python3 itself is
+# already a hard, pre-existing ANetBBS dependency (this whole install
+# can't run without it), so this adds no new requirement.
 #
 # Returns 0 if the source doesn't exist (nothing to back up, not a
 # failure) or the backup succeeded AND passed integrity_check; 1 if
-# sqlite3 isn't installed, if .backup fails, or if the resulting
-# backup fails integrity_check -- the caller aborts on any of these,
-# since a DB that exists but couldn't be safely backed up means no
-# real rollback point exists for it. Doesn't try to guess which of
-# anetbbs.db / anetbbs_dev.db is the "real" one in use (some installs
-# run against either via DATABASE_URL) -- both are treated as equally
-# critical.
+# neither sqlite3 nor python3 is available, if the backup itself
+# fails, or if the resulting backup fails integrity_check -- the
+# caller aborts on any of these, since a DB that exists but couldn't
+# be safely backed up means no real rollback point exists for it.
+# Doesn't try to guess which of anetbbs.db / anetbbs_dev.db is the
+# "real" one in use (some installs run against either via
+# DATABASE_URL) -- both are treated as equally critical.
 backup_sqlite() {
     local src="$1" dst="$2" label="$3"
     [[ -f "$src" ]] || return 0
-    if ! command -v sqlite3 >/dev/null 2>&1; then
-        warn "sqlite3(1) is not installed — cannot safely back up $label (a raw copy of a live database can silently omit committed WAL transactions, so there is no safe fallback)"
-        return 1
+    if command -v sqlite3 >/dev/null 2>&1; then
+        if ! sqlite3 "$src" ".backup '$dst'" 2>/dev/null; then
+            warn "sqlite3 .backup of $label failed"
+            return 1
+        fi
+        local _integrity
+        _integrity=$(sqlite3 "$dst" "PRAGMA integrity_check;" 2>/dev/null)
+        if [[ "$_integrity" != "ok" ]]; then
+            warn "$label backup failed integrity_check (expected 'ok', got: ${_integrity:-<empty>})"
+            return 1
+        fi
+        ok "Backed up $label (sqlite3 .backup, integrity_check ok, $(du -h "$dst" | cut -f1))"
+        return 0
     fi
-    if ! sqlite3 "$src" ".backup '$dst'" 2>/dev/null; then
-        warn "sqlite3 .backup of $label failed"
-        return 1
+    if command -v python3 >/dev/null 2>&1; then
+        local _integrity
+        _integrity=$(SRC="$src" DST="$dst" python3 << 'PYBACKUPEOF' 2>/dev/null
+import os, sqlite3
+src_conn = sqlite3.connect(os.environ['SRC'])
+dst_conn = sqlite3.connect(os.environ['DST'])
+src_conn.backup(dst_conn)
+src_conn.close()
+cur = dst_conn.execute('PRAGMA integrity_check;')
+print(cur.fetchone()[0])
+dst_conn.close()
+PYBACKUPEOF
+)
+        if [[ "$_integrity" != "ok" ]]; then
+            warn "$label backup failed integrity_check via python3 fallback (sqlite3(1) CLI not installed; expected 'ok', got: ${_integrity:-<empty>})"
+            return 1
+        fi
+        ok "Backed up $label (python3 sqlite3 backup API, integrity_check ok, $(du -h "$dst" | cut -f1))"
+        return 0
     fi
-    local _integrity
-    _integrity=$(sqlite3 "$dst" "PRAGMA integrity_check;" 2>/dev/null)
-    if [[ "$_integrity" != "ok" ]]; then
-        warn "$label backup failed integrity_check (expected 'ok', got: ${_integrity:-<empty>})"
-        return 1
-    fi
-    ok "Backed up $label (sqlite3 .backup, integrity_check ok, $(du -h "$dst" | cut -f1))"
-    return 0
+    warn "sqlite3(1) is not installed and python3 is unavailable — cannot safely back up $label (a raw copy of a live database can silently omit committed WAL transactions, so there is no safe fallback)"
+    return 1
 }
 if ! backup_sqlite "$INSTALL_DIR/data/anetbbs.db" "$BACKUP_DIR/anetbbs.db.bak" "production DB"; then
     fail "Could not back up data/anetbbs.db — aborting before touching anything live."

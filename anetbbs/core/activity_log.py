@@ -43,3 +43,31 @@ def log_activity(user_id, activity_type, details=None, *, ip_address=None,
             db.session.rollback()
         except Exception:
             pass
+
+
+def web_log_activity(user_id, activity_type, details=None, caller_log_id=None):
+    """Request-aware convenience wrapper around log_activity() for any
+    web blueprint -- fills in ip_address/user_agent/service='web' from
+    the active Flask request, and caller_log_id from the active login's
+    flask_session-stashed id (same idiom web/auth.py's login route uses)
+    unless the caller passes one explicitly.
+
+    Added during a broader logging audit (2026-10-26) that found most
+    web blueprints (echomail, boards, pm, qwk_hub, ...) never logged any
+    UserActivity at all -- only web/auth.py had its own private
+    `_log_activity()` doing this, which meant every other blueprint
+    either reinvented it or, worse, inserted a bare UserActivity() row
+    missing caller_log_id (breaking the admin caller-log drill-down --
+    see test_web_file_download_activity_correlation.py for the exact
+    shape of that bug). New call sites should use THIS function, not a
+    direct UserActivity(...) insert and not a private copy, so every
+    web-side activity event is correlated the same way.
+    """
+    from flask import request, session as flask_session
+    log_activity(
+        user_id, activity_type, details,
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get('User-Agent') or '',
+        service='web',
+        caller_log_id=caller_log_id if caller_log_id is not None
+                     else flask_session.get('caller_log_id'))

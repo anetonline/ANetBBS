@@ -776,6 +776,12 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
         if area is not None and network is not None:
             from ..echomail.notify_reply import maybe_notify_recipient
             maybe_notify_recipient(msg, area, network)
+        # Logging-audit gap (2026-10-26): the PETSCII echomail composer
+        # never logged a UserActivity row -- see the identical fix in
+        # bbs_ui.py's _compose_echomail()/web/echomail.py's compose().
+        session._log_activity(
+            'echomail_reply' if reply_to_name else 'echomail_post',
+            f'{area_name}: {subject[:100]}')
     await session.write('\r\nMessage posted.\r\n')
     await session.read_line('Press ENTER...')
 
@@ -885,6 +891,10 @@ async def _pm_compose(session, reply_to_username=None, reply_subject=None):
                   body=subject[:120], target_url=f'/messages/{pm.id}')
         except Exception:
             pass
+        # Logging-audit gap (2026-10-26): the PETSCII PM composer never
+        # logged a UserActivity row -- see the identical fix in
+        # bbs_ui.py's _send_pm(). Never logs the body, same as there.
+        session._log_activity('pm_sent', f'To {to_username}: {subject[:100]}')
     await session.write('\r\nSent.\r\n')
     await session.read_line('Press ENTER...')
 

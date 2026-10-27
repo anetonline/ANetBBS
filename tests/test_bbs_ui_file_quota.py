@@ -21,10 +21,20 @@ import anetbbs.config as cfg_mod
 
 
 class _FakeSession:
-    def __init__(self, user, responses):
+    def __init__(self, user, responses, caller_log_id=None):
         self.user = user
         self._responses = list(responses)
         self.written = []
+        # Real gap found live (broader logging audit, 2026-10-26):
+        # _download_file() originally wrote its file_download
+        # UserActivity row directly instead of through
+        # Session._log_activity(), so it never set caller_log_id and
+        # never showed up in the admin caller-log drill-down. This
+        # fake mirrors the real method's signature/behavior (same
+        # import, same fields) so tests can confirm the real call site
+        # now gets that correlation for free.
+        self._caller_log_id = caller_log_id
+        self._proto = 'telnet'
 
     async def write(self, text):
         self.written.append(text)
@@ -40,6 +50,18 @@ class _FakeSession:
 
     def transcript(self):
         return ''.join(self.written)
+
+    def _log_activity(self, activity_type, details=None):
+        from anetbbs.models import db, UserActivity
+        from anetbbs.features.bbs_ui import _app
+        if not self.user:
+            return
+        with _app().app_context():
+            db.session.add(UserActivity(
+                user_id=self.user.get('id'), activity_type=activity_type,
+                details=details, service=self._proto,
+                caller_log_id=self._caller_log_id))
+            db.session.commit()
 
 
 class BbsUiFileQuotaTests(unittest.TestCase):
@@ -120,7 +142,7 @@ class BbsUiFileQuotaTests(unittest.TestCase):
             fh.write(b'x' * 100)
 
         f = {'name': 'small.bin', 'size': 100, 'path': fpath}
-        session = _FakeSession(user_dict, ['X', ''])
+        session = _FakeSession(user_dict, ['X', ''], caller_log_id=4321)
         ui = BBSMenuUI(session)
 
         with patch('anetbbs.features.xfer.send_file',
@@ -149,6 +171,12 @@ class BbsUiFileQuotaTests(unittest.TestCase):
                 activity, 'a successful terminal download must log a '
                 'file_download UserActivity row')
             self.assertEqual(activity.user_id, user_dict['id'])
+            # Second real gap (broader logging audit, 2026-10-26): the
+            # row must be correlated to the session's CallerLog via
+            # caller_log_id, or it never shows up in the admin
+            # caller-log drill-down -- the original direct-insert
+            # version left this unset.
+            self.assertEqual(activity.caller_log_id, 4321)
 
 
 if __name__ == '__main__':

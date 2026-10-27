@@ -1,11 +1,48 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.54`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.55`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.55 — Call log and activity log audit (October 2026)
+
+- Fixed web caller sessions permanently recording a zero-second
+  duration unless the caller used the explicit Logout link. Most web
+  sessions simply close the browser tab, which never recorded a real
+  duration before; duration is now backfilled from the existing daily
+  stale-session cleanup job once an abandoned session is reaped, via a
+  new correlation between the presence-tracking table and the caller
+  log. Terminal (telnet/SSH/rlogin) sessions already recorded duration
+  correctly and are unaffected.
+- Closed a wide gap in the admin caller log drill-down (introduced in
+  a previous release to show what a caller did during their session),
+  which was sparsely populated because most areas of the BBS never
+  logged an activity entry at all. Added activity logging across web
+  echomail (viewing, posting, replying, deleting, netmail), web
+  message boards (viewing, posting, replying), private message
+  sending, QWK hub pack transfers, and fifteen hub administration
+  actions (node/identity management, polls, approvals).
+- Added the same activity logging to the terminal client (both ANSI
+  and PETSCII) for echomail composing, inline replying, and private
+  message sending, including a fourth, previously unlogged local
+  compose path reachable only from inside the message reader.
+- Fixed existing file-download activity logging, on both the terminal
+  client and the web file areas, so it correctly correlates to its
+  caller log session and actually appears in the drill-down. The main
+  web file-area download route had never logged a download at all
+  before this fix.
+- Added a shared activity-logging helper for web routes, so future web
+  features log activity consistently rather than each one reinventing
+  (and potentially breaking) the pattern.
+- Fixed the online updater refusing to update at all on a system
+  without the `sqlite3` command-line package installed. The updater's
+  pre-update database backup step now falls back to Python's built-in
+  SQLite support — which uses the same safe, consistent backup method
+  as the command-line tool, not a plain file copy — when that package
+  isn't present, instead of aborting the update entirely.
 
 ## v1.1.54 — Telnet negotiation hardening and installer fix (October 2026)
 

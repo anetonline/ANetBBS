@@ -34,11 +34,18 @@ import anetbbs.config as cfg_mod
 
 
 class _FakeSession:
-    def __init__(self, keys):
+    def __init__(self, keys, caller_log_id=None):
         self.user = {'id': 1, 'username': 'testuser', 'access_level': 100,
                      'is_admin': True}
         self.written = []
         self._keys = list(keys)
+        # Mirrors the real Session._log_activity() -- needed since this
+        # inline reply composer now logs an 'echomail_reply' activity
+        # row on success (logging-audit gap found live, 2026-10-26, the
+        # same fourth-write-path gap this file's own docstring already
+        # covers for toss_message()/tear_line/origin_line).
+        self._caller_log_id = caller_log_id
+        self._proto = 'telnet'
 
     async def write(self, text):
         self.written.append(text)
@@ -48,6 +55,18 @@ class _FakeSession:
 
     async def read_line(self, prompt=''):
         return ''
+
+    def _log_activity(self, activity_type, details=None):
+        from anetbbs.models import db, UserActivity
+        from anetbbs.features.bbs_ui import _app
+        if not self.user:
+            return
+        with _app().app_context():
+            db.session.add(UserActivity(
+                user_id=self.user.get('id'), activity_type=activity_type,
+                details=details, service=self._proto,
+                caller_log_id=self._caller_log_id))
+            db.session.commit()
 
 
 class ReadEchoAreaReplyTossesAndHasOriginLineTests(unittest.TestCase):
@@ -109,7 +128,7 @@ class ReadEchoAreaReplyTossesAndHasOriginLineTests(unittest.TestCase):
         from anetbbs.models import EchomailMessage
 
         before = self._hold_queue_count()
-        session = _FakeSession(keys=['ENTER'])
+        session = _FakeSession(keys=['ENTER'], caller_log_id=6611)
         ui = BBSMenuUI(session)
 
         async def _fake_launch_aneview(*args, **kwargs):
@@ -139,6 +158,18 @@ class ReadEchoAreaReplyTossesAndHasOriginLineTests(unittest.TestCase):
             self.assertIsNotNone(reply, 'reply message was not saved')
             self.assertEqual(reply.tear_line, expected_tear)
             self.assertEqual(reply.origin_line, expected_origin)
+
+        # Logging-audit gap (2026-10-26): this fourth local-compose
+        # write path never logged a UserActivity row either.
+        with self.app.app_context():
+            from anetbbs.models import UserActivity
+            activity = UserActivity.query.filter_by(
+                activity_type='echomail_reply').first()
+            self.assertIsNotNone(
+                activity, "read_echo_area()'s reply branch must log an "
+                'echomail_reply UserActivity row')
+            self.assertEqual(activity.user_id, 1)
+            self.assertEqual(activity.caller_log_id, 6611)
 
 
 if __name__ == '__main__':

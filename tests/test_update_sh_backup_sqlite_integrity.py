@@ -6,12 +6,21 @@ database can silently omit committed transactions still sitting in
 the -wal file -- producing a backup that opens fine but is quietly
 missing data, while the function still reported success.
 
-Fixed: sqlite3 is now required (no cp fallback at all), `.backup`
-must succeed, and the resulting backup file must then pass its own
-`PRAGMA integrity_check` (exactly "ok") before the function reports
-success. Any of the three failure points now returns 1, which the
-existing (unchanged) caller already treats as a fatal
-"abort before touching anything live" condition.
+Fixed (2026-10-23): no cp fallback at all, `.backup` must succeed,
+and the resulting backup file must then pass its own `PRAGMA
+integrity_check` (exactly "ok") before the function reports success.
+
+Second real bug, this one a live report from a sysop (AloxeCorton,
+2026-10-27): removing the cp(1) fallback made the sqlite3(1) CLI
+package a hard, undocumented dependency for every future update --
+install.sh/update.sh never verify or install it. A sysop without that
+package installed got stuck permanently unable to update at all,
+since the only remaining options were an unsafe cp(1) (correctly
+removed) or refusing entirely. Fixed by falling back to Python's
+stdlib sqlite3 module, which wraps the exact same SQLite Online
+Backup API the CLI's own .backup command uses -- not a raw cp(1), and
+still gated by the same integrity_check requirement. python3 is
+already a hard, pre-existing ANetBBS dependency, so this adds none.
 
 This test extracts the REAL backup_sqlite() function body out of
 update.sh and runs it in actual bash -- not a reimplementation --
@@ -93,6 +102,21 @@ class _Harness(unittest.TestCase):
         fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
         return str(bindir)
 
+    def _python3_only_path(self):
+        """A PATH directory containing only a real python3 (via symlink)
+        and nothing else -- simulates a system where the sqlite3(1) CLI
+        package was never installed but python3 (a hard, pre-existing
+        ANetBBS dependency) is present. This is the exact shape of the
+        real AloxeCorton bug report: sqlite3(1) missing, update blocked
+        indefinitely."""
+        real_python3 = shutil.which('python3')
+        assert real_python3, ('python3 not found on this machine -- '
+                              'required to run this test file at all')
+        bindir = self.dir / 'python3onlybin'
+        bindir.mkdir()
+        os.symlink(real_python3, bindir / 'python3')
+        return str(bindir)
+
 
 @unittest.skipUnless(_HAS_REAL_SQLITE3_CLI,
                      'sqlite3 CLI binary not installed on this machine -- '
@@ -141,6 +165,66 @@ class MissingSqlite3Tests(_Harness):
         self.assertFalse(dst.exists(),
                          'no cp fallback -- the destination must never be '
                          'created when sqlite3 itself is unavailable')
+
+
+class MissingSqlite3CliButPython3AvailableTests(_Harness):
+    """The real AloxeCorton bug: sqlite3(1) CLI absent, python3 present
+    -- update must now fall back to python3's stdlib sqlite3 module
+    instead of refusing outright."""
+
+    def test_falls_back_to_python_sqlite3_module_and_succeeds(self):
+        src = self._make_real_db(rows=5)
+        dst = self.dir / 'dst.db'
+        env = os.environ.copy()
+        # PATH contains ONLY a real python3 -- no sqlite3(1) anywhere.
+        env['PATH'] = self._python3_only_path()
+        script = (
+            'ok() { echo "OK: $*"; }\n'
+            'warn() { echo "WARN: $*" >&2; }\n'
+            f'{self.fn_code}\n'
+            f'backup_sqlite {str(src)!r} {str(dst)!r} "production DB"\n'
+            'echo "RC=$?"\n'
+        )
+        result = subprocess.run([_BASH, '-c', script],
+                                capture_output=True, text=True, env=env)
+        self.assertIn('RC=0', result.stdout, result.stderr)
+        self.assertIn('integrity_check ok', result.stdout, result.stdout)
+        self.assertTrue(dst.exists())
+        conn = sqlite3.connect(str(dst))
+        self.assertEqual(conn.execute('SELECT COUNT(*) FROM t').fetchone()[0], 5)
+        conn.close()
+
+    def test_a_non_database_source_still_fails_via_python_fallback(self):
+        """The python fallback must not silently 'succeed' backing up
+        garbage -- it's gated by the same integrity_check as the CLI
+        path."""
+        src = self.dir / 'not_a_real_db.db'
+        src.write_text('this is not a sqlite database')
+        dst = self.dir / 'dst.db'
+        env = os.environ.copy()
+        env['PATH'] = self._python3_only_path()
+        script = (
+            'ok() { echo "OK: $*"; }\n'
+            'warn() { echo "WARN: $*" >&2; }\n'
+            f'{self.fn_code}\n'
+            f'backup_sqlite {str(src)!r} {str(dst)!r} "production DB"\n'
+            'echo "RC=$?"\n'
+        )
+        result = subprocess.run([_BASH, '-c', script],
+                                capture_output=True, text=True, env=env)
+        self.assertIn('RC=1', result.stdout)
+
+    def test_prefers_real_sqlite3_cli_over_python_fallback_when_both_present(self):
+        """When sqlite3(1) IS installed, it must still be used directly
+        -- the python3 fallback is a last resort, not a replacement."""
+        if not _HAS_REAL_SQLITE3_CLI:
+            self.skipTest('sqlite3 CLI binary not installed on this machine')
+        src = self._make_real_db(rows=2)
+        dst = self.dir / 'dst.db'
+        result = self._run(str(src), str(dst))
+        self.assertIn('RC=0', result.stdout)
+        self.assertIn('sqlite3 .backup', result.stdout)
+        self.assertNotIn('python3 sqlite3 backup API', result.stdout)
 
 
 class FailedBackupCommandTests(_Harness):

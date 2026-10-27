@@ -175,6 +175,14 @@ def view_board(board_id):
         except Exception:
             db.session.rollback()
 
+        # Coarse-grained activity logging: one row per board actually
+        # opened, not one per individual thread/post viewed within it
+        # (view_post() below deliberately does NOT log) -- enough for the
+        # admin caller-log drill-down to show "spent time in this board"
+        # without flooding the log with a row per thread click.
+        from ..core.activity_log import web_log_activity
+        web_log_activity(current_user.id, 'board_viewed', details=board.name)
+
     return render_template('boards/view.html',
                          board=board,
                          posts=posts,
@@ -279,6 +287,10 @@ def new_post(board_id):
             check_for_user(current_user)
         except Exception:
             db.session.rollback()
+
+        from ..core.activity_log import web_log_activity
+        web_log_activity(current_user.id, 'board_post',
+                         details=f'{board.name}: {clean_subject[:100]}')
 
         flash('Post created successfully!', 'success')
         return redirect(url_for('boards.view_post', post_id=post.id))
@@ -495,6 +507,10 @@ def reply_post(post_id):
             check_for_user(current_user)
         except Exception:
             db.session.rollback()
+
+        from ..core.activity_log import web_log_activity
+        web_log_activity(current_user.id, 'board_reply',
+                         details=f'{parent_post.board.name}: {reply.subject[:100]}')
 
         flash('Reply posted successfully!', 'success')
     else:
