@@ -1294,10 +1294,20 @@ EnvironmentFile=$INSTALL_DIR/.env
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 # Real gap found in a security/performance audit: no systemd
 # sandboxing directives at all -- see install.sh's matching unit for
-# the longer version of this comment. NoNewPrivileges=yes is
-# deliberately OMITTED here (unlike the other units this script
-# generates) -- it would block the sudo escalation the NOTE above
-# already documents as required for the Service Control Center.
+# the longer version of this comment.
+#
+# NoNewPrivileges=no is set EXPLICITLY (unlike the other units this
+# script generates) -- a real live outage (2026-10-27) found that
+# merely OMITTING the line, as this unit used to do, does NOT actually
+# prevent it: per systemd.exec(5), NoNewPrivileges=yes is IMPLIED by
+# several of the other hardening directives below (SystemCallFilter=,
+# RestrictNamespaces=, ProtectKernelTunables=, ProtectKernelModules=,
+# ProtectKernelLogs=, MemoryDenyWriteExecute=, RestrictRealtime=,
+# LockPersonality=) unless NoNewPrivileges=no is explicitly specified
+# to override that -- which then blocks every sudo call the Service
+# Control Center's restart/upgrade/backup features make from this
+# process.
+NoNewPrivileges=no
 PrivateTmp=yes
 ProtectHome=$PROTECTHOME_MODE
 ProtectKernelTunables=yes
@@ -1782,6 +1792,34 @@ for _strict_svc in anetbbs-mrc-bridge anetbbs-binkp anetbbs-finger; do
         "SystemCallFilter=@system-service" "SystemCallErrorNumber=EPERM"
 done
 unset _strict_svc
+
+# Dedicated, unconditional fix for a real live production outage
+# (2026-10-27): despite the "NoNewPrivileges intentionally omitted"
+# comment on the anetbbs-web retrofit above, merely OMITTING
+# NoNewPrivileges= does NOT actually keep it off. Per systemd.exec(5),
+# NoNewPrivileges=yes is IMPLIED by several of the directives that
+# retrofit writes (SystemCallFilter=, RestrictNamespaces=,
+# ProtectKernelTunables=, ProtectKernelModules=, ProtectKernelLogs=,
+# MemoryDenyWriteExecute=, RestrictRealtime=, LockPersonality=) unless
+# NoNewPrivileges=no is explicitly specified to override that -- the
+# unprivileged service user has no CAP_SYS_ADMIN, so the kernel only
+# allows systemd to install the SystemCallFilter= seccomp filter by
+# also setting the kernel's own no_new_privs flag. That flag then
+# makes every sudo call the Service Control Center's process makes
+# (restart/upgrade/backup) fail with "sudo: The 'no new privileges'
+# flag is set". Written unconditionally every run (idempotent, same
+# content every time) in its own drop-in, deliberately kept outside
+# _retrofit_hardening()'s own gated call above (which only fires once
+# per unit and would otherwise never revisit an install that already
+# received a hardening drop-in before this specific directive was
+# known to be needed -- exactly the install this bug was found on).
+# The daemon-reload and service restart later in this script pick this
+# up along with everything else.
+if [[ -f /etc/systemd/system/anetbbs-web.service ]]; then
+    mkdir -p /etc/systemd/system/anetbbs-web.service.d
+    printf '%s\n' "[Service]" "NoNewPrivileges=no" \
+        > /etc/systemd/system/anetbbs-web.service.d/20-nonewprivileges-override.conf
+fi
 
 # Ensure MRC bridge config.json exists
 if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then

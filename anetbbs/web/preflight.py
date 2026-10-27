@@ -113,13 +113,28 @@ def _check_sudo_escalation(cfg):
     1. **No sudoers grant for the wrapper.** ``sudo -n -l <wrapper>``
        returns non-zero. ``-l`` just queries permission, it doesn't
        execute, so this is safe.
-    2. **Unit hardening blocks privilege escalation.** A unit with
-       ``NoNewPrivileges=true`` or a restrictive
-       ``CapabilityBoundingSet=`` causes any sudo call (including
-       the wrapper) to fail with "unable to change to root gid".
-       We detect this by reading the unit file directly — no sudo
-       needed — instead of trying to escalate and getting a misleading
-       error.
+    2. **Unit hardening blocks privilege escalation.** NoNewPrivileges
+       being effectively "yes" for the unit, or a restrictive
+       ``CapabilityBoundingSet=``, causes any sudo call (including the
+       wrapper) to fail with "The 'no new privileges' flag is set" or
+       "unable to change to root gid".
+
+       A real live outage (2026-10-27) found that checking for a
+       literal ``NoNewPrivileges=yes`` line in the unit file — what
+       this function used to do — isn't enough: per systemd.exec(5),
+       several OTHER hardening directives (``SystemCallFilter=``,
+       ``RestrictNamespaces=``, ``ProtectKernelTunables=``,
+       ``ProtectKernelModules=``, ``ProtectKernelLogs=``,
+       ``MemoryDenyWriteExecute=``, ``RestrictRealtime=``,
+       ``LockPersonality=``) each IMPLICITLY force NoNewPrivileges=yes
+       unless ``NoNewPrivileges=no`` is explicitly set to override it —
+       so a unit whose files never literally mention
+       ``NoNewPrivileges=`` at all can still have it effectively on. A
+       text-only check can't know this; querying systemd's own
+       computed ``NoNewPrivileges`` property (``systemctl show -p
+       NoNewPrivileges --value``) can, since systemd itself applies
+       that implication when computing it. No privileges needed for
+       this query either.
 
     The earlier version of this check ran ``sudo -n /bin/true`` and
     reported "sudoers grant missing" on every well-configured install
@@ -130,21 +145,37 @@ def _check_sudo_escalation(cfg):
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     wrapper = os.path.join(install_root, 'deploy', 'run_upgrade.sh')
 
-    # Read the unit file to detect hardening BEFORE trying sudo.
-    # Cheap, no privileges needed, catches the friend's regression.
+    bad_directives = []
+
+    # Ask systemd for the EFFECTIVE, computed NoNewPrivileges value --
+    # not a text-file guess. Catches both a literal NoNewPrivileges=yes
+    # AND the implied-by-other-directives case above.
+    try:
+        r = subprocess.run(
+            ['systemctl', 'show', 'anetbbs-web.service', '-p',
+             'NoNewPrivileges', '--value'],
+            capture_output=True, text=True, timeout=5)
+        effective_nnp = (r.stdout or '').strip().lower()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        effective_nnp = ''
+    if effective_nnp == 'yes':
+        bad_directives.append(
+            'NoNewPrivileges=yes (effective — may be implied by other '
+            'hardening directives even if no unit file literally sets '
+            'it; see systemd.exec(5))')
+
+    # CapabilityBoundingSet= isn't affected by the implied-NoNewPrivileges
+    # trap above -- still fine to detect via a direct text read, no
+    # privileges needed.
     unit_path = '/etc/systemd/system/anetbbs-web.service'
     try:
         with open(unit_path, 'r') as f:
             unit_text = f.read()
     except OSError:
         unit_text = ''
-    bad_directives = []
     for line in unit_text.splitlines():
         s = line.strip()
-        if s.startswith('NoNewPrivileges=') and \
-                s.split('=', 1)[1].strip().lower() in ('yes', 'true', '1'):
-            bad_directives.append(s)
-        elif s.startswith('CapabilityBoundingSet='):
+        if s.startswith('CapabilityBoundingSet='):
             # Any narrow set could exclude CAP_SETUID; flag if it doesn't
             # explicitly include the caps sudo needs.
             caps = s.split('=', 1)[1].lower()
@@ -154,10 +185,12 @@ def _check_sudo_escalation(cfg):
     if bad_directives:
         return _check('sudo escalation from web service', 'fail',
                       'unit hardening blocks sudo: ' + '; '.join(bad_directives),
-                      'Edit /etc/systemd/system/anetbbs-web.service to remove '
-                      'NoNewPrivileges=true and/or add CAP_SETUID CAP_SETGID '
-                      'CAP_AUDIT_WRITE to CapabilityBoundingSet. Then sudo '
-                      'systemctl daemon-reload && systemctl restart anetbbs-web.')
+                      'Add NoNewPrivileges=no via a systemd drop-in '
+                      '(sudo systemctl edit anetbbs-web, or re-run sudo bash '
+                      'update.sh which does this automatically) and/or add '
+                      'CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE to '
+                      'CapabilityBoundingSet. Then sudo systemctl daemon-reload '
+                      '&& systemctl restart anetbbs-web.')
 
     # Unit looks fine — now check that sudoers actually grants the wrapper.
     if not os.path.isfile(wrapper):

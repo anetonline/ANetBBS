@@ -34,6 +34,15 @@ WEB_DIRECTIVES = (
     'MemoryDenyWriteExecute=yes',
     'SystemCallFilter=@system-service',
     'SystemCallErrorNumber=EPERM',
+    # Real live outage (2026-10-27): merely OMITTING NoNewPrivileges=
+    # (the previous convention here) does NOT keep it off -- several
+    # of the OTHER directives above (SystemCallFilter=, MemoryDeny
+    # WriteExecute=, and the RestrictNamespaces=/ProtectKernel*=/
+    # RestrictRealtime=/LockPersonality= directives asserted
+    # elsewhere) each imply NoNewPrivileges=yes per systemd.exec(5)
+    # unless NoNewPrivileges=no is explicitly set to override it. An
+    # explicit "no" is required here, not just an absent line.
+    'NoNewPrivileges=no',
 )
 
 TERMINAL_DIRECTIVES = (

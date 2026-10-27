@@ -2056,10 +2056,25 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 # Real gap found in a security/performance audit: none of the units
 # this script generates set ANY systemd sandboxing directives at all
 # -- defense in depth if the Python process itself is ever compromised
-# via a code-execution vulnerability. NoNewPrivileges=yes is
-# deliberately OMITTED here (unlike the other 4 units below) -- it
-# would block the sudo escalation the NOTE above already documents as
-# required for the Service Control Center's restart/upgrade features.
+# via a code-execution vulnerability.
+#
+# NoNewPrivileges=no is set EXPLICITLY here (unlike the other 4 units
+# below, which omit it to let it default on) -- a real live outage
+# (2026-10-27) found that merely OMITTING the line, as this unit used
+# to do, does NOT actually prevent it: per systemd.exec(5),
+# NoNewPrivileges=yes is IMPLIED by several of the other hardening
+# directives below (SystemCallFilter=, RestrictNamespaces=,
+# ProtectKernelTunables=, ProtectKernelModules=, ProtectKernelLogs=,
+# MemoryDenyWriteExecute=, RestrictRealtime=, LockPersonality=) unless
+# NoNewPrivileges=no is explicitly specified to override that. The
+# unprivileged service user has no CAP_SYS_ADMIN, so installing the
+# seccomp filter SystemCallFilter= requires at the kernel level, and
+# systemd silently sets the kernel's no_new_privs flag to satisfy that
+# -- which also then makes every sudo call from this process (the
+# Service Control Center's restart/upgrade/backup features) fail with
+# "sudo: The 'no new privileges' flag is set". NoNewPrivileges=no
+# overrides the implication and restores the original intent.
+NoNewPrivileges=no
 # PrivateTmp=yes is safe and reinforces this same audit's own /tmp
 # symlink-attack fixes elsewhere (deploy/run_restore.sh, install.sh's
 # Mystic-installer download) -- an isolated /tmp, not a restricted one.

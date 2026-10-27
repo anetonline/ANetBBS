@@ -24,12 +24,22 @@ EnvironmentFile=/opt/anetbbs/.env
 # We intentionally do NOT set CapabilityBoundingSet here so that sudo
 # (used by the Service Control Center) can still escalate.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-# NoNewPrivileges=yes is deliberately OMITTED here (unlike the other
-# units) -- it would block the sudo escalation the Service Control
-# Center's restart/upgrade features require. PrivateTmp=yes is still
-# safe and reinforces this same audit's own /tmp symlink-attack fixes
-# elsewhere (deploy/run_restore.sh, install.sh's Mystic-installer
-# download) -- an isolated /tmp, not a restricted one.
+# NoNewPrivileges=no is set EXPLICITLY (unlike the other units, which
+# omit the line and let it default on) -- a real live outage
+# (2026-10-27) found that merely OMITTING the line, as this unit used
+# to do, does NOT actually keep it off. Per systemd.exec(5),
+# NoNewPrivileges=yes is IMPLIED by several of the directives below
+# (SystemCallFilter=, RestrictNamespaces=, ProtectKernelTunables=,
+# ProtectKernelModules=, ProtectKernelLogs=, MemoryDenyWriteExecute=,
+# RestrictRealtime=, LockPersonality=) unless NoNewPrivileges=no is
+# explicitly specified to override that -- which then blocks every
+# sudo call the Service Control Center's restart/upgrade/backup
+# features make from this process.
+NoNewPrivileges=no
+# PrivateTmp=yes is still safe and reinforces this same audit's own
+# /tmp symlink-attack fixes elsewhere (deploy/run_restore.sh,
+# install.sh's Mystic-installer download) -- an isolated /tmp, not a
+# restricted one.
 PrivateTmp=yes
 ProtectHome=yes
 ProtectKernelTunables=yes

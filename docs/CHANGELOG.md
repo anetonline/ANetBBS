@@ -1,11 +1,39 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.55`** (October 2026). This file covers `v1.0.0`
+Current release: **`v1.1.56`** (October 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.56 — Fix a real sudo escalation outage for the Service Control Center (October 2026)
+
+**If the Service Control Center's Install/Restart/Backup buttons are
+currently failing with a sudo "no new privileges" error, this release
+cannot be applied through the web upgrade button itself** — that
+button relies on the exact privilege escalation this release fixes, so
+it's blocked the same way the other buttons are. Apply this one
+update manually instead: download the release tarball and run
+`sudo bash update.sh` from an SSH session. After that one manual
+update, the web-based Install/Restart/Backup buttons work normally
+again, including for every future update.
+
+- Fixed a real production outage where the Service Control Center's
+  web-triggered restart, upgrade, and backup actions could silently
+  stop working on an install with systemd sandboxing hardening
+  applied to the web service, failing with a "no new privileges"
+  sudo error. Several of the hardening directives involved implicitly
+  force a systemd setting that blocks privilege escalation unless
+  explicitly overridden, which earlier releases never accounted for.
+- The updater now automatically applies this fix to any existing
+  install the next time it runs, with no manual steps required beyond
+  the one-time manual update described above for an install already
+  affected.
+- Fixed the admin Preflight Checklist page's own sudo-escalation
+  check, which could previously report a false "ok" in exactly this
+  situation; it now asks systemd directly for the effective
+  configuration instead of inspecting the unit file's raw text.
 
 ## v1.1.55 — Call log and activity log audit (October 2026)
 
