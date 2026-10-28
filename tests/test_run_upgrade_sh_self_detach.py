@@ -24,11 +24,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_UPGRADE_SH = REPO_ROOT / 'deploy' / 'run_upgrade.sh'
 
-_START_MARKER = "# ── Detach from the caller's cgroup"
+_START_MARKER = "# ── Resolve install dir from /etc/anetbbs.install"
 _END_MARKER = '# ── Argument validation'
 
 
 def _extract_detach_block():
+    """Extracts BOTH the install-dir-resolution section and the detach
+    section together -- the detach block (added after a THIRD real
+    live outage, see its own comment in the real file) needs
+    INSTALL_DIR already resolved to build the log path, so the two
+    sections must run as one unit, not independently."""
     lines = RUN_UPGRADE_SH.read_text().splitlines()
     start = end = None
     for i, line in enumerate(lines):
@@ -63,6 +68,7 @@ fail() { printf '%s FAIL: %s\\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
 
 __DETACH_BLOCK__
 
+log "pid=$$ cgroup=$(cat /proc/self/cgroup)"
 printf 'pid=%s cgroup=%s\\n' "$$" "$(cat /proc/self/cgroup)" >> "__MARKER__"
 exit __EXITCODE__
 """
@@ -98,15 +104,27 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
         shim.chmod(0o755)
         self.env = dict(os.environ)
         self.env['PATH'] = f"{shim_dir}:{self.env.get('PATH', '')}"
+        self.env.pop('INSTALL_DIR', None)
         self.marker = tmp_path / 'marker.txt'
         self.outer_cgroup = Path('/proc/self/cgroup').read_text()
+
+        # The extracted block's INSTALL_DIR fallback derives from the
+        # SCRIPT'S OWN location (two-parents-up, matching the real
+        # <install>/deploy/run_upgrade.sh layout) when /etc/anetbbs.
+        # install isn't readable -- which it won't be in this sandbox.
+        # Mirror that layout so UPGRADE_LOG=$INSTALL_DIR/data/... lands
+        # somewhere real and writable, same as a genuine install.
+        self._fake_install = tmp_path / 'fake_install'
+        self._script_dir = self._fake_install / 'deploy'
+        self._script_dir.mkdir(parents=True)
+        (self._fake_install / 'data').mkdir()
 
     def _write_script(self, name, exit_code):
         body = (_SCRIPT_TEMPLATE
                 .replace('__DETACH_BLOCK__', self.detach_block)
                 .replace('__MARKER__', str(self.marker))
                 .replace('__EXITCODE__', str(exit_code)))
-        script = Path(self._tmp.name) / name
+        script = self._script_dir / name
         script.write_text(body)
         script.chmod(0o755)
         return script
@@ -124,6 +142,30 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
                             self.outer_cgroup,
                             'detached process landed in the same cgroup '
                             'as the caller -- not actually detached')
+
+    def test_standard_output_lands_in_data_dir_not_tmp(self):
+        """Regression test for a THIRD real live outage (2026-10-28,
+        found while verifying the second fix): the detach block used
+        to hardcode StandardOutput=append:/tmp/anetbbs_upgrade.log.
+        anetbbs-web.service has PrivateTmp=yes, so the file the WEB
+        PROCESS creates lives in that service's own private /tmp mount
+        namespace -- invisible to systemd/PID1, which resolves the
+        StandardOutput target against the REAL, system-wide /tmp when
+        setting up the detached unit. Confirmed live: `systemd[...]:
+        Failed to set up standard output: Permission denied`, exit
+        209/STDOUT. Fixed by moving the log to INSTALL_DIR/data/, a
+        real, non-virtualized directory every process agrees on."""
+        script = self._write_script('probe-logpath.sh', 0)
+        result = subprocess.run([str(script)], env=self.env,
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        upgrade_log = self._fake_install / 'data' / 'anetbbs_upgrade.log'
+        self.assertTrue(upgrade_log.exists(),
+                        'the detached unit\'s StandardOutput should have '
+                        'created this file under data/, not /tmp')
+        self.assertIn('pid=', upgrade_log.read_text(),
+                      'the continuation\'s own stdout should have landed '
+                      'in the data/ log via StandardOutput=append:')
 
     def test_relays_a_real_failure_exit_code_too(self):
         script = self._write_script('probe-fail.sh', 7)

@@ -17,8 +17,8 @@
 # trust the args even though the calling code is also ours.
 #
 # Logging: everything goes to stdout / stderr, which systemd (after the
-# detach below) redirects to /tmp/anetbbs_upgrade.log. The UI tails
-# that file.
+# detach below) redirects to <INSTALL_DIR>/data/anetbbs_upgrade.log.
+# The UI tails that file.
 
 set -eu -o pipefail
 
@@ -26,43 +26,68 @@ LOG_PREFIX="[upgrade]"
 log()  { printf '%s %s\n' "$LOG_PREFIX" "$*"; }
 fail() { printf '%s FAIL: %s\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
 
+# ── Resolve install dir from /etc/anetbbs.install ─────────────────────────
+# Moved ahead of the detach block below (it used to run after argument
+# validation) because the detach block itself now needs INSTALL_DIR to
+# build the log path. install.sh + update.sh write this file with
+# INSTALL_DIR=/path/to/anetbbs so any privileged helper can find the
+# right install without hardcoding.
+INSTALL_DIR=""
+if [ -r /etc/anetbbs.install ]; then
+    # shellcheck source=/dev/null
+    . /etc/anetbbs.install
+fi
+if [ -z "${INSTALL_DIR:-}" ]; then
+    # Fall back to two-parents-up from this script's location.
+    HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    INSTALL_DIR=$(dirname "$HERE")
+fi
+[ -d "$INSTALL_DIR" ] || fail "install dir $INSTALL_DIR does not exist"
+
 # ── Detach from the caller's cgroup ────────────────────────────────────────
-# Real live outage (2026-10-27, three fix attempts) followed by a SECOND
-# real live outage (2026-10-28): the mechanism used to escape anetbbs-
-# web's cgroup (so update.sh's own restart of anetbbs-web, below, can't
-# kill US as collateral damage) used to be baked into the SUDO-GATED
-# command itself -- first `systemd-run --scope` (found not to actually
-# detach: systemd-run becomes the wrapper's own parent, not a real
-# escape), then `systemd-run --unit=... --wait --property=...` (the
-# real fix, v1.1.59). Both put the exact detachment flags inside the
-# one thing sudoers has to literally pattern-match against -- so every
-# time the detachment mechanism needed to change, every existing
-# install's /etc/sudoers.d/anetbbs had to change in lockstep, via
-# update.sh actually re-running successfully. When that refresh step
-# silently failed on a live box once (confirmed live: the grant was
-# still the pre-v1.1.59 `--scope` form while the running CODE was
-# already v1.1.59+, meaning a past upgrade's sudoers-refresh step
-# failed/warned without escalating while the rest of that same upgrade
-# still succeeded), the box was stuck: new code building a command the
-# stale grant would never match, and the auto-update button is the ONE
-# thing that can't fix a sudoers problem via itself.
+# Real live outage (2026-10-27, three fix attempts), a SECOND real live
+# outage (2026-10-28, the sudoers-drift bug), and a THIRD real live
+# outage found the same day while verifying the second fix: once the
+# sudoers problem was fixed, this re-exec itself started failing with
+# systemd exit 209/STDOUT, "Failed to set up standard output: Permission
+# denied" -- root cause: anetbbs-web.service has PrivateTmp=yes, so the
+# /tmp/anetbbs_upgrade.log the WEB PROCESS creates/truncates lives in
+# that service's own PRIVATE /tmp mount namespace. The `sudo`/this
+# script's process tree inherits that same private namespace (sudo
+# changes UID, not mount namespaces), but systemd/PID1 (which actually
+# opens the StandardOutput target for the new unit) resolves the path
+# against the REAL, system-wide /tmp -- a different, inconsistent view
+# of "the same" path depending on which process looks at it. Rather
+# than chase the exact permission semantics of that mismatch further,
+# the log now lives under INSTALL_DIR/data/ -- a real, non-virtualized
+# directory already used for persistent app data, visible identically
+# to every process regardless of any unit's PrivateTmp setting.
 #
-# Fixed by moving detachment OUT of the sudo-gated command entirely.
-# sudoers now only ever needs to grant ONE thing, forever: plain
-# `run_upgrade.sh *` -- no flags, no properties, nothing that can ever
-# need to change again regardless of how detachment works internally.
-# Once sudo hands us root (we're already running as root by the time
-# this line executes), root can always talk to systemd directly with
-# no further privilege check -- so THIS script re-execs ITSELF into a
-# detached transient unit, no second sudo call involved at all.
-# Whatever this mechanism needs to become in the future, it only ever
-# touches this file, which takes effect on the very next invocation --
-# it can never again require a sudoers refresh to actually land.
+# Earlier history, still relevant to why this is a re-exec and not a
+# sudo-command flag: the mechanism used to escape anetbbs-web's cgroup
+# (so update.sh's own restart of anetbbs-web, below, can't kill US as
+# collateral damage) used to be baked into the SUDO-GATED command
+# itself -- first `systemd-run --scope` (found not to actually detach:
+# systemd-run becomes the wrapper's own parent, not a real escape),
+# then `systemd-run --unit=... --wait --property=...` run directly by
+# the web process. Both put detachment flags inside the one thing
+# sudoers has to literally pattern-match against, so every change to
+# the mechanism meant every existing install's /etc/sudoers.d/anetbbs
+# had to change in lockstep via a successful update.sh run -- and when
+# that refresh silently failed on a live box once, the box was stuck
+# with no way to fix a sudoers problem via the one feature that needs
+# sudoers to work at all. Fixed by moving detachment OUT of the
+# sudo-gated command entirely: sudoers only ever grants plain
+# `run_upgrade.sh *`, and THIS script (already root by the time this
+# line runs) re-execs itself into a detached transient unit with no
+# second sudo call involved -- whatever this mechanism needs to become
+# in the future, it only ever touches this file.
+UPGRADE_LOG="$INSTALL_DIR/data/anetbbs_upgrade.log"
 if [ -z "${ANETBBS_UPGRADE_DETACHED:-}" ]; then
     export ANETBBS_UPGRADE_DETACHED=1
     exec systemd-run --unit=anetbbs-upgrade --collect --quiet --wait \
-        --property=StandardOutput=append:/tmp/anetbbs_upgrade.log \
-        --property=StandardError=append:/tmp/anetbbs_upgrade.log \
+        --property=StandardOutput=append:"$UPGRADE_LOG" \
+        --property=StandardError=append:"$UPGRADE_LOG" \
         --setenv=ANETBBS_UPGRADE_DETACHED=1 \
         "$0" "$@"
 fi
@@ -102,21 +127,6 @@ fi
 SHA_LC=$(printf '%s' "$SHA" | tr '[:upper:]' '[:lower:]')
 
 log "version=$VERSION  url=$URL  sha=${SHA_LC:0:16}…"
-
-# ── Resolve install dir from /etc/anetbbs.install ─────────────────────────
-# install.sh + update.sh write this file with INSTALL_DIR=/path/to/anetbbs
-# so any privileged helper can find the right install without hardcoding.
-INSTALL_DIR=""
-if [ -r /etc/anetbbs.install ]; then
-    # shellcheck source=/dev/null
-    . /etc/anetbbs.install
-fi
-if [ -z "${INSTALL_DIR:-}" ]; then
-    # Fall back to two-parents-up from this script's location.
-    HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    INSTALL_DIR=$(dirname "$HERE")
-fi
-[ -d "$INSTALL_DIR" ] || fail "install dir $INSTALL_DIR does not exist"
 log "install dir: $INSTALL_DIR"
 
 # ── Verify URL origin against the configured registry ─────────────────────

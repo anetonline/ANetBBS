@@ -325,7 +325,18 @@ def _check_sudoers():
                       'Re-run update.sh — SCC restart buttons + auto-update wrapper need it.')
     try:
         st = os.stat(path)
-        if st.st_mode & 0o077:
+        # Real finding (live, 2026-10-28): install.sh/update.sh always
+        # chmod this file to exactly 0440 -- owner read, GROUP read,
+        # nothing for other -- which is the standard, correct
+        # permission visudo itself expects for a sudoers.d fragment.
+        # The old mask (0o077) flagged ANY group bit, including the
+        # group-read bit 0440 itself sets, so a freshly-refreshed,
+        # correctly-permissioned file tripped this exact warning every
+        # time. The real risk is group/other WRITE or EXECUTE, or
+        # OTHER having any access at all -- group-READ is fine (and
+        # expected) since only root and root's own group can reach
+        # this file in the first place.
+        if st.st_mode & 0o037:
             return _check('sudoers grant present', 'warn',
                           f'permissions {oct(st.st_mode & 0o777)} are too open',
                           'sudo chmod 0440 /etc/sudoers.d/anetbbs')

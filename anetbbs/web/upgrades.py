@@ -336,9 +336,55 @@ def check():
 
 # === Install ================================================================
 
-_UPGRADE_LOG_PATH = '/tmp/anetbbs_upgrade.log'  # nosec B108 -- transient progress log, safe to lose across reboot
+_INSTALL_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Real live outage (2026-10-28): this used to be a fixed /tmp path.
+# anetbbs-web.service has PrivateTmp=yes, so the web process's own view
+# of /tmp is a private mount namespace invisible to the rest of the
+# system -- but the actual upgrade work happens in a separately-
+# launched, detached systemd unit (deploy/run_upgrade.sh's own detach
+# block) that resolves /tmp against the REAL, system-wide instance.
+# Two different processes, two different "/tmp"s for the same literal
+# path -- confirmed live via `systemd[...]: Failed to set up standard
+# output: Permission denied`, exit 209/STDOUT. data/ is a real,
+# non-virtualized directory every process agrees on regardless of any
+# unit's PrivateTmp setting, already used for persistent app data, and
+# already granted to anetbbs-web.service via ReadWritePaths=.
+_UPGRADE_LOG_PATH = os.path.join(_INSTALL_ROOT, 'data', 'anetbbs_upgrade.log')  # nosec B108 -- transient progress log, safe to lose across reboot
 _INSTALL_LOCK = threading.Lock()
 _install_state = {'running': False, 'started_at': 0.0, 'version': ''}
+
+
+def _reset_upgrade_log() -> None:
+    """Truncate (or create) the upgrade log fresh for a new attempt.
+
+    The detached root unit that does the real upgrade work (see
+    deploy/run_upgrade.sh) also writes to this same file via systemd's
+    StandardOutput=append:/StandardError=append: -- if a PAST attempt
+    somehow left it root-owned with restrictive permissions (e.g. the
+    file never existed yet and systemd itself created it before this
+    web process ever got a chance to), a plain open(..., 'w') here
+    would raise PermissionError instead of truncating. data/ itself is
+    owned by the service user, so removing and recreating always
+    succeeds even when the existing inode doesn't belong to us. Not a
+    sensitive file (install progress text only), so loosening it to
+    0o666 after creation is a deliberate, low-risk way to guarantee
+    both this process and the detached root unit can always write to
+    it regardless of who created it last.
+    """
+    try:
+        open(_UPGRADE_LOG_PATH, 'w').close()
+    except PermissionError:
+        try:
+            os.remove(_UPGRADE_LOG_PATH)
+        except OSError:
+            pass
+        open(_UPGRADE_LOG_PATH, 'w').close()
+    except OSError:
+        return
+    try:
+        os.chmod(_UPGRADE_LOG_PATH, 0o666)
+    except OSError:
+        pass
 
 
 def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str) -> list:
@@ -471,10 +517,7 @@ def install():
 
     # Truncate prior log, then spawn the wrapper detached so the HTTP
     # request doesn't get killed when update.sh restarts gunicorn.
-    try:
-        open(_UPGRADE_LOG_PATH, 'w').close()
-    except OSError:
-        pass
+    _reset_upgrade_log()
 
     _patch_wrapper_if_needed(wrapper)
     _spawn_upgrade(wrapper, target, url, sha256, label='upgrade')
@@ -510,10 +553,7 @@ def _install_container(target, upstream):
         _install_state.update({'running': True,
                                'started_at': time.time(),
                                'version': target})
-    try:
-        open(_UPGRADE_LOG_PATH, 'w').close()
-    except OSError:
-        pass
+    _reset_upgrade_log()
 
     def _runner():
         try:
@@ -692,18 +732,16 @@ def rollback():
         _install_state.update({'running': True,
                                'started_at': time.time(),
                                'version': target})
-    try:
-        open(_UPGRADE_LOG_PATH, 'w').close()
-    except OSError:
-        pass
+    _reset_upgrade_log()
     _spawn_upgrade(wrapper, target, url, sha, label='rollback')
     return jsonify({'ok': True,
                     'log_url': url_for('upgrades_admin.log_tail')})
 
 
 # ANSI-escape stripper. update.sh's `info`/`ok`/`warn`/`fail` helpers
-# emit colour codes that travel through into /tmp/anetbbs_upgrade.log
-# as literal `\033[…m` bytes. The browser renders those as glyphs,
+# emit colour codes that travel through into the upgrade log (see
+# _UPGRADE_LOG_PATH) as literal `\033[…m` bytes. The browser renders
+# those as glyphs,
 # turning every "[INFO]" prefix into "[0;32m[INFO][0m".
 # Strip them server-side so the JS only has to colour structural
 # content, not work around terminal escapes.
