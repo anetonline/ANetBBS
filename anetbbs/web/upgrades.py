@@ -360,16 +360,21 @@ def _reset_upgrade_log() -> None:
     The detached root unit that does the real upgrade work (see
     deploy/run_upgrade.sh) also writes to this same file via systemd's
     StandardOutput=append:/StandardError=append: -- if a PAST attempt
-    somehow left it root-owned with restrictive permissions (e.g. the
-    file never existed yet and systemd itself created it before this
-    web process ever got a chance to), a plain open(..., 'w') here
-    would raise PermissionError instead of truncating. data/ itself is
-    owned by the service user, so removing and recreating always
-    succeeds even when the existing inode doesn't belong to us. Not a
-    sensitive file (install progress text only), so loosening it to
-    0o666 after creation is a deliberate, low-risk way to guarantee
-    both this process and the detached root unit can always write to
-    it regardless of who created it last.
+    somehow left it root-owned (e.g. the file never existed yet and
+    systemd itself created it before this web process ever got a
+    chance to), a plain open(..., 'w') here would raise
+    PermissionError instead of truncating. data/ itself is owned by
+    the service user, so removing and recreating always succeeds even
+    when the existing inode doesn't belong to us -- deleting a file
+    only needs write permission on its CONTAINING directory, not on
+    the file itself.
+
+    Deliberately does NOT chmod the file permissive to cover the
+    other direction (root writing to a file WE created) -- root
+    always bypasses standard file permission checks regardless of
+    mode, so no loosening is needed for that side, and a world-
+    writable progress log is unnecessary exposure a security scan
+    correctly flags (bandit B103) on a box with other local accounts.
     """
     try:
         open(_UPGRADE_LOG_PATH, 'w').close()
@@ -381,10 +386,6 @@ def _reset_upgrade_log() -> None:
         open(_UPGRADE_LOG_PATH, 'w').close()
     except OSError:
         return
-    try:
-        os.chmod(_UPGRADE_LOG_PATH, 0o666)
-    except OSError:
-        pass
 
 
 def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str) -> list:

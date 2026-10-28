@@ -67,10 +67,17 @@ class ResetUpgradeLogTests(unittest.TestCase):
         upgrades._reset_upgrade_log()
         self.assertEqual(self.path.read_text(), '')
 
-    def test_sets_permissive_mode_so_a_root_owned_process_can_append_too(self):
+    def test_does_not_make_the_file_world_writable(self):
+        # Real finding from a CI security scan (bandit B103, High/High,
+        # CWE-732): an earlier version of this function chmod'd the
+        # file to 0o666 to let the detached ROOT unit write to it too
+        # -- unnecessary, since root bypasses standard file permission
+        # checks regardless of mode. World-writable would let any
+        # other local account on the box tamper with install-progress
+        # text later displayed as trusted in the admin web UI.
         upgrades._reset_upgrade_log()
         mode = self.path.stat().st_mode & 0o777
-        self.assertEqual(mode, 0o666, oct(mode))
+        self.assertEqual(mode & 0o002, 0, oct(mode))
 
     def test_falls_back_to_remove_and_recreate_on_permission_error(self):
         # Simulates the real scenario: a PAST detached root unit left
