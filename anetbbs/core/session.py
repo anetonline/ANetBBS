@@ -1804,22 +1804,30 @@ class BBSSession:
                 "\r\n\x1b[1;36mPress \x1b[33mESC\x1b[36m or "
                 "\x1b[33m*\x1b[36m twice to continue...\x1b[0m\r\n")
             seen = 0
-            # Read up to 64 bytes total — enough to absorb any leading
+            # Read up to 64 REAL bytes -- enough to absorb any leading
             # IAC negotiation noise but small enough to keep bots out.
+            # A prior version filtered IAC noise itself by just
+            # skipping bytes >= 0xF0 (the leading command byte only) --
+            # that missed a WILL/WONT/DO/DONT's trailing OPTION byte and
+            # any IAC SB subnegotiation's PAYLOAD bytes (e.g. a NAWS
+            # width/height of 27 or 42), which could land on 0x1b/0x2a
+            # and spuriously count toward a real keypress. Routing
+            # through read_raw() instead -- the same primitive
+            # read_key()/read_line()/read_password() all use -- means
+            # there's no second hand-rolled IAC filter to keep in sync
+            # with handle_telnet_command()'s real parsing.
             for _ in range(64):
                 try:
                     raw = await asyncio.wait_for(
-                        self.reader.read(1), timeout=timeout)
+                        self.read_raw(1), timeout=timeout)
                 except asyncio.TimeoutError:
                     return False
-                if not raw:
+                except CarrierLost:
                     return False
-                # Strip telnet IAC commands (which are bytes >= 0xF0 --
-                # covers every telnet command byte, IAC/WILL/WONT/DO/
-                # DONT/SB/SE, not just IAC itself; the "0xFA" this
-                # comment used to say was stale/wrong -- SE is 0xF0).
-                # If we're seeing IAC, just keep waiting for a real key.
-                if raw and raw[0] >= 0xF0:
+                if not raw:
+                    # A byte WAS received but was fully consumed as
+                    # telnet negotiation -- keep waiting for a real
+                    # keystroke, same as read_key()'s identical case.
                     continue
                 if raw in (b'\x1b', b'*'):
                     seen += 1

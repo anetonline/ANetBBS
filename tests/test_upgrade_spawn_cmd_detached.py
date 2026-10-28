@@ -168,6 +168,22 @@ class SudoersGrantMatchesSpawnCommandTests(unittest.TestCase):
                           'deploy/sudoers.anetbbs does not grant it -- '
                           'the auto-update button would fail sudo again')
 
+    def test_fixed_flags_appear_in_the_exact_order_spawn_upgrade_builds(self):
+        # The check above only proved every token appears SOMEWHERE in
+        # the sudoers text -- sudoers matches a literal (fnmatch'd)
+        # command string, so a REORDERING of two correct flags would
+        # still pass that check while a real `sudo -n` would reject
+        # the actual command. Cross-check the exact joined sequence,
+        # not just set membership.
+        joined = ' '.join(self._upgrade_cmd_tokens())
+        self.assertIn(joined, self.sudoers_text,
+                      f'_spawn_upgrade() builds the flags in this exact '
+                      f'order: {joined!r} -- but that literal sequence '
+                      'does not appear in deploy/sudoers.anetbbs, which '
+                      'means a real `sudo -n` would reject the command '
+                      'even though every individual flag is granted '
+                      'somewhere in the file')
+
     def test_sudoers_grant_does_not_still_use_scope(self):
         upgrade_line = next(
             (line for line in self.sudoers_text.splitlines()

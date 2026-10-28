@@ -32,6 +32,7 @@ from ..models import (db, BinkPNode, EchoAreaNode, BinkPHoldQueue,
                        HubIdentity, _default_hub_identity_id,
                        FileEchoSubscription, FileArea)
 from ..core.activity_log import web_log_activity
+from ..echomail.routing import parse_address, format_address
 
 hub_admin_bp = Blueprint('hub_admin', __name__, url_prefix='/admin/echomail/hub')
 
@@ -464,8 +465,25 @@ def new_binkp_node():
             flash('Session password is required when creating a new node.', 'danger')
             return render_template('echomail/admin/hub/binkp_node_form.html',
                                    form=form, node=None)
-        existing = BinkPNode.query.filter_by(
-            ftn_address=form.ftn_address.data.strip()).first()
+        # Point-notation-aware duplicate check -- a plain exact-string
+        # filter_by() would miss that "21:3/100" and "21:3/100.0" name
+        # the same real address, matching the normalization already
+        # applied to connection-time hub/peer matching (binkp_server.py)
+        # after a real hub-recognition bug there (v1.1.53). Without
+        # this, an admin could create two BinkPNode rows for the same
+        # address just by typing the point suffix differently.
+        new_address = form.ftn_address.data.strip()
+        new_parsed = parse_address(new_address)
+        existing = None
+        if new_parsed:
+            new_canonical = format_address(*new_parsed)
+            for node in BinkPNode.query.all():
+                node_parsed = parse_address(node.ftn_address)
+                if node_parsed and format_address(*node_parsed) == new_canonical:
+                    existing = node
+                    break
+        else:
+            existing = BinkPNode.query.filter_by(ftn_address=new_address).first()
         if existing:
             flash('A node with that FTN address already exists.', 'danger')
             return render_template('echomail/admin/hub/binkp_node_form.html',

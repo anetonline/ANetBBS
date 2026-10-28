@@ -341,6 +341,26 @@ _INSTALL_LOCK = threading.Lock()
 _install_state = {'running': False, 'started_at': 0.0, 'version': ''}
 
 
+def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str) -> list:
+    """Build the exact (unprivileged-prefix) systemd-run command the
+    real upgrade spawns, WITHOUT the leading ``sudo -n`` -- shared by
+    ``_spawn_upgrade()`` below and ``preflight.py``'s sudo-escalation
+    check, so the two can never drift out of sync the way two
+    independently hand-written copies of this command already did
+    once (a security/performance audit found the preflight probe was
+    only testing the OTHER sudoers grant -- the plain direct-invocation
+    one -- never the systemd-run form the web button actually uses,
+    so preflight could report "ok" while the real auto-update path
+    stayed broken). See ``_spawn_upgrade()``'s docstring for why the
+    command is shaped this way (no ``--scope``, ``--wait`` instead).
+    """
+    return ['/usr/bin/systemd-run', '--unit=anetbbs-upgrade',
+            '--collect', '--quiet', '--wait',
+            f'--property=StandardOutput=append:{_UPGRADE_LOG_PATH}',
+            f'--property=StandardError=append:{_UPGRADE_LOG_PATH}',
+            wrapper, target, url, sha256]
+
+
 def _patch_wrapper_if_needed(wrapper: str) -> None:
     """Patch run_upgrade.sh in-place if it still has an outdated version
     regex that would reject a version string a NEWER release actually
@@ -560,12 +580,7 @@ def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
 
     Sudoers ships an entry granting exactly this command shape.
     """
-    cmd = ['sudo', '-n',
-           '/usr/bin/systemd-run', '--unit=anetbbs-upgrade',
-           '--collect', '--quiet', '--wait',
-           f'--property=StandardOutput=append:{_UPGRADE_LOG_PATH}',
-           f'--property=StandardError=append:{_UPGRADE_LOG_PATH}',
-           wrapper, target, url, sha256]
+    cmd = ['sudo', '-n'] + build_upgrade_cmd(wrapper, target, url, sha256)
 
     def _runner():
         try:

@@ -206,20 +206,33 @@ def _check_sudo_escalation(cfg):
                       'then sudo systemctl daemon-reload && systemctl '
                       'restart anetbbs-web.')
 
-    # Unit looks fine — now check that sudoers actually grants the wrapper.
+    # Unit looks fine — now check that sudoers actually grants the
+    # EXACT command the auto-update button will run. A prior version
+    # of this probe just ran ``sudo -n -l <wrapper>`` with no
+    # arguments, which only matches sudoers' second ("direct
+    # invocation") grant alternative — never the systemd-run form
+    # ``_spawn_upgrade()`` actually uses. That let this check report
+    # "ok" while the real auto-update path stayed broken (the exact
+    # failure shape this whole preflight page exists to catch). Build
+    # the real probe command via the SAME helper ``_spawn_upgrade()``
+    # calls, so the two can never silently diverge again.
     if not os.path.isfile(wrapper):
         return _check('sudo escalation from web service', 'warn',
                       f'upgrade wrapper not at {wrapper}',
                       'Re-run sudo bash update.sh to install the wrapper.')
+    from .upgrades import build_upgrade_cmd  # local import: upgrades.py imports from this module
+    probe_cmd = build_upgrade_cmd(wrapper, 'v0.0.0-preflight-probe',
+                                  'https://example.invalid/preflight-probe.tar.gz',
+                                  '0' * 64)
     try:
-        r = subprocess.run(['sudo', '-n', '-l', wrapper],
+        r = subprocess.run(['sudo', '-n', '-l'] + probe_cmd,
                            capture_output=True, text=True, timeout=5)
         if r.returncode == 0:
             return _check('sudo escalation from web service', 'ok',
-                          f'sudoers permits {wrapper}')
+                          f'sudoers permits {wrapper} via systemd-run')
         stderr = (r.stderr or '').strip()[:200]
         return _check('sudo escalation from web service', 'fail',
-                      f'sudo -n -l rejected wrapper: {stderr}',
+                      f'sudo -n -l rejected the real upgrade command: {stderr}',
                       'Re-run sudo bash update.sh — it rewrites /etc/sudoers.d/anetbbs '
                       'with the grant for the current service user + install path.')
     except FileNotFoundError:

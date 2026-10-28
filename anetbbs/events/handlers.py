@@ -288,13 +288,23 @@ def cleanup_stale_sessions(app, params):
             UserSession.last_seen < cutoff).all()
         backfilled = 0
         for row in stale_rows:
-            if row.caller_log_id is None:
+            # Each row's backfill is isolated so one bad/unexpected row
+            # (e.g. a CallerLog lookup failure, a transient DB lock
+            # under concurrent writers) can't raise out of this loop
+            # and skip the delete() below for every OTHER stale row --
+            # that would regress this backstop into the exact "row
+            # left behind forever" failure its own docstring exists to
+            # prevent, just for a different reason than before.
+            try:
+                if row.caller_log_id is None:
+                    continue
+                cl = CallerLog.query.get(row.caller_log_id)
+                if cl is not None and cl.duration_seconds is None:
+                    cl.duration_seconds = max(0, int(
+                        (row.last_seen - cl.started_at).total_seconds()))
+                    backfilled += 1
+            except Exception:  # noqa: BLE001
                 continue
-            cl = CallerLog.query.get(row.caller_log_id)
-            if cl is not None and cl.duration_seconds is None:
-                cl.duration_seconds = max(0, int(
-                    (row.last_seen - cl.started_at).total_seconds()))
-                backfilled += 1
         deleted = UserSession.query.filter(UserSession.last_seen < cutoff).delete()
         db.session.commit()
         return True, (f'Deleted {deleted} stale session row(s) older than '

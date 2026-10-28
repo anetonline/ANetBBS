@@ -191,6 +191,47 @@ class CleanupStaleSessionsHandlerTests(unittest.TestCase):
             self.assertIsNone(refreshed.duration_seconds)
             self.assertEqual(UserSession.query.count(), 1)
 
+    def test_one_bad_rows_backfill_does_not_block_deleting_other_stale_rows(self):
+        """Regression test for a follow-up audit finding (v1.1.50-present
+        sweep, 2026-10-28): the per-row CallerLog backfill loop used to
+        share the function's single outer try/except with the actual
+        stale-row delete(). If backfilling any ONE row raised, the whole
+        function rolled back and returned False -- meaning every OTHER
+        stale UserSession row (not just the bad one) survived the
+        cleanup tick too, regressing this backstop into the exact
+        "row left behind forever" failure it exists to prevent."""
+        from unittest.mock import patch
+        from anetbbs.models import db, UserSession, CallerLog
+        from anetbbs.events.handlers import cleanup_stale_sessions
+
+        with self.app.app_context():
+            db.session.add(UserSession(
+                user_id=self.user_id, session_key='triggers-backfill-error',
+                last_seen=datetime.utcnow() - timedelta(days=2),
+                caller_log_id=424242))
+            db.session.add(UserSession(
+                user_id=self.user_id, session_key='unrelated-stale-row',
+                last_seen=datetime.utcnow() - timedelta(days=3)))
+            db.session.commit()
+
+            real_get = CallerLog.query.get.__func__ if hasattr(
+                CallerLog.query.get, '__func__') else CallerLog.query.get
+            query_cls = type(CallerLog.query)
+
+            def flaky_get(self_, ident, *a, **kw):
+                if ident == 424242:
+                    raise RuntimeError('simulated transient DB error')
+                return real_get(self_, ident, *a, **kw)
+
+            with patch.object(query_cls, 'get', flaky_get):
+                ok, msg = cleanup_stale_sessions(self.app, {'stale_days': 1})
+
+            self.assertTrue(ok, msg)
+            self.assertEqual(UserSession.query.count(), 0,
+                             'the unrelated stale row must still be '
+                             'deleted even though the other row\'s '
+                             'backfill raised')
+
     def test_is_registered_in_the_scheduler(self):
         from anetbbs.events.handlers import REGISTRY, HANDLER_META, DEFAULT_EVENTS
         self.assertIn('cleanup_stale_sessions', REGISTRY)

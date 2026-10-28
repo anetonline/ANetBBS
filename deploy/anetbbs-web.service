@@ -47,6 +47,16 @@ NoNewPrivileges=no
 # install.sh's Mystic-installer download) -- an isolated /tmp, not a
 # restricted one.
 PrivateTmp=yes
+# ProtectHome=yes is only correct for a non-/home install path (the
+# default /opt/anetbbs shown throughout this file). install.sh/update.sh
+# both switch this to ProtectHome=read-only automatically when
+# INSTALL_DIR resolves under /home, /root, or /run/user -- a real
+# outage (2026-10-27) happened because ProtectHome=yes unconditionally
+# blocks exec of anything under /home regardless of ReadWritePaths=. If
+# you're installing manually with INSTALL_DIR under one of those paths,
+# change this line to `ProtectHome=read-only` (and keep ReadWritePaths=
+# below pointed at your real INSTALL_DIR) or you will reproduce that
+# outage.
 ProtectHome=yes
 ProtectControlGroups=yes
 # ProtectSystem=full (not strict) -- the Service Control Center's

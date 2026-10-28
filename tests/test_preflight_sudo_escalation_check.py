@@ -25,6 +25,7 @@ unit file text -- systemd itself already applies the implied-by-other-
 directives rule when computing this value, so this check can't miss
 it the way a text search can.
 """
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -99,6 +100,61 @@ class SudoEscalationImpliedNoNewPrivilegesTests(unittest.TestCase):
             result = preflight._check_sudo_escalation({'INSTALL_DIR': '/opt/anetbbs'})
 
         self.assertEqual(result['status'], 'ok', result)
+
+
+class SudoProbeMatchesRealUpgradeCommandTests(unittest.TestCase):
+    """Regression test for a second real finding from a follow-up
+    audit (v1.1.50-present sweep, 2026-10-28): the sudo probe used to
+    be `sudo -n -l <wrapper>` with NO arguments, which only exercises
+    deploy/sudoers.anetbbs's second ("direct invocation") grant
+    alternative -- never the `systemd-run --unit=anetbbs-upgrade ...`
+    form `_spawn_upgrade()` actually uses for the real auto-update
+    button. That meant this check could report "ok" while the real
+    auto-update path stayed broken -- exactly the "preflight green,
+    real path red" shape that already bit this project once with the
+    old NoNewPrivileges text-only check.
+
+    Fixed by building the probe via the same `build_upgrade_cmd()`
+    helper `_spawn_upgrade()` itself calls, so the two can never
+    silently diverge again, and asserting the probe actually names
+    systemd-run/the unit flags, not just the bare wrapper path.
+    """
+
+    def test_probe_uses_the_real_systemd_run_shape_not_bare_wrapper(self):
+        from anetbbs.web import upgrades
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ['systemctl', 'show']:
+                return _FakeCompletedProcess(stdout='no\n')
+            if cmd[:1] == ['sudo']:
+                return _FakeCompletedProcess(returncode=0)
+            raise AssertionError(f'unexpected subprocess call: {cmd}')
+
+        with patch('anetbbs.web.preflight.subprocess.run', side_effect=fake_run), \
+             patch('builtins.open', MagicMock(side_effect=OSError('no file'))), \
+             patch('os.path.isfile', return_value=True):
+            result = preflight._check_sudo_escalation({'INSTALL_DIR': '/opt/anetbbs'})
+
+        self.assertEqual(result['status'], 'ok', result)
+        sudo_calls = [c for c in calls if c[:1] == ['sudo']]
+        self.assertEqual(len(sudo_calls), 1)
+        probed = sudo_calls[0]
+        self.assertEqual(probed[:3], ['sudo', '-n', '-l'])
+        # The bug: this used to be just the bare wrapper path with no
+        # further arguments at all.
+        self.assertIn('/usr/bin/systemd-run', probed)
+        self.assertIn('--unit=anetbbs-upgrade', probed)
+        self.assertIn('--wait', probed)
+        wrapper = os.path.join('/opt/anetbbs', 'deploy', 'run_upgrade.sh')
+        self.assertIn(wrapper, probed)
+        # And it must be built via the SAME helper _spawn_upgrade() uses,
+        # not a second hand-written copy that could drift again.
+        expected_tail = upgrades.build_upgrade_cmd(
+            wrapper, 'v0.0.0-preflight-probe',
+            'https://example.invalid/preflight-probe.tar.gz', '0' * 64)
+        self.assertEqual(probed[3:], expected_tail)
 
 
 class CapabilityBoundingSetStillDetectedTests(unittest.TestCase):
