@@ -1,35 +1,33 @@
-"""Regression test for a real live production outage (2026-10-27,
-second half): the web-triggered auto-update button could pass
-preflight (sudo escalation confirmed working) and still silently die
-partway through, with the box left on the old version and no error in
-the UI.
+"""Regression test for TWO real live production outages in this
+subsystem, now both closed by the same structural fix.
 
-Root cause: `_spawn_upgrade()` ran the privileged wrapper via
-``systemd-run --scope``, which -- confirmed via systemd-run(1), not
-guessed -- makes ``systemd-run`` itself the PARENT process of the
-wrapper ("the command will inherit the execution environment of the
-caller"). That means the wrapper was still a descendant of whatever
-spawned it (gunicorn, inside anetbbs-web's own cgroup) the whole time.
-When ``update.sh``'s own Step 3 stops anetbbs-web, systemd can still
-kill the wrapper as collateral damage, confirmed live via journalctl
-showing the wrapper's sudo process SIGKILLed mid-upgrade.
+Outage 1 (2026-10-27, second half): `_spawn_upgrade()` ran the
+privileged wrapper via ``systemd-run --scope``, which -- confirmed via
+systemd-run(1), not guessed -- makes ``systemd-run`` itself the PARENT
+process of the wrapper, so the wrapper stayed a descendant of
+anetbbs-web's own cgroup and could be killed as collateral damage when
+``update.sh`` restarted that service mid-upgrade. Fixed in v1.1.59 by
+switching to a named, detached ``systemd-run --unit=... --wait``
+service instead -- but that fix put the exact detachment flags INSIDE
+the sudo-gated command, which meant deploy/sudoers.anetbbs had to
+change in lockstep on every existing install.
 
-Fixed by dropping ``--scope`` entirely. The DEFAULT (non-scope)
-``systemd-run`` mode runs the command as a transient *service* with
-the service manager (PID 1) as its parent -- never a descendant of the
-caller at all, so it's unconditionally immune to anetbbs-web's cgroup
-being killed, regardless of timing. ``--wait`` restores completion
-tracking by monitoring the unit via the service manager (not by being
-part of its process tree), and the StandardOutput=/StandardError=
-properties redirect the unit's output to the upgrade log file, since a
-plain service's output goes to the journal by default rather than
-inheriting systemd-run's own stdout the way --scope mode did.
+Outage 2 (2026-10-28): on one real box, that sudoers refresh (inside
+``update.sh``) silently failed on a past upgrade while the rest of
+that upgrade still succeeded -- leaving the box running v1.1.59+ code
+that built the new systemd-run command, against a stale pre-v1.1.59
+sudoers grant that still only permitted the OLD ``--scope`` form.
+"sudo: a password is required", confirmed live. The auto-update button
+is the one thing that can never fix a sudoers problem via itself, so
+this exact class of bug could recur indefinitely every time the
+detachment mechanism's flags changed.
 
-This test asserts the exact `cmd` list `_spawn_upgrade()` builds --
-not threading/subprocess mechanics, which are mocked out entirely --
-and separately asserts deploy/sudoers.anetbbs's ANETBBS_UPGRADE grant
-contains the exact same flags, so the two can never drift out of sync
-the way a sudoers-grant mismatch would silently break this again.
+Structural fix: ALL detachment logic moved out of the sudo-gated
+command entirely, into deploy/run_upgrade.sh itself (see
+test_run_upgrade_sh_self_detach.py for that half). `_spawn_upgrade()`
+now only ever builds `sudo -n <wrapper> <args>` -- nothing that can
+ever need to change again regardless of how detachment works
+internally -- and deploy/sudoers.anetbbs's grant is just as simple.
 """
 import sys
 import unittest
@@ -81,47 +79,30 @@ class SpawnUpgradeCommandShapeTests(unittest.TestCase):
                                     'a' * 64, label='upgrade')
         return captured['cmd']
 
-    def test_does_not_use_scope(self):
-        # The exact bug: --scope makes systemd-run the wrapper's own
-        # parent, leaving it entangled with the caller's cgroup.
+    def test_command_is_exactly_sudo_n_wrapper_and_three_args(self):
+        # The whole point of the fix: NOTHING else is in this command --
+        # no systemd-run, no --scope, no --unit, no --property flags.
+        # Detachment is entirely deploy/run_upgrade.sh's own problem now.
         cmd = self._capture_cmd()
-        self.assertNotIn('--scope', cmd)
+        self.assertEqual(cmd, [
+            'sudo', '-n', '/opt/anetbbs/deploy/run_upgrade.sh',
+            'v1.1.58', 'https://example.com/ANetBBS-v1.1.58.tar.gz',
+            'a' * 64,
+        ])
 
-    def test_uses_a_named_unit_and_waits_for_completion(self):
-        cmd = self._capture_cmd()
-        self.assertIn('--unit=anetbbs-upgrade', cmd)
-        self.assertIn('--wait', cmd)
-
-    def test_redirects_unit_output_to_the_upgrade_log(self):
-        # A plain (non-scope) transient service's output goes to the
-        # journal by default, not to our pipe -- must be explicitly
-        # redirected or the web UI's log tail goes silent.
+    def test_does_not_mention_systemd_run_at_all(self):
         cmd = self._capture_cmd()
         joined = ' '.join(cmd)
-        self.assertIn(f'--property=StandardOutput=append:{upgrades._UPGRADE_LOG_PATH}',
-                      joined)
-        self.assertIn(f'--property=StandardError=append:{upgrades._UPGRADE_LOG_PATH}',
-                      joined)
-
-    def test_still_invokes_via_sudo_n_systemd_run(self):
-        cmd = self._capture_cmd()
-        self.assertEqual(cmd[0], 'sudo')
-        self.assertEqual(cmd[1], '-n')
-        self.assertEqual(cmd[2], '/usr/bin/systemd-run')
-
-    def test_wrapper_and_args_still_passed_through(self):
-        cmd = self._capture_cmd()
-        self.assertIn('/opt/anetbbs/deploy/run_upgrade.sh', cmd)
-        self.assertIn('v1.1.58', cmd)
-        self.assertIn('https://example.com/ANetBBS-v1.1.58.tar.gz', cmd)
-        self.assertIn('a' * 64, cmd)
+        self.assertNotIn('systemd-run', joined)
+        self.assertNotIn('--scope', joined)
+        self.assertNotIn('--unit=', joined)
+        self.assertNotIn('--property=', joined)
 
 
 class SudoersGrantMatchesSpawnCommandTests(unittest.TestCase):
     """Cross-checks deploy/sudoers.anetbbs against what _spawn_upgrade()
     actually builds, so the two files can't silently drift apart --
-    exactly the shape of bug that would reintroduce a permission
-    denial with zero code-level test coverage otherwise."""
+    exactly the shape of bug that caused both outages above."""
 
     def setUp(self):
         sudoers_path = REPO_ROOT / 'deploy' / 'sudoers.anetbbs'
@@ -135,61 +116,33 @@ class SudoersGrantMatchesSpawnCommandTests(unittest.TestCase):
                           '(excluded from the Docker image by .dockerignore)')
         self.sudoers_text = sudoers_path.read_text()
 
-    def _upgrade_cmd_tokens(self):
-        fake_proc = MagicMock()
-        fake_proc.wait.return_value = None
-        fake_proc.returncode = 0
-        captured = {}
+    def _upgrade_lines(self):
+        return [ln for ln in self.sudoers_text.splitlines()
+               if 'run_upgrade.sh' in ln
+               and not ln.strip().startswith('#')
+               and 'Cmnd_Alias' not in ln]
 
-        def _fake_popen(cmd, **kwargs):
-            captured['cmd'] = cmd
-            return fake_proc
+    def _upgrade_line(self):
+        lines = self._upgrade_lines()
+        self.assertEqual(len(lines), 1, lines)
+        return lines[0]
 
-        upgrades._install_state['running'] = False
-        with patch.object(upgrades, 'threading') as mock_threading, \
-             patch.object(upgrades.subprocess, 'Popen', side_effect=_fake_popen), \
-             patch('builtins.open', MagicMock()):
-            mock_threading.Thread = _SyncThread
-            upgrades._spawn_upgrade('/opt/anetbbs/deploy/run_upgrade.sh',
-                                    'v1.1.58', 'https://example.com/x.tar.gz',
-                                    'a' * 64, label='upgrade')
-        # Drop sudo/-n (the sudoers file itself is what grants those)
-        # and everything from the wrapper path onward (the per-call
-        # wrapper/version/url/sha256 args, matched by the trailing `*`
-        # glob in the sudoers rule, not literal tokens).
-        cmd = captured['cmd']
-        wrapper_idx = cmd.index('/opt/anetbbs/deploy/run_upgrade.sh')
-        return cmd[2:wrapper_idx]
+    def test_grant_is_the_plain_wrapper_with_no_extra_flags(self):
+        # Deliberately simple: this must stay just "<wrapper> *" forever,
+        # with nothing version/mechanism-specific baked into it. If a
+        # future change ever reintroduces a flag here, it has reopened
+        # exactly the class of bug this test exists to catch.
+        line = self._upgrade_line().strip().rstrip(',').strip()
+        self.assertTrue(line.endswith('/deploy/run_upgrade.sh *'), line)
+        self.assertNotIn('systemd-run', line)
+        self.assertNotIn('--', line)
 
-    def test_every_fixed_flag_appears_in_the_sudoers_grant(self):
-        for token in self._upgrade_cmd_tokens():
-            self.assertIn(token, self.sudoers_text,
-                          f'_spawn_upgrade() builds {token!r} but '
-                          'deploy/sudoers.anetbbs does not grant it -- '
-                          'the auto-update button would fail sudo again')
-
-    def test_fixed_flags_appear_in_the_exact_order_spawn_upgrade_builds(self):
-        # The check above only proved every token appears SOMEWHERE in
-        # the sudoers text -- sudoers matches a literal (fnmatch'd)
-        # command string, so a REORDERING of two correct flags would
-        # still pass that check while a real `sudo -n` would reject
-        # the actual command. Cross-check the exact joined sequence,
-        # not just set membership.
-        joined = ' '.join(self._upgrade_cmd_tokens())
-        self.assertIn(joined, self.sudoers_text,
-                      f'_spawn_upgrade() builds the flags in this exact '
-                      f'order: {joined!r} -- but that literal sequence '
-                      'does not appear in deploy/sudoers.anetbbs, which '
-                      'means a real `sudo -n` would reject the command '
-                      'even though every individual flag is granted '
-                      'somewhere in the file')
-
-    def test_sudoers_grant_does_not_still_use_scope(self):
-        upgrade_line = next(
-            (line for line in self.sudoers_text.splitlines()
-             if 'systemd-run' in line and 'run_upgrade.sh' in line), None)
-        self.assertIsNotNone(upgrade_line, 'no systemd-run grant line found')
-        self.assertNotIn('--scope', upgrade_line)
+    def test_only_one_upgrade_grant_alternative_exists(self):
+        # Outage 1's fix added a second ("direct invocation")
+        # alternative alongside the systemd-run one; now that
+        # detachment moved into the script, there's no reason for more
+        # than one invocation form to exist at all.
+        self.assertEqual(len(self._upgrade_lines()), 1, self._upgrade_lines())
 
 
 if __name__ == '__main__':

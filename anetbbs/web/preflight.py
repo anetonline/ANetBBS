@@ -207,15 +207,13 @@ def _check_sudo_escalation(cfg):
                       'restart anetbbs-web.')
 
     # Unit looks fine — now check that sudoers actually grants the
-    # EXACT command the auto-update button will run. A prior version
-    # of this probe just ran ``sudo -n -l <wrapper>`` with no
-    # arguments, which only matches sudoers' second ("direct
-    # invocation") grant alternative — never the systemd-run form
-    # ``_spawn_upgrade()`` actually uses. That let this check report
-    # "ok" while the real auto-update path stayed broken (the exact
-    # failure shape this whole preflight page exists to catch). Build
-    # the real probe command via the SAME helper ``_spawn_upgrade()``
-    # calls, so the two can never silently diverge again.
+    # EXACT command the auto-update button will run. Built via the
+    # SAME helper ``_spawn_upgrade()`` calls (``build_upgrade_cmd()``),
+    # so the two can never silently diverge — a prior version of this
+    # probe tested a different, narrower sudoers alternative than the
+    # one the button actually used, letting this check report "ok"
+    # while the real path stayed broken (the exact failure shape this
+    # whole preflight page exists to catch).
     if not os.path.isfile(wrapper):
         return _check('sudo escalation from web service', 'warn',
                       f'upgrade wrapper not at {wrapper}',
@@ -229,7 +227,7 @@ def _check_sudo_escalation(cfg):
                            capture_output=True, text=True, timeout=5)
         if r.returncode == 0:
             return _check('sudo escalation from web service', 'ok',
-                          f'sudoers permits {wrapper} via systemd-run')
+                          f'sudoers permits {wrapper}')
         stderr = (r.stderr or '').strip()[:200]
         return _check('sudo escalation from web service', 'fail',
                       f'sudo -n -l rejected the real upgrade command: {stderr}',

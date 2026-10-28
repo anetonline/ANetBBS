@@ -45,9 +45,10 @@ scans `TDF_FONTS_DIR` fresh on every request.
 ## Why no sudo, no service restart triggered automatically
 
 ANetBBS's full self-upgrade mechanism (Admin → Check for Updates) uses
-a privileged wrapper script invoked via `sudo systemd-run` (as a
-detached transient service, not the web service's own process tree),
-because a self-upgrade replaces every file in the install and must
+a privileged wrapper script invoked via plain `sudo` -- the wrapper
+puts itself into a detached systemd unit internally once it's
+running, so it survives the web service's own restart partway through
+-- because a self-upgrade replaces every file in the install and must
 swap atomically out from under the running service. An add-on install
 only *adds* a small, fixed set of new files under well-known
 subdirectories and never touches or replaces anything existing -- the

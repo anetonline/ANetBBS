@@ -103,24 +103,21 @@ class SudoEscalationImpliedNoNewPrivilegesTests(unittest.TestCase):
 
 
 class SudoProbeMatchesRealUpgradeCommandTests(unittest.TestCase):
-    """Regression test for a second real finding from a follow-up
-    audit (v1.1.50-present sweep, 2026-10-28): the sudo probe used to
-    be `sudo -n -l <wrapper>` with NO arguments, which only exercises
-    deploy/sudoers.anetbbs's second ("direct invocation") grant
-    alternative -- never the `systemd-run --unit=anetbbs-upgrade ...`
-    form `_spawn_upgrade()` actually uses for the real auto-update
-    button. That meant this check could report "ok" while the real
-    auto-update path stayed broken -- exactly the "preflight green,
-    real path red" shape that already bit this project once with the
-    old NoNewPrivileges text-only check.
-
-    Fixed by building the probe via the same `build_upgrade_cmd()`
-    helper `_spawn_upgrade()` itself calls, so the two can never
-    silently diverge again, and asserting the probe actually names
-    systemd-run/the unit flags, not just the bare wrapper path.
+    """Regression test for the sudo probe staying in sync with what
+    `_spawn_upgrade()` actually invokes -- built via the SAME
+    `build_upgrade_cmd()` helper on both sides, so the two can never
+    silently diverge the way they once did (a follow-up audit found
+    the probe testing the wrong sudoers alternative; a separate real
+    outage, 2026-10-28, then showed that baking a detachment
+    mechanism's specific flags into the sudo-gated command at all is
+    itself the real recurring risk -- see
+    tests/test_upgrade_spawn_cmd_detached.py's module docstring for
+    the full writeup). Detachment now lives entirely inside
+    deploy/run_upgrade.sh, so this probe -- like the real command --
+    is just the wrapper and its three plain arguments.
     """
 
-    def test_probe_uses_the_real_systemd_run_shape_not_bare_wrapper(self):
+    def test_probe_is_the_plain_wrapper_with_real_arguments(self):
         from anetbbs.web import upgrades
         calls = []
 
@@ -142,15 +139,16 @@ class SudoProbeMatchesRealUpgradeCommandTests(unittest.TestCase):
         self.assertEqual(len(sudo_calls), 1)
         probed = sudo_calls[0]
         self.assertEqual(probed[:3], ['sudo', '-n', '-l'])
-        # The bug: this used to be just the bare wrapper path with no
-        # further arguments at all.
-        self.assertIn('/usr/bin/systemd-run', probed)
-        self.assertIn('--unit=anetbbs-upgrade', probed)
-        self.assertIn('--wait', probed)
         wrapper = os.path.join('/opt/anetbbs', 'deploy', 'run_upgrade.sh')
         self.assertIn(wrapper, probed)
-        # And it must be built via the SAME helper _spawn_upgrade() uses,
-        # not a second hand-written copy that could drift again.
+        # No detachment mechanism's flags belong in this command at all
+        # anymore -- that was the exact root cause of a real outage.
+        joined = ' '.join(probed)
+        self.assertNotIn('systemd-run', joined)
+        self.assertNotIn('--scope', joined)
+        self.assertNotIn('--unit=', joined)
+        # Must be built via the SAME helper _spawn_upgrade() uses, not a
+        # second hand-written copy that could drift again.
         expected_tail = upgrades.build_upgrade_cmd(
             wrapper, 'v0.0.0-preflight-probe',
             'https://example.invalid/preflight-probe.tar.gz', '0' * 64)

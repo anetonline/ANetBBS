@@ -36,28 +36,19 @@
 # install location; install.sh / update.sh rewrite /etc/sudoers.d/anetbbs
 # at every run with the correct INSTALL_DIR substituted.
 #
-# We grant TWO invocation forms:
-#   1. Via plain `systemd-run` (NOT --scope) — the auto-update path
-#      uses this so the wrapper runs as an independent transient
-#      service, never a descendant of anetbbs-web's own cgroup at all.
-#      A real live outage (2026-10-27) found `--scope` insufficient for
-#      this: per systemd-run(1), --scope makes systemd-run ITSELF the
-#      parent of the wrapper, so it's still entangled with the caller's
-#      process tree -- Step 3 of update.sh (which stops anetbbs-web)
-#      could still silently kill the wrapper mid-flight despite the
-#      scope. The default (non-scope) mode's "service manager as
-#      parent" is a real, unconditional detachment. --wait keeps
-#      completion tracking without re-introducing that coupling (it
-#      monitors the unit via the service manager, not by being part of
-#      its process tree), and the StandardOutput=/StandardError=
-#      properties redirect the unit's output to the same upgrade log
-#      the web UI tails, since a plain service's output goes to the
-#      journal by default rather than inheriting systemd-run's own
-#      stdout the way --scope mode did.
-#   2. Direct invocation — kept for sysop / debugging use from a
-#      terminal session that isn't inside anetbbs-web's cgroup.
+# Deliberately ONE plain invocation form, nothing else -- this grant
+# must never again need to change to match a detachment mechanism's
+# flags. Two past real live outages (2026-10-27's --scope bug, then a
+# SECOND one on 2026-10-28 when a stale box's sudoers refresh had
+# silently failed on an earlier upgrade while the code kept moving
+# forward) both came from encoding `systemd-run`'s exact flags HERE,
+# in the one thing sudo has to literally pattern-match. The wrapper
+# (deploy/run_upgrade.sh) now re-execs itself into a detached systemd
+# unit internally, once it's already root -- no sudo call needed for
+# that part at all, so this line can stay exactly this simple forever
+# regardless of how detachment works internally. See
+# run_upgrade.sh's own detach-block comment for the full writeup.
 Cmnd_Alias ANETBBS_UPGRADE = \
-    /usr/bin/systemd-run --unit=anetbbs-upgrade --collect --quiet --wait --property=StandardOutput=append:/tmp/anetbbs_upgrade.log --property=StandardError=append:/tmp/anetbbs_upgrade.log /opt/anetbbs/deploy/run_upgrade.sh *, \
     /opt/anetbbs/deploy/run_upgrade.sh *
 
 # Restore helper — invoked by /admin/backups/ to copy a snapshot's

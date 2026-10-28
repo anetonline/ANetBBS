@@ -4,22 +4,68 @@
 # Invoked by the sysop "Check for Updates" UI as:
 #   sudo -n /home/<bbs-user>/anetbbs/deploy/run_upgrade.sh <version> <url> <sha256>
 #
-# It downloads the tarball from <url>, verifies its SHA-256 against the
-# value the admin UI fetched from the upstream /api/releases/latest, and
-# runs the new tarball's update.sh.
+# This is the ONLY command the sudoers grant for this feature ever
+# needs to know about -- see the detach block immediately below for
+# why that's deliberate. The script re-execs itself (as root, no
+# further sudo call) into a detached systemd unit before doing any
+# real work, then downloads the tarball from <url>, verifies its
+# SHA-256 against the value the admin UI fetched from the upstream
+# /api/releases/latest, and runs the new tarball's update.sh.
 #
 # All three args are validated against strict regexes here BEFORE doing
 # anything, since the sudoers grant is open to the service user — never
 # trust the args even though the calling code is also ours.
 #
-# Logging: everything goes to stdout / stderr, which the caller redirects
-# to /tmp/anetbbs_upgrade.log. The UI tails that file.
+# Logging: everything goes to stdout / stderr, which systemd (after the
+# detach below) redirects to /tmp/anetbbs_upgrade.log. The UI tails
+# that file.
 
 set -eu -o pipefail
 
 LOG_PREFIX="[upgrade]"
 log()  { printf '%s %s\n' "$LOG_PREFIX" "$*"; }
 fail() { printf '%s FAIL: %s\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
+
+# ── Detach from the caller's cgroup ────────────────────────────────────────
+# Real live outage (2026-10-27, three fix attempts) followed by a SECOND
+# real live outage (2026-10-28): the mechanism used to escape anetbbs-
+# web's cgroup (so update.sh's own restart of anetbbs-web, below, can't
+# kill US as collateral damage) used to be baked into the SUDO-GATED
+# command itself -- first `systemd-run --scope` (found not to actually
+# detach: systemd-run becomes the wrapper's own parent, not a real
+# escape), then `systemd-run --unit=... --wait --property=...` (the
+# real fix, v1.1.59). Both put the exact detachment flags inside the
+# one thing sudoers has to literally pattern-match against -- so every
+# time the detachment mechanism needed to change, every existing
+# install's /etc/sudoers.d/anetbbs had to change in lockstep, via
+# update.sh actually re-running successfully. When that refresh step
+# silently failed on a live box once (confirmed live: the grant was
+# still the pre-v1.1.59 `--scope` form while the running CODE was
+# already v1.1.59+, meaning a past upgrade's sudoers-refresh step
+# failed/warned without escalating while the rest of that same upgrade
+# still succeeded), the box was stuck: new code building a command the
+# stale grant would never match, and the auto-update button is the ONE
+# thing that can't fix a sudoers problem via itself.
+#
+# Fixed by moving detachment OUT of the sudo-gated command entirely.
+# sudoers now only ever needs to grant ONE thing, forever: plain
+# `run_upgrade.sh *` -- no flags, no properties, nothing that can ever
+# need to change again regardless of how detachment works internally.
+# Once sudo hands us root (we're already running as root by the time
+# this line executes), root can always talk to systemd directly with
+# no further privilege check -- so THIS script re-execs ITSELF into a
+# detached transient unit, no second sudo call involved at all.
+# Whatever this mechanism needs to become in the future, it only ever
+# touches this file, which takes effect on the very next invocation --
+# it can never again require a sudoers refresh to actually land.
+if [ -z "${ANETBBS_UPGRADE_DETACHED:-}" ]; then
+    export ANETBBS_UPGRADE_DETACHED=1
+    exec systemd-run --unit=anetbbs-upgrade --collect --quiet --wait \
+        --property=StandardOutput=append:/tmp/anetbbs_upgrade.log \
+        --property=StandardError=append:/tmp/anetbbs_upgrade.log \
+        --setenv=ANETBBS_UPGRADE_DETACHED=1 \
+        "$0" "$@"
+fi
 
 # ── Argument validation ────────────────────────────────────────────────────
 # Use case-based pattern matching instead of `[[ =~ ]]` regex. Bash treats
@@ -158,7 +204,8 @@ log "extracted to $INNER"
 # update.sh expects to be run as root with bash, and it operates on the
 # already-installed tree at INSTALL_DIR. update.sh restarts the web
 # service, which will kill the HTTP request that triggered us — but we
-# run detached via the caller's nohup/setsid so we keep going.
+# already re-exec'd into our own detached systemd unit above, so that
+# restart cannot touch us.
 log "running update.sh"
 cd "$INNER"
 # Real gap found in a full install/update re-verify audit: update.sh's

@@ -342,23 +342,32 @@ _install_state = {'running': False, 'started_at': 0.0, 'version': ''}
 
 
 def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str) -> list:
-    """Build the exact (unprivileged-prefix) systemd-run command the
-    real upgrade spawns, WITHOUT the leading ``sudo -n`` -- shared by
+    """Build the exact (unprivileged-prefix) command the real upgrade
+    spawns, WITHOUT the leading ``sudo -n`` -- shared by
     ``_spawn_upgrade()`` below and ``preflight.py``'s sudo-escalation
-    check, so the two can never drift out of sync the way two
-    independently hand-written copies of this command already did
-    once (a security/performance audit found the preflight probe was
-    only testing the OTHER sudoers grant -- the plain direct-invocation
-    one -- never the systemd-run form the web button actually uses,
-    so preflight could report "ok" while the real auto-update path
-    stayed broken). See ``_spawn_upgrade()``'s docstring for why the
-    command is shaped this way (no ``--scope``, ``--wait`` instead).
+    check, so the two can never drift out of sync.
+
+    A SECOND real live outage (2026-10-28), separate from the one
+    v1.1.59 fixed: this used to build a ``systemd-run --unit=... --wait
+    --property=...`` command directly here, with the matching sudoers
+    grant encoding those exact flags. When a *different* box's sudoers
+    refresh (inside ``update.sh``) silently failed on one past upgrade
+    while the rest of that upgrade still succeeded, the box was left
+    running code that built a command its own stale sudoers grant no
+    longer matched -- "sudo: a password is required", confirmed live.
+    The auto-update button is the one thing that can never fix a
+    sudoers problem via itself, so this exact class of bug could recur
+    indefinitely every time the detachment mechanism's flags changed.
+
+    Fixed by moving ALL of that detachment logic out of the sudo-gated
+    command entirely, into ``deploy/run_upgrade.sh`` itself (see its
+    own detach block for the full writeup) -- the script re-execs
+    itself into a detached unit once it's already root, with no
+    further sudo call needed. This function now just builds the one
+    thing sudoers ever needs to grant, forever: the wrapper and its
+    three plain arguments, nothing else.
     """
-    return ['/usr/bin/systemd-run', '--unit=anetbbs-upgrade',
-            '--collect', '--quiet', '--wait',
-            f'--property=StandardOutput=append:{_UPGRADE_LOG_PATH}',
-            f'--property=StandardError=append:{_UPGRADE_LOG_PATH}',
-            wrapper, target, url, sha256]
+    return [wrapper, target, url, sha256]
 
 
 def _patch_wrapper_if_needed(wrapper: str) -> None:
@@ -542,43 +551,31 @@ def _install_container(target, upstream):
 
 def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
                    *, label: str) -> None:
-    """Spawn the privileged upgrade wrapper as an independent systemd
-    service, NOT a scope -- a real live outage (2026-10-27) found
-    ``--scope`` is not actually reliable for this.
+    """Spawn the privileged upgrade wrapper via sudo. The wrapper
+    itself (``deploy/run_upgrade.sh``) is responsible for detaching
+    into its own systemd unit before doing any real work -- this
+    function no longer knows or cares how that's done.
 
-    Why a scope wasn't enough: the wrapper inherits the cgroup of
-    whatever spawned it (gunicorn for the web service). When
-    ``update.sh`` later runs ``systemctl stop anetbbs-web`` in Step 3,
-    systemd terminates every process in the unit's cgroup — including
-    our running wrapper, halting the upgrade mid-flight. ``systemd-run
-    --scope`` was added to dodge this by creating a transient scope the
-    wrapper escapes into -- but per systemd-run(1), ``--scope`` makes
-    ``systemd-run`` ITSELF the parent process of the wrapper ("the
-    command will inherit the execution environment of the caller"),
-    so the wrapper is still a descendant of the very process tree
-    we're trying to escape. Confirmed broken live: the auto-update
-    button still failed to complete an upgrade after NoNewPrivileges
-    was fixed, with no privilege error at all -- it just silently died
-    partway through, version unchanged.
+    History, briefly (see ``deploy/run_upgrade.sh``'s own detach-block
+    comment for the full writeup): the wrapper needs to survive
+    ``update.sh``'s own restart of anetbbs-web partway through the
+    upgrade, which means it can't still be a descendant of anetbbs-
+    web's cgroup when that restart happens. Two different detachment
+    mechanisms (``systemd-run --scope``, then
+    ``systemd-run --unit=... --wait --property=...``) were both tried
+    HERE, in the sudo-gated command itself -- and each time the
+    mechanism changed, every existing install's sudoers grant had to
+    change in lockstep via a successful ``update.sh`` run. When that
+    refresh silently failed on one real box while the rest of that
+    upgrade still succeeded, the box was left permanently stuck: new
+    code building a command its own stale sudoers grant no longer
+    matched, with no way to fix it short of a manual SSH session,
+    confirmed live twice.
 
-    The fix: omit ``--scope`` entirely. Per systemd-run(1), the
-    DEFAULT mode runs the command as a transient *service* with "the
-    service manager [PID 1] as its parent process" -- never a
-    descendant of the caller at all, so killing anetbbs-web's cgroup
-    cannot touch it regardless of timing. ``--wait`` gets completion
-    tracking back without re-introducing the coupling: it makes
-    ``systemd-run`` block by *monitoring* the unit via the service
-    manager, not by being part of its process tree -- so even if our
-    ``sudo``/``systemd-run`` waiter itself gets killed as collateral
-    damage, the actual upgrade keeps running and finishes on its own.
-    ``--property=StandardOutput=/StandardError=append:<path>`` is
-    needed because a plain transient service's output goes to the
-    journal by default, not to our pipe the way ``--scope`` mode's did
-    (the launched command directly inherited systemd-run's own stdout
-    there) -- redirect both back to the same upgrade log file so the
-    web UI's log tail keeps working exactly as before.
-
-    Sudoers ships an entry granting exactly this command shape.
+    Moving detachment into the wrapper script itself means the sudoers
+    grant for this feature is now just the wrapper and its arguments --
+    nothing that can ever drift out of sync with how detachment
+    actually works internally again.
     """
     cmd = ['sudo', '-n'] + build_upgrade_cmd(wrapper, target, url, sha256)
 
@@ -595,8 +592,9 @@ def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
                 except RuntimeError as _e:
                     # eventlet's hub raises "Second simultaneous read on fileno N"
                     # when its internal fd-monitoring conflicts with proc.wait().
-                    # The upgrade is already running detached in its own systemd
-                    # scope (systemd-run --scope), so this is non-fatal — drop it.
+                    # The upgrade wrapper has already re-exec'd itself into its
+                    # own detached systemd unit by this point (see
+                    # deploy/run_upgrade.sh), so this is non-fatal — drop it.
                     if 'simultaneous read' not in str(_e):
                         raise
                 log.write(f'\n[{datetime.utcnow().isoformat()}Z] '

@@ -408,9 +408,10 @@ launches a detached, ephemeral sibling container (from the same image,
 which bundles the `docker` CLI + compose plugin) that runs `docker
 compose pull && up -d --remove-orphans` against your own
 `docker-compose.yml`/`.env` — the container analogue of the detached
-transient `systemd-run` service bare-metal installs launch the same
-upgrade wrapper as, so the upgrader survives the web container being
-recreated mid-upgrade.
+systemd unit the bare-metal upgrade wrapper puts itself into once it's
+running, so the upgrader survives the web container being recreated
+mid-upgrade the same way the bare-metal wrapper survives anetbbs-web
+being restarted.
 
 This needs `ANETBBS_COMPOSE_DIR` set in `.env` to the absolute host
 path containing your `docker-compose.yml` (defaults to wherever you
