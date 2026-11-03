@@ -1,7 +1,7 @@
-# ANetBBS v1.1.64 — CI security-scan fix (October 2026)
+# ANetBBS v1.1.65 — Door-game SSH/telnet write-path fix, plus a follow-up audit (November 2026)
 
-A security scan (bandit) caught a real finding in v1.1.63's own fix, after that release had already shipped: the code that lets both the web process and the detached root upgrade unit write to the same progress-log file loosened that file's permissions to world-writable (`0o666`) to guarantee both sides could always write to it.
+Door games launched over SSH, telnet, or rlogin could fail to save player progress, scores, or other persistent data — or in some cases fail to launch at all — even though the same game worked fine through the web interface. The cause was a mismatch between what the two access methods are allowed to write to on disk: the SSH/telnet/rlogin service only grants write access to the application's own data and log directories, not to a door's own install directory.
 
-That's unnecessary — root already bypasses standard file permission checks regardless of mode, so the only direction that genuinely needed defending (the web process needing to reclaim a file a past root-owned write left behind) was already covered by a separate remove-and-recreate fallback. A world-writable progress log is needless exposure on a box with other local accounts, so the loosening step was simply removed rather than suppressed.
+Native door games now get a dedicated, always-writable storage location automatically, with no sysop configuration needed. DOS- and DOSEMU-emulated door games that aren't installed inside the writable data directory now report a clear, actionable error at launch instead of failing silently or unpredictably; see `docs/14-door-games.md` for the recommended install location if you see this error.
 
-No sysop-visible behavior changes; applying this release corrects the file's permissions going forward. The exposure window was a transient progress log (install-step text only, no credentials or secrets ever written to it), not a credential or data leak.
+Also: a routine follow-up security/performance audit hardened a handful of other areas, including network message-size limits and the sandboxing applied to an optional add-on service. No sysop action is required; applying this release picks these up automatically.

@@ -445,6 +445,24 @@ restart anetbbs`.
   it if you deliberately want them to share write access to doors'
   save/state files. `sbbs_stubs` only gets read+traverse for "o", never
   write.)
+- **A door writes/saves fine over the web UI but fails with `EROFS`
+  (errno 30) or a storage/lock-file error over SSH/telnet/rlogin,
+  even after the `chmod -R g+rwX .../doors` fix above** → this isn't a
+  file-permission problem. The SSH/telnet/rlogin systemd unit
+  (`anetbbs.service`) only whitelists `data/` and `logs/` in its
+  `ReadWritePaths` — unlike `anetbbs-web.service`, which on a
+  `/home`-rooted install gets the whole install tree writable. A
+  native door with no explicit `working_directory` defaults its cwd to
+  its own folder under `doors/<name>/`, which is outside that
+  whitelist and stays read-only no matter what the Unix file
+  permissions say. Fix: point the door's own data/save-file config at
+  the `BBS_DOOR_DATA_DIR` env var ANetBBS sets for every door launch
+  (resolves to `data/games/doors/<slug>/`, always writable), or set
+  the Game's `working_directory` to an absolute path under `data/`.
+  Confirmed live with ANetSlots (2026-11-01): `STORAGE
+  step=lock_failed ... errno=30` writing its lock file relative to its
+  own install dir; fixed by pointing its `data_dir` config at
+  `data/anetslots` instead.
 - **`bbs.log` PermissionError** → service user needs write access to the
   install dir. `install.sh` `chown`s on every run; if you re-pointed the
   unit file at a different install dir, mirror the perms there.

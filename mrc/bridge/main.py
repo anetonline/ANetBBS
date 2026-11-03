@@ -96,6 +96,15 @@ MRC_CHAT_PACKET_SPACING = 0.75
 # an opt-in to 0.0.0.0 for remote umrc-client connections, at which
 # point an uncapped buffer here would be a remote memory DoS.
 MRC_TCP_MAX_LINE_BYTES = 8192
+# Found in a follow-up audit: the public /mrcws WebSocket endpoint built
+# below had no explicit max_msg_size, so it fell back to aiohttp's own
+# 4 MiB default -- 16x every sibling cap already chosen in this exact
+# service (this raw-TCP listener's 8 KiB above; the MRC-IRC bridge's and
+# the terminal MRC client's own outbound legs to this same bridge, both
+# 262144). At the MRC_WS_MAX_CONNECTIONS global cap that's a real
+# amplification (up to ~1 GiB of simultaneous in-flight oversized
+# frames) versus the deliberately small caps used everywhere else.
+MRC_WS_MAX_MSG_BYTES = 262144
 # Found missing in a follow-up audit: unlike anetbbs/ftp/server.py
 # (max_cons=256, max_cons_per_ip=8), this listener tracked every
 # accepted connection in self.mrc_tcp_clients with no ceiling at all --
@@ -2128,7 +2137,7 @@ class BridgeApp:
                     f"at the per-IP cap ({MRC_WS_MAX_CONNECTIONS_PER_IP})")
                 return web.Response(status=503, text="MRC bridge: too many connections from your address")
 
-        ws    = web.WebSocketResponse(heartbeat=30)
+        ws    = web.WebSocketResponse(heartbeat=30, max_msg_size=MRC_WS_MAX_MSG_BYTES)
         await ws.prepare(request)
 
         ws_id = id(ws)

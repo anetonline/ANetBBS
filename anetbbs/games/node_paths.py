@@ -20,6 +20,7 @@ This module owns:
     door expects.
 """
 import os
+import re
 import logging
 from typing import Optional
 
@@ -39,6 +40,35 @@ def temp_root() -> str:
     except Exception:
         pass
     return '/tmp/anetbbs-temp'  # nosec B108 -- scratch dir fallback only, DATA_DIR-based path used above when available
+
+
+def door_data_dir(slug: str) -> str:
+    """Return the absolute path to a door's writable data directory,
+    ``<GAMES_DATA_DIR>/doors/<slug>/``, creating it if missing.
+
+    A native door's default working directory is its own install folder
+    under ``doors/<name>/`` (see door_runner.py's ``_build_command()``),
+    which the SSH/telnet/rlogin systemd unit does NOT whitelist for
+    writes -- only DATA_DIR and LOGS_DIR are in its ReadWritePaths. Any
+    door that persists player data, scores, or lock files relative to
+    its own directory fails with EROFS the moment it's launched over
+    SSH, even though the same door works fine over the web UI (which
+    gets the whole install tree writable). This gives every door a
+    location it can rely on regardless of how it was launched."""
+    safe_slug = re.sub(r'[^A-Za-z0-9_.-]', '_', slug or 'game') or 'game'
+    try:
+        from ..config import get_config
+        cfg = get_config()
+        games_dir = (getattr(cfg, 'GAMES_DATA_DIR', None)
+                     or os.path.join(str(getattr(cfg, 'DATA_DIR', '/tmp/anetbbs-data')), 'games'))
+    except Exception:
+        games_dir = '/tmp/anetbbs-data/games'  # nosec B108 -- scratch dir fallback only, GAMES_DATA_DIR-based path used above when available
+    path = os.path.join(str(games_dir), 'doors', safe_slug)
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError as exc:
+        logger.warning('Could not create door data dir %s: %s', path, exc)
+    return path
 
 
 def node_dir(node_number: int) -> str:

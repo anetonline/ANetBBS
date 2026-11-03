@@ -196,6 +196,41 @@ def _resolve_path(p, base=None):
     return os.path.normpath(os.path.join(base, p))
 
 
+def _check_game_dir_writable(game_dir, slug):
+    """Probe-write into a door_dos/door_dosemu game's own directory and
+    raise a clear, actionable error if it isn't actually writable.
+
+    `os.access(path, os.W_OK)` can't detect this: the SSH/telnet/rlogin
+    systemd unit's ProtectHome=read-only + narrow ReadWritePaths (only
+    data/ and logs/) is enforced via a mount namespace, which doesn't
+    change the directory's own permission bits -- os.access() would
+    report it writable right up until the real write fails with EROFS.
+    Both game types need write access here: the generated drop-file
+    copy lands in this directory (DOS doors conventionally look for
+    their drop file only in their own cwd, not a configurable path),
+    and many DOS doors also persist save/score state relative to their
+    own directory. Root-caused against the identical EROFS failure for
+    a door_native game's storage, confirmed live 2026-11-01 -- this
+    check turns that same failure class from a silent/cryptic one deep
+    inside DOSBox/dosemu into a clear error at launch time instead."""
+    probe = os.path.join(game_dir, f'.anetbbs_write_probe_{os.getpid()}')
+    try:
+        with open(probe, 'w') as f:
+            f.write('')
+        os.remove(probe)
+    except OSError as exc:
+        raise PermissionError(
+            f'Game {slug!r}\'s directory ({game_dir!r}) is not writable: '
+            f'{exc}. door_dos/door_dosemu games need their own directory '
+            'to be writable (for the drop-file copy, and often the game\'s '
+            'own save/score files) -- the SSH/telnet/rlogin systemd unit '
+            'only whitelists data/ and logs/ for writes, unlike the web UI. '
+            f'Move this game under <install>/data/doors/{slug}/, or add '
+            f'{game_dir!r} to anetbbs.service\'s ReadWritePaths. See '
+            'docs/14-door-games.md.'
+        )
+
+
 def _mods_dir():
     """The sysop's own /data/mods/ override directory -- a file dropped
     here takes priority over the stock, package-shipped copy, matching
@@ -963,6 +998,7 @@ def _build_dos_command(game, node_number, cwd, token_ctx=None,
         raise FileNotFoundError(
             f'Game directory does not exist: {game_dir!r}.'
         )
+    _check_game_dir_writable(game_dir, game.slug)
 
     # Use dosbox-staging's stdio support for now. The TCP-nullmodem approach
     # (better, works on vanilla DOSBox) is staged as infrastructure in
@@ -1146,6 +1182,7 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
         exe_name = os.path.basename(exe_path)
     else:
         raise FileNotFoundError(f'executable_path not found: {exe_path!r}')
+    _check_game_dir_writable(game_dir, game.slug)
 
     # G: = dos_runtime/ (available for future use; FOSSIL drivers not used in Standard mode)
     fossil_base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -1182,7 +1219,17 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
         extra = extra.replace(_pn_slash, 'I:\\').replace(per_node_host.rstrip(os.sep), 'I:\\')
 
     cmd_str = (exe_name + (' ' + extra if extra else '')).strip()
-    bat_path = os.path.join(game_dir, '_ANET.BAT')
+    # _ANET.BAT is ANetBBS's own generated launcher script, not game data --
+    # it has no reason to live in game_dir (H:), which the SSH/telnet/rlogin
+    # systemd unit does NOT whitelist for writes (only data/ and logs/ are
+    # in anetbbs.service's ReadWritePaths; a /home-rooted install's game_dir
+    # under doors/<name>/ is read-only there). The per-node scratch dir
+    # (I:) is always writable -- confirmed live with the identical EROFS
+    # failure for a door_native game's own storage, root-caused 2026-11-01.
+    # Written into H: only when no per-node dir resolved (test-only edge case).
+    bat_drive = 'I' if per_node_host else 'H'
+    bat_host_dir = per_node_host or game_dir
+    bat_path = os.path.join(bat_host_dir, '_ANET.BAT')
 
     # TW2002-specific setup: TWNODE env var selects the node config entry in
     # TWNODE.DAT, and node 1 maps its DOOR.SYS path to I:\NODE2\DOOR.SYS.
@@ -1214,7 +1261,7 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
         'EXIT\r\n'
     )
     try:
-        os.makedirs(game_dir, exist_ok=True)
+        os.makedirs(bat_host_dir, exist_ok=True)
         with open(bat_path, 'w', newline='') as f:
             f.write(bat_body)
     except OSError as exc:
@@ -1271,7 +1318,7 @@ def _build_dosemu_command(game, node_number, dosemu_path, token_ctx=None):
     ]
     if per_node_host:
         cmd.extend(['-d', per_node_host])  # I: = per-node scratch
-    cmd.extend(['-E', 'H:\\_ANET.BAT'])
+    cmd.extend(['-E', f'{bat_drive}:\\_ANET.BAT'])
     # Return 2-tuple (cmd, game_dir).  pts_path and conf_path are derivable
     # by any caller that knows node_number and os.getpid() via the same formula
     # used above.  launch_door_game re-derives them after the fork.
@@ -1635,6 +1682,18 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
             os.environ['BBS_LOGIN_COUNT'] = str(_ufield('login_count', 0) or 0)
             os.environ['BBS_NODE_NUMBER'] = str(node)
             os.environ['BBS_NAME'] = bbs_name
+            # Doors that persist player data/scores/lock files relative to
+            # their own install dir (the default cwd for a game with no
+            # explicit working_directory, see _build_command() above) hit
+            # EROFS over SSH/telnet/rlogin: that systemd unit only
+            # whitelists DATA_DIR/LOGS_DIR for writes, unlike the web UI.
+            # Give every door a location it can rely on instead.
+            try:
+                from .node_paths import door_data_dir as _door_data_dir
+                os.environ['BBS_DOOR_DATA_DIR'] = _door_data_dir(
+                    getattr(game, 'slug', '') or f'game{getattr(game, "id", 0)}')
+            except Exception:
+                pass
             # Sysop name for Synchronet @SYSOP@ expansion. Pull from app
             # config when we have a Flask context; otherwise fall back to
             # whatever the spawning process inherited.

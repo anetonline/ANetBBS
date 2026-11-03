@@ -272,6 +272,32 @@ Tokens are case-sensitive. `%P` (Mystic) and `%p` (Synchronet phone)
 are different. Unknown tokens are passed through untouched, so a
 literal `%X` in a path stays as `%X`.
 
+## Environment variables passed to every door
+
+Every door launch (any `door_native`, `door_dos`, `door_dosemu`,
+`door_mystic`, `door_mystic_mps`) gets `BBS_USERNAME`, `BBS_USER_ID`,
+`BBS_REAL_NAME`, `BBS_EMAIL`, `BBS_SECURITY`, `BBS_TIME_LEFT`,
+`BBS_LOGIN_COUNT`, `BBS_NODE_NUMBER`, `BBS_NAME`, and (when a sysop
+name is configured) `BBS_SYSOP_NAME` in its environment — useful for a
+door that wants this info without parsing a drop file.
+
+**`BBS_DOOR_DATA_DIR`** is the important one for anything that writes
+to disk: it resolves to `data/games/doors/<slug>/` and is guaranteed
+writable no matter how the door was launched. A native door's default
+working directory, if you don't set `Game.working_directory`, is its
+own install folder under `doors/<name>/` — fine for reading config,
+but **not writable over SSH/telnet/rlogin** (the systemd unit for
+those only whitelists `data/` and `logs/`; the web UI's unit gets the
+whole install tree, so a door that writes relative to its own
+directory can look fine in testing over the web and then fail with
+`EROFS` the first time someone plays it over SSH). If your door
+persists player data, scores, or lock files, point its data-directory
+config at `$BBS_DOOR_DATA_DIR` rather than a path relative to its own
+install dir. Confirmed live with ANetSlots (2026-11-01): a hardcoded
+`data_dir=data` (relative to the executable) failed with `STORAGE
+step=lock_failed ... errno=30` over SSH; fixed by pointing it at an
+absolute path under `data/` instead.
+
 ## DOS emulator drive layout
 
 `door_dos` (DOSBox) and `door_dosemu` (dosemu2) mount the same three
@@ -302,6 +328,21 @@ driver if the game's **"Requires FOSSIL Driver"** checkbox is on —
 this is deliberate, not a bug: dosemu2's own virtual COM1 (what
 TW2002-style doors expect) conflicts with a FOSSIL driver, so leave
 that checkbox off unless your specific door genuinely needs one.
+
+**The game working dir (`C:`/`H:`) must itself be writable** — unlike
+a `door_native` game (see "Environment variables passed to every
+door" above), there's no env var to redirect writes to: these doors
+are hardcoded, decades-old DOS binaries that look for their drop file
+only in their own current directory, and most also persist save/score
+state the same way. The drop-file copy step described above writes
+into this directory every launch. If `Game.working_directory` (or
+`executable_path`'s directory) resolves outside `data/`, launching
+over SSH/telnet/rlogin now fails fast with a clear "directory is not
+writable" error instead of a silent DOSBox/dosemu failure — install
+these games under `<install>/data/doors/<slug>/` instead of
+`<install>/doors/<name>/` to avoid it, or add the game's actual
+directory to `anetbbs.service`'s `ReadWritePaths` if you'd rather keep
+it where it is.
 
 ## LORD (Legend of the Red Dragon) — bundled, plays out of the box
 

@@ -31,6 +31,17 @@ RestartSec=10
 # that actually launches door games.
 NoNewPrivileges=true
 ProtectSystem=strict
+# ProtectHome=true is only correct for a non-/home install path (the
+# default /opt/anetbbs shown throughout this file). install.sh/update.sh
+# switch anetbbs.service/anetbbs-web.service to ProtectHome=read-only
+# automatically when INSTALL_DIR resolves under /home, /root, or
+# /run/user -- a real outage (2026-10-27) happened because
+# ProtectHome=yes/true unconditionally blocks exec of anything under
+# /home regardless of ReadWritePaths=. This unit isn't auto-generated,
+# so that fix never reached it. If you're installing this add-on
+# manually with INSTALL_DIR under one of those paths, change this line
+# to `ProtectHome=read-only` (and keep ReadWritePaths= below pointed at
+# your real INSTALL_DIR/data) or you will reproduce that outage.
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/opt/anetbbs/data
