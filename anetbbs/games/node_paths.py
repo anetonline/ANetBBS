@@ -56,13 +56,19 @@ def door_data_dir(slug: str) -> str:
     gets the whole install tree writable). This gives every door a
     location it can rely on regardless of how it was launched."""
     safe_slug = re.sub(r'[^A-Za-z0-9_.-]', '_', slug or 'game') or 'game'
+    games_dir = None
     try:
         from ..config import get_config
         cfg = get_config()
-        games_dir = (getattr(cfg, 'GAMES_DATA_DIR', None)
-                     or os.path.join(str(getattr(cfg, 'DATA_DIR', '/tmp/anetbbs-data')), 'games'))
+        games_dir = getattr(cfg, 'GAMES_DATA_DIR', None)
+        if not games_dir:
+            data_dir = getattr(cfg, 'DATA_DIR', None)
+            if data_dir:
+                games_dir = os.path.join(str(data_dir), 'games')
     except Exception:
-        games_dir = '/tmp/anetbbs-data/games'  # nosec B108 -- scratch dir fallback only, GAMES_DATA_DIR-based path used above when available
+        pass
+    if not games_dir:
+        games_dir = '/tmp/anetbbs-data/games'  # nosec B108 -- scratch dir fallback only, GAMES_DATA_DIR/DATA_DIR-based path used above when available
     path = os.path.join(str(games_dir), 'doors', safe_slug)
     try:
         os.makedirs(path, exist_ok=True)
