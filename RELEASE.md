@@ -1,5 +1,5 @@
-# ANetBBS v1.1.66 — CI security-scan fix (November 2026)
+# ANetBBS v1.1.67 — Orphaned door session cleanup fix (November 2026)
 
-A security scan (bandit) caught a real finding in v1.1.65's own fix, after that release had already shipped: the new helper that gives door games a reliable writable storage location built its fallback path from a hardcoded `/tmp` literal inline, rather than through the same pattern already used (and already annotated) for the equivalent fallback a few lines above in the same file.
+A door game session whose underlying process had already exited (for example, after a service restart following an unrelated crash) could be left permanently stuck in the "active" state, shown as still connected with no way for a sysop to disconnect it from the admin UI — the only automatic recovery was a background sweep that only considers sessions over an hour old.
 
-Not a functional bug — the fallback path is only ever used when application config isn't loaded yet (effectively test-only), and the resulting path was always correct. This release simply consolidates the fallback through the existing, already-reviewed pattern so the scanner's static analysis (and anyone reading the code) can see that clearly, with no behavior change for live installs.
+The sysop-initiated disconnect/kick path now finishes cleaning up a door session itself whenever it finds the recorded process already gone, instead of assuming another process will eventually do it.

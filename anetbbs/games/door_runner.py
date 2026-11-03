@@ -2247,7 +2247,22 @@ def terminate_session(session_id):
                     "sent SIGTERM directly to pid %d (its owning process's own "
                     "watcher will finish cleanup)", session_id, gs.pid)
             except ProcessLookupError:
-                pass
+                # pid is already gone -- there is no "owning process" left
+                # to ever run the normal cleanup (its own _pty_reader/
+                # _waitpid_watcher died with it, e.g. a `systemctl restart`
+                # that killed the process group without a graceful
+                # disconnect). Finishing the cleanup here ourselves is the
+                # only way this GameSession row ever leaves 'active' before
+                # node_manager.cleanup_stale_sessions()'s 1-hour backstop --
+                # real incident: a sysop's own door session outlived a
+                # service restart in the DB, showed as still connected, and
+                # the admin "Disconnect" button silently did nothing because
+                # this branch used to just `pass`.
+                logger.info(
+                    "terminate_session: pid %d for session %d is already "
+                    "gone -- no owning process left to clean it up, "
+                    "finishing cleanup here", gs.pid, session_id)
+                _cleanup_session(session_id)
             except OSError as exc:
                 logger.warning('terminate_session: cross-process kill of pid %d '
                                'for session %d failed: %s', gs.pid, session_id, exc)

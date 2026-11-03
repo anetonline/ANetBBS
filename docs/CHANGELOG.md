@@ -1,11 +1,22 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.66`** (November 2026). This file covers `v1.0.0`
+Current release: **`v1.1.67`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.67 — Orphaned door session cleanup fix (November 2026)
+
+A door game session whose underlying process had already exited (for
+example, after a service restart following an unrelated crash) could be
+left permanently stuck in the "active" state, shown as still connected
+with no way for a sysop to disconnect it from the admin UI — the only
+automatic recovery was a background sweep that only considers sessions
+over an hour old. The sysop-initiated disconnect/kick path now finishes
+cleaning up a door session itself whenever it finds the recorded process
+already gone, instead of assuming another process will eventually do it.
 
 ## v1.1.66 — CI security-scan fix (November 2026)
 
