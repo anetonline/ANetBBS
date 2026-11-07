@@ -508,6 +508,11 @@ def login():
             flash('Invalid username or password', 'danger')
             return redirect(url_for('auth.login'))
 
+        # Login bookkeeping commits and expires this ORM object. Do not
+        # adopt a generation created by a concurrent password reset when
+        # login_user later reloads it.
+        verified_auth_version = user.auth_version
+
         if not user.is_active:
             flash('Your account has been deactivated. Please contact an administrator.', 'warning')
             return redirect(url_for('auth.login'))
@@ -531,6 +536,11 @@ def login():
         
         # Update login information
         user.update_login()
+
+        if user.auth_version != verified_auth_version:
+            logout_user()
+            flash('Invalid username or password', 'danger')
+            return redirect(url_for('auth.login'))
 
         login_user(user, remember=True)
         # Caller log row — best effort, never block the login. Created

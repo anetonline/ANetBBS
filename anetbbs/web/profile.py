@@ -440,11 +440,20 @@ def change_password():
             flash('Current password is incorrect.', 'danger')
             return redirect(url_for('profile.change_password'))
 
-        current_user.set_password(form.new_password.data)
+        user = current_user._get_current_object()
+        user.set_password(form.new_password.data)
+        changed_auth_version = user.auth_version
         db.session.commit()
+        # A later concurrent reset may win after this commit expires the
+        # ORM object. Only renew the generation this request actually set.
+        if user.auth_version != changed_auth_version:
+            from flask_login import logout_user
+            logout_user()
+            flash('Your password changed again. Please log in.', 'warning')
+            return redirect(url_for('auth.login'))
         # Keep this browser authenticated under the new generation. Copies
         # of its old cookies, other browsers and terminal sessions expire.
-        login_user(current_user._get_current_object(), remember=True, fresh=True)
+        login_user(user, remember=True, fresh=True)
 
         flash('Password changed successfully!', 'success')
         return redirect(url_for('profile.view_user', username=current_user.username))

@@ -157,3 +157,65 @@ def test_existing_database_migrates_without_mass_logout_or_password_change(accou
         db.session.commit()
         assert login_manager._user_callback(str(uid)) is None
         assert login_manager._user_callback(user.get_id()).id == uid
+
+
+def test_login_cannot_adopt_generation_reset_after_password_verification(account, monkeypatch):
+    app, uid = account
+    from anetbbs.models import User, db
+    from sqlalchemy.orm import Session
+    with app.app_context():
+        engine = db.engine
+    original = User.update_login
+
+    def reset_after_login_commit(user):
+        original(user)  # Expires the request's ORM object.
+        with Session(engine) as independent:
+            target = independent.get(User, uid)
+            target.set_password('concurrent-reset-password')
+            independent.commit()
+
+    monkeypatch.setattr(User, 'update_login', reset_after_login_commit)
+    client = app.test_client()
+    response = client.post('/auth/login', data={
+        'username': 'recovery-user', 'password': 'original-password'})
+    assert response.status_code == 302
+    assert '/auth/login' in response.location
+    _assert_revoked(client)
+
+
+def test_password_change_cannot_adopt_a_later_concurrent_reset(account, monkeypatch):
+    app, uid = account
+    from anetbbs.models import User, db
+    from sqlalchemy.orm import Session
+    client = _login(app)
+    with app.app_context():
+        engine = db.engine
+    original_set = User.set_password
+    original_commit = db.session.commit
+    pending = False
+
+    def replace_password(user, password):
+        nonlocal pending
+        original_set(user, password)
+        if user.id == uid and password == 'replacement-password':
+            pending = True
+
+    def commit_then_reset():
+        nonlocal pending
+        original_commit()
+        if pending:
+            pending = False
+            with Session(engine) as independent:
+                target = independent.get(User, uid)
+                target.set_password('concurrent-reset-password')
+                independent.commit()
+
+    monkeypatch.setattr(User, 'set_password', replace_password)
+    monkeypatch.setattr(db.session, 'commit', commit_then_reset)
+    response = client.post('/profile/change-password', data={
+        'current_password': 'original-password',
+        'new_password': 'replacement-password',
+        'confirm_password': 'replacement-password'})
+    assert response.status_code == 302
+    assert '/auth/login' in response.location
+    _assert_revoked(client)
