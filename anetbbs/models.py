@@ -4,6 +4,7 @@ Database models for ANetBBS
 Supports both SQLite (development) and PostgreSQL (production)
 """
 from datetime import datetime
+import secrets
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from sqlalchemy import event
@@ -73,6 +74,9 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False, index=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
+    # NULL preserves pre-upgrade cookies until the first password change.
+    # A random generation also revokes remember cookies and terminal logins.
+    auth_version = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     last_login = db.Column(db.DateTime)
     login_count = db.Column(db.Integer, default=0)
@@ -168,7 +172,15 @@ class User(UserMixin, db.Model):
     
     def set_password(self, password):
         """Hash and set user password"""
+        if self.password_hash:
+            self.auth_version = secrets.token_urlsafe(32)
         self.password_hash = generate_password_hash(password)
+
+    def get_id(self):
+        """Bind Flask-Login cookies to the current authentication generation."""
+        if self.auth_version:
+            return f'{self.id}:{self.auth_version}'
+        return str(self.id)
     
     def check_password(self, password):
         """Verify user password"""

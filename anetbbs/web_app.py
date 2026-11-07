@@ -22,11 +22,12 @@ from datetime import datetime
 from flask import Flask, request, render_template
 from flask_login import LoginManager, current_user
 from flask_migrate import Migrate
-from flask_socketio import SocketIO, join_room
+from flask_socketio import join_room
 from flask_wtf.csrf import CSRFProtect
 
 from .models import db, User, Theme, UserSession
 from .config import get_config
+from .session_auth import RevokingSocketIO
 
 
 # Initialize extensions
@@ -35,7 +36,7 @@ migrate = Migrate()
 # Bump heartbeat to 60s timeout / 25s interval so a slow IRC MOTD or
 # brief network blip doesn't kick the user. Defaults (5s timeout) were
 # dropping users immediately after MOTD floods.
-socketio = SocketIO(async_mode='eventlet',
+socketio = RevokingSocketIO(async_mode='eventlet',
                     ping_timeout=60,
                     ping_interval=25)
 csrf = CSRFProtect()
@@ -178,8 +179,17 @@ def create_app(config_name=None):
         # logged-out (AnonymousUserMixin) starting on the very next
         # request after a ban/lock takes effect, for both the plain
         # session and the remember-cookie path alike.
-        user = User.query.get(int(user_id))
+        # Legacy numeric cookies are valid only while auth_version is NULL.
+        # Both session and remember cookies use this same generation check.
+        try:
+            numeric_id = int(str(user_id).split(':', 1)[0])
+        except (ValueError, TypeError):
+            return None
+        user = db.session.get(User, numeric_id)
         if user is None:
+            return None
+        import hmac
+        if not hmac.compare_digest(str(user_id).encode(), user.get_id().encode()):
             return None
         if not user.is_active or user.is_locked:
             return None
@@ -783,6 +793,12 @@ def create_app(config_name=None):
     with app.app_context():
         db.create_all()
         _lightweight_migrate(app)
+        # Authentication must not silently continue with a missing security
+        # column when an existing database could not be migrated.
+        from sqlalchemy import inspect as _inspect
+        if 'auth_version' not in {
+                c['name'] for c in _inspect(db.engine).get_columns('users')}:
+            raise RuntimeError('Missing users.auth_version; migrate the database before startup')
         try:
             _create_default_data()
         except Exception as exc:
@@ -1215,6 +1231,10 @@ def _lightweight_migrate(app):
         except Exception as exc:
             app.logger.warning(
                 f'Could not add index {index_name} on {table}.{col_name}: {exc}')
+
+    # Authentication generation for existing installations; leave old rows
+    # NULL so their numeric login cookies remain valid until password change.
+    _ensure_column('users', 'auth_version', 'VARCHAR(64)')
 
     # Posts: pinning + locking
     _ensure_column('posts', 'is_pinned',

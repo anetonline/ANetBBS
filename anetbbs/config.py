@@ -261,6 +261,9 @@ class Config:
     # Public hostname/domain shown on the About page connect commands.
     # Defaults to whatever Host header the request carries.
     BBS_DOMAIN = os.environ.get('BBS_DOMAIN', '')
+    # Trusted external origin for password recovery, never inferred from
+    # Host/X-Forwarded-Host. Blank uses the configured BBS_DOMAIN over HTTPS.
+    PUBLIC_BASE_URL = os.environ.get('PUBLIC_BASE_URL', '')
     # Personal web-pages toggle. When true, the app serves the contents
     # of {DATA_DIR}/personal_pages/ at the BBS root URL — e.g. dropping
     # a `photography/` folder makes it visible at /photography/ with
@@ -713,6 +716,7 @@ class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
     WTF_CSRF_ENABLED = False
+    PUBLIC_BASE_URL = 'http://localhost'
 
 
 # Configuration dictionary

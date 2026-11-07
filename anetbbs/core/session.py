@@ -1339,7 +1339,9 @@ class BBSSession:
         as offline/never showed up at all" symptom at the source, for
         every consumer of NodeActivity, not just one of them.
 
-        Polls every 5 seconds while we have a NodeActivity row.
+        Polls every 5 seconds for an authenticated session, even when
+        its presence row could not be created. Password generation
+        changes invalidate the login snapshot on every transport.
 
         Real gap found in a security/performance audit: the web session
         path already rechecks is_active/is_locked on every single
@@ -1359,11 +1361,12 @@ class BBSSession:
                 try:
                     await asyncio.sleep(5)
                     nid = getattr(self, '_node_activity_id', None)
-                    if not nid:
+                    if not nid and not (getattr(self, 'user', None) or {}).get('id'):
                         return
                     from ..models import NodeActivity, User, db as _db
                     from ..features.bbs_ui import _app
                     kicked = False
+                    auth_revoked = False
                     reason = ''
                     with _app().app_context():
                         uid = (getattr(self, 'user', None) or {}).get('id')
@@ -1371,7 +1374,17 @@ class BBSSession:
                         if u is not None and (not u.is_active or u.is_locked):
                             kicked = True
                             reason = 'your account has been locked or deactivated'
-                        row = NodeActivity.query.get(nid)
+                        elif u is not None and (
+                                getattr(u, 'auth_version', None)
+                                != (getattr(self, 'user', None) or {}).get('auth_version')):
+                            # Password changes/recovery revoke existing terminal
+                            # logins too, including SSH-key sessions and doors.
+                            # Closing the transport makes door input pumps reach
+                            # EOF and run their existing subprocess cleanup.
+                            kicked = True
+                            auth_revoked = True
+                            reason = 'your password changed; please log in again'
+                        row = NodeActivity.query.get(nid) if nid else None
                         if row and row.kick_requested:
                             kicked = True
                             reason = row.kick_reason or 'Disconnected by sysop'
@@ -1391,9 +1404,13 @@ class BBSSession:
                                 _db.session.rollback()
                     if kicked:
                         try:
-                            await self.write(
+                            message = (
                                 f"\r\n\r\n\x1b[1;31m*** Disconnected by "
                                 f"sysop: {reason} ***\x1b[0m\r\n")
+                            if auth_revoked:
+                                await asyncio.wait_for(self.write(message), timeout=1)
+                            else:
+                                await self.write(message)
                         except Exception:
                             pass
                         try:
