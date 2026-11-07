@@ -163,3 +163,53 @@ def test_invalid_configured_origin_fails_closed(app, invalid):
 def test_recovery_host_restriction_does_not_apply_to_login(app):
     response = app.test_client().get('/auth/login', base_url='https://other.invalid')
     assert response.status_code == 200
+
+
+def test_international_origin_preserves_modern_dns_identity(app):
+    from anetbbs.web.auth import _password_recovery_origin, _check_password_recovery_host
+
+    app.config['PUBLIC_BASE_URL'] = 'https://faß.invalid'
+    with app.test_request_context('/auth/forgot', base_url='https://localhost',
+                                  headers={'Host': 'xn--fa-hia.invalid'}):
+        assert _password_recovery_origin() == 'https://xn--fa-hia.invalid'
+        assert _check_password_recovery_host() is None
+
+
+def test_international_origin_never_issues_tokens_to_idna2003_alias(app):
+    from anetbbs.models import PasswordResetToken
+
+    app.config['PUBLIC_BASE_URL'] = 'https://faß.invalid'
+    response, urls = _request_email(app, 'https://fass.invalid')
+    assert response.status_code == 400
+    assert urls == []
+    with app.app_context():
+        assert PasswordResetToken.query.count() == 0
+
+
+def test_international_origin_email_uses_the_browser_ascii_hostname(app):
+    app.config['PUBLIC_BASE_URL'] = 'https://faß.invalid'
+    # Dispatch the real endpoint without the test client's cookie jar,
+    # whose URL decoding itself uses IDNA2003 and rejects this valid host.
+    with app.test_request_context(
+            '/auth/forgot', method='POST', base_url='https://localhost',
+            headers={'Host': 'xn--fa-hia.invalid'},
+            data={'identifier': 'originuser'}), \
+            mock.patch('anetbbs.mailer.smtp_enabled', return_value=True), \
+            mock.patch('anetbbs.mailer.send_password_reset_email') as send, \
+            mock.patch('anetbbs.web.auth.threading.Thread') as thread:
+        response = app.full_dispatch_request()
+        callback = thread.call_args.kwargs
+        callback['target'](*callback['args'])
+    assert response.status_code == 200
+    assert urlsplit(send.call_args.args[1]).netloc == 'xn--fa-hia.invalid'
+
+
+@pytest.mark.parametrize(('configured', 'requested'), [
+    ('[0:0:0:0:0:0:0:1]', '[::1]'),
+    ('[::1]', '[0:0:0:0:0:0:0:1]'),
+])
+def test_equivalent_ipv6_authorities_use_one_canonical_origin(app, configured, requested):
+    app.config['PUBLIC_BASE_URL'] = f'http://{configured}:5000'
+    response, urls = _request_email(app, f'http://{requested}:5000')
+    assert response.status_code == 200
+    assert urlsplit(urls[0]).netloc == '[::1]:5000'

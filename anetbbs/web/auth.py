@@ -4,10 +4,10 @@ Authentication blueprint for user login, registration, and logout
 """
 import random
 import ipaddress
-import re
 import secrets
 import threading
 import time
+import idna
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 from sqlalchemy.exc import IntegrityError
@@ -282,11 +282,14 @@ def _password_recovery_origin():
                 or parts.path not in ('', '/') or '?' in raw or '#' in raw
                 or (port is not None and not 0 < port <= 65535)):
             raise ValueError
-        host = parts.hostname.encode('idna').decode('ascii').lower()
+        host = parts.hostname
         if ':' in host:
-            ipaddress.IPv6Address(host)
-        elif not re.fullmatch(r'[a-z0-9.-]+', host) or not host.strip('.'):
-            raise ValueError
+            host = str(ipaddress.IPv6Address(host))
+        else:
+            # Built-in IDNA2003 maps e.g. faß to fass, a different DNS
+            # origin. Use browsers' non-transitional UTS46 identity.
+            host = idna.encode(host, uts46=True, std3_rules=True,
+                               transitional=False).decode('ascii').lower()
     except (ValueError, UnicodeError):
         raise ValueError('Password recovery requires a valid HTTP(S) origin') from None
     if ':' in host:  # Preserve IPv6 authority brackets.
@@ -314,8 +317,11 @@ def _check_password_recovery_host():
     try:
         host = request.host
         supplied = urlsplit('http://' + host)
+        supplied_host = supplied.hostname or ''
+        if ':' in supplied_host:
+            supplied_host = str(ipaddress.IPv6Address(supplied_host))
         default_port = 443 if origin.scheme == 'https' else 80
-        matches = (supplied.hostname == origin.hostname
+        matches = (supplied_host == origin.hostname
                    and (supplied.port if supplied.port is not None else default_port)
                    == (origin.port if origin.port is not None else default_port)
                    and supplied.username is None and supplied.password is None
