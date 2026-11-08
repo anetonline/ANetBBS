@@ -7,16 +7,16 @@
 <span class="vote-widget" data-msg-type="{{ msg_type }}" data-msg-id="{{ msg_id }}">
     <button type="button"
             class="btn btn-sm vote-btn vote-up{% if tally.my_vote > 0 %} active{% endif %}"
-            title="Upvote"
+            title="{{ t('common.upvote', 'Upvote') }}"
             {% if not current_user.is_authenticated %}disabled{% endif %}
             data-value="1">
         <i class="bi bi-hand-thumbs-up{% if tally.my_vote > 0 %}-fill{% endif %}"></i>
         <span class="vote-up-count">{{ tally.up }}</span>
     </button>
-    <span class="vote-score mx-1" title="Net score">{{ tally.score }}</span>
+    <span class="vote-score mx-1" title="{{ t('common.net_score', 'Net score') }}">{{ tally.score }}</span>
     <button type="button"
             class="btn btn-sm vote-btn vote-down{% if tally.my_vote < 0 %} active{% endif %}"
-            title="Downvote"
+            title="{{ t('common.downvote', 'Downvote') }}"
             {% if not current_user.is_authenticated %}disabled{% endif %}
             data-value="-1">
         <i class="bi bi-hand-thumbs-down{% if tally.my_vote < 0 %}-fill{% endif %}"></i>

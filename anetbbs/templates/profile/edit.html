@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Edit Profile - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t('profile.edit_title', 'Edit Profile') }} - {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
 <div class="bbs-header">
-    <h1><i class="bi bi-person-gear"></i> Edit Profile</h1>
+    <h1><i class="bi bi-person-gear"></i> {{ t('profile.edit_title', 'Edit Profile') }}</h1>
 </div>
 
 {# Avatar-remove form lives OUTSIDE the main profile form. HTML forbids
@@ -21,17 +21,27 @@
 
 <form method="post" enctype="multipart/form-data">
     {{ form.hidden_tag() }}
+    {% if form.errors %}
+    <div class="alert alert-danger" role="alert">
+        <p class="mb-1">{{ t('profile.correct_errors', 'Please correct the errors below.') }}</p>
+        <ul class="mb-0">
+        {% for field in form if field.errors %}
+            {% for error in field.errors %}<li>{{ field.label.text }}: {{ error }}</li>{% endfor %}
+        {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
 
     <div class="row g-3">
         <!-- Basic Info -->
         <div class="col-md-6">
             <div class="card">
-                <div class="card-header"><i class="bi bi-person"></i> Basic Info</div>
+                <div class="card-header"><i class="bi bi-person"></i> {{ t('profile.basic_info', 'Basic Info') }}</div>
                 <div class="card-body">
                     {% if field_config.display_name %}
                     <div class="mb-3">
                         {{ form.display_name.label(class="form-label") }}
-                        {{ form.display_name(class="form-control", placeholder="Your display name") }}
+                        {{ form.display_name(class="form-control", placeholder=t('profile.display_name_placeholder', 'Your display name')) }}
                     </div>
                     {% endif %}
                     <div class="mb-3">
@@ -43,13 +53,13 @@
                     <div class="mb-3">
                         {{ form.bio.label(class="form-label") }}
                         {{ form.bio(class="form-control", rows="4", maxlength="500", id="bio-textarea") }}
-                        <small><span id="bio-count">0</span>/500 characters</small>
+                        <small><span id="bio-count">0</span>/500 {{ t('profile.characters', 'characters') }}</small>
                     </div>
                     {% endif %}
                     {% if field_config.location %}
                     <div class="mb-3">
                         {{ form.location.label(class="form-label") }}
-                        {{ form.location(class="form-control", placeholder="City, Country") }}
+                        {{ form.location(class="form-control", placeholder=t('profile.location_placeholder', 'City, Country')) }}
                     </div>
                     {% endif %}
                     {% if field_config.website %}
@@ -65,11 +75,11 @@
         <!-- Avatar -->
         <div class="col-md-6">
             <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-image"></i> Avatar</div>
+                <div class="card-header"><i class="bi bi-image"></i> {{ t('profile.avatar', 'Avatar') }}</div>
                 <div class="card-body">
                     <div class="text-center mb-3">
                         {% if avatar %}
-                            <img src="{{ avatar }}" alt="Current Avatar" class="rounded-circle" style="width:100px;height:100px;object-fit:cover;border:2px solid var(--theme-primary);">
+                            <img src="{{ avatar }}" alt="{{ t('profile.current_avatar', 'Current Avatar') }}" class="rounded-circle" style="width:100px;height:100px;object-fit:cover;border:2px solid var(--theme-primary);">
                         {% else %}
                             <i class="bi bi-person-circle" style="font-size:5rem;"></i>
                         {% endif %}
@@ -79,13 +89,13 @@
                         {{ form.avatar_url(class="form-control", placeholder="https://example.com/avatar.jpg") }}
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Or Upload Avatar</label>
+                        <label class="form-label">{{ t('profile.or_upload_avatar', 'Or Upload Avatar') }}</label>
                         {{ form.avatar_file(class="form-control") }}
                         {% for e in form.avatar_file.errors %}<div class="text-danger">{{ e }}</div>{% endfor %}
-                        <small>Max 2MB. JPG, PNG, GIF, WebP allowed.</small>
+                        <small>{{ t('profile.avatar_help', 'Max 2MB. JPG, PNG, GIF, WebP allowed.') }}</small>
                     </div>
                     {% if avatar %}
-                    <button type="submit" form="remove_avatar_form" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i> Remove Avatar</button>
+                    <button type="submit" form="remove_avatar_form" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i> {{ t('profile.remove_avatar', 'Remove Avatar') }}</button>
                     {% endif %}
                 </div>
             </div>
@@ -93,7 +103,7 @@
             {% if field_config.show_email or field_config.date_of_birth %}
             <!-- Privacy -->
             <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-shield"></i> Privacy</div>
+                <div class="card-header"><i class="bi bi-shield"></i> {{ t('profile.privacy', 'Privacy') }}</div>
                 <div class="card-body">
                     {% if field_config.show_email %}
                     <div class="mb-3 form-check">
@@ -118,18 +128,18 @@
 
             <!-- Security -->
             <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-shield-lock"></i> Account Security</div>
+                <div class="card-header"><i class="bi bi-shield-lock"></i> {{ t('profile.account_security', 'Account Security') }}</div>
                 <div class="card-body">
                     <a href="{{ url_for('profile.change_password') }}" class="btn btn-outline-secondary btn-sm w-100 mb-2">
-                        <i class="bi bi-key"></i> Change Password
+                        <i class="bi bi-key"></i> {{ t('profile.change_password', 'Change Password') }}
                     </a>
                     <a href="{{ url_for('profile.security_questions') }}" class="btn btn-outline-secondary btn-sm w-100 mb-2">
-                        <i class="bi bi-question-circle"></i> Security Questions
-                        <span class="text-muted">(for password recovery)</span>
+                        <i class="bi bi-question-circle"></i> {{ t('profile.security_questions', 'Security Questions') }}
+                        <span class="text-muted">{{ t('profile.for_recovery', '(for password recovery)') }}</span>
                     </a>
                     <a href="{{ url_for('profile.ssh_keys') }}" class="btn btn-outline-secondary btn-sm w-100">
-                        <i class="bi bi-terminal"></i> SSH Keys
-                        <span class="text-muted">(password-free SSH login)</span>
+                        <i class="bi bi-terminal"></i> {{ t('profile.ssh_keys', 'SSH Keys') }}
+                        <span class="text-muted">{{ t('profile.ssh_login_help', '(password-free SSH login)') }}</span>
                     </a>
                 </div>
             </div>
@@ -139,10 +149,10 @@
         <!-- Signature -->
         <div class="col-12">
             <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-pen"></i> Forum Signature</div>
+                <div class="card-header"><i class="bi bi-pen"></i> {{ t('profile.signature_label', 'Forum Signature') }}</div>
                 <div class="card-body">
                     {{ form.signature(class="form-control", rows="3", maxlength="200", id="sig-textarea") }}
-                    <small><span id="sig-count">0</span>/200 characters</small>
+                    <small><span id="sig-count">0</span>/200 {{ t('profile.characters', 'characters') }}</small>
                 </div>
             </div>
         </div>
@@ -152,7 +162,7 @@
         <!-- FTN Tagline -->
         <div class="col-12">
             <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-quote"></i> FTN Tagline</div>
+                <div class="card-header"><i class="bi bi-quote"></i> {{ t('profile.tagline_label', 'FTN Tagline') }}</div>
                 <div class="card-body">
                     {{ form.tagline(class="form-control", maxlength="160") }}
                     <small class="text-muted">{{ form.tagline.description }}</small>
@@ -163,7 +173,7 @@
         <!-- Echomail / Netmail identity -->
         <div class="col-12">
             <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-fingerprint"></i> Echomail / Netmail Identity</div>
+                <div class="card-header"><i class="bi bi-fingerprint"></i> {{ t('profile.mail_identity', 'Echomail / Netmail Identity') }}</div>
                 <div class="card-body">
                     <div class="mb-3">
                         {{ form.real_name.label(class="form-label") }}
@@ -184,10 +194,21 @@
         </div>
         {% endif %}
 
+        <div class="col-12">
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-translate"></i> {{ t('profile.language_preferences', 'Language Preferences') }}</div>
+                <div class="card-body">
+                    {{ form.language.label(class="form-label") }}
+                    {{ form.language(class="form-select") }}
+                    {% for error in form.language.errors %}<div class="text-danger">{{ error }}</div>{% endfor %}
+                </div>
+            </div>
+        </div>
+
         <!-- Theme -->
         <div class="col-12">
             <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-palette"></i> Theme</div>
+                <div class="card-header"><i class="bi bi-palette"></i> {{ t('profile.theme', 'Theme') }}</div>
                 <div class="card-body">
                     <div class="mb-3">
                         {{ form.theme_id.label(class="form-label") }}
@@ -244,7 +265,7 @@
                     </script>
                     {% endif %}
                     <div class="mt-2">
-                        <a href="{{ url_for('profile.themes') }}" class="btn btn-sm btn-primary"><i class="bi bi-eye"></i> Preview All Themes</a>
+                        <a href="{{ url_for('profile.themes') }}" class="btn btn-sm btn-primary"><i class="bi bi-eye"></i> {{ t('profile.preview_all_themes', 'Preview All Themes') }}</a>
                     </div>
                 </div>
             </div>
@@ -253,7 +274,7 @@
         <!-- Terminal Capabilities -->
         <div class="col-12">
             <div class="card mb-3">
-                <div class="card-header"><i class="bi bi-terminal"></i> Terminal Capabilities</div>
+                <div class="card-header"><i class="bi bi-terminal"></i> {{ t('profile.terminal_capabilities', 'Terminal Capabilities') }}</div>
                 <div class="card-body">
                     <div class="mb-1">
                         {{ form.sixel_mode.label(class="form-label") }}
@@ -283,7 +304,7 @@
 
     {% if custom_fields_list %}
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-card-list"></i> Additional Info</div>
+        <div class="card-header"><i class="bi bi-card-list"></i> {{ t('profile.additional_info', 'Additional Info') }}</div>
         <div class="card-body">
             <div class="row g-2">
             {% for cf in custom_fields_list %}
@@ -295,7 +316,7 @@
                     {% elif cf.field_type == 'select' %}
                         {% set choices = cf.choices | from_json if cf.choices else [] %}
                         <select name="cf_{{ cf.name }}" class="form-select form-select-sm">
-                            <option value="">-- select --</option>
+                            <option value="">{{ t('profile.select', '-- select --') }}</option>
                             {% for c in choices %}
                             <option value="{{ c }}" {% if val == c %}selected{% endif %}>{{ c }}</option>
                             {% endfor %}
@@ -313,8 +334,8 @@
 
     <div class="d-flex gap-2 mb-3">
         {{ form.submit(class="btn btn-primary") }}
-        <a href="{{ url_for('profile.index') }}" class="btn btn-secondary">Cancel</a>
-        <a href="{{ url_for('profile.change_password') }}" class="btn btn-primary"><i class="bi bi-key"></i> Change Password</a>
+        <a href="{{ url_for('profile.index') }}" class="btn btn-secondary">{{ t('profile.cancel', 'Cancel') }}</a>
+        <a href="{{ url_for('profile.change_password') }}" class="btn btn-primary"><i class="bi bi-key"></i> {{ t('profile.change_password', 'Change Password') }}</a>
     </div>
 </form>
 {% endblock %}

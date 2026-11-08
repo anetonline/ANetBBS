@@ -1,31 +1,30 @@
 {% extends "base.html" %}
 
-{% block title %}Security Questions - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t('profile.security_questions', 'Security Questions') }} - {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
 <div class="bbs-header">
-    <h1><i class="bi bi-shield-lock"></i> Security Questions</h1>
+    <h1><i class="bi bi-shield-lock"></i> {{ t('profile.security_questions', 'Security Questions') }}</h1>
 </div>
 
 <div class="row justify-content-center">
     <div class="col-md-7">
         <div class="card mb-3">
-            <div class="card-header">Password Recovery Questions</div>
+            <div class="card-header">{{ t('profile.recovery_questions', 'Password Recovery Questions') }}</div>
             <div class="card-body">
                 <p class="text-muted">
-                    Set up to 3 security questions. If you forget your password, you can answer
-                    one of these instead of waiting for the sysop. Answers are not case-sensitive.
+                    {{ t('profile.security_questions_help', 'Set up to 3 security questions. If you forget your password, you can answer\n                    one of these instead of waiting for the sysop. Answers are not case-sensitive.') }}
                 </p>
 
                 {% if current_answers %}
                 <div class="alert alert-success py-2">
                     <i class="bi bi-check-circle"></i>
-                    {{ current_answers|length }} question{{ 's' if current_answers|length != 1 }} currently set.
+                    {{ t('profile.questions_count', '{count} security questions currently set.', count=current_answers|length) }}
                 </div>
                 {% else %}
                 <div class="alert alert-warning py-2">
                     <i class="bi bi-exclamation-triangle"></i>
-                    No security questions set. Without them, only a sysop can reset your password.
+                    {{ t('profile.no_security_questions', 'No security questions set. Without them, only a sysop can reset your password.') }}
                 </div>
                 {% endif %}
 
@@ -35,9 +34,9 @@
                     {% set existing = current_answers[i-1] if current_answers|length >= i else none %}
                     <div class="border rounded p-3 mb-3">
                         <div class="mb-2">
-                            <label class="form-label fw-semibold">Question {{ i }}</label>
+                            <label class="form-label fw-semibold">{{ t('profile.question_number', 'Question {number}', number=i) }}</label>
                             <select name="question_{{ i }}" class="form-select">
-                                <option value="">(none)</option>
+                                <option value="">{{ t('profile.none', '(none)') }}</option>
                                 {% for q in q_choices %}
                                 <option value="{{ q[0] }}" {% if existing and existing.question == q[0] %}selected{% endif %}>
                                     {{ q[1] }}
@@ -46,14 +45,14 @@
                             </select>
                         </div>
                         <div>
-                            <label class="form-label">Answer</label>
+                            <label class="form-label">{{ t('profile.answer', 'Answer') }}</label>
                             <input type="text" name="answer_{{ i }}" class="form-control"
-                                   placeholder="{% if existing %}Leave blank to keep current answer{% else %}Your answer{% endif %}">
+                                   placeholder="{% if existing %}{{ t('profile.keep_answer', 'Leave blank to keep current answer') }}{% else %}{{ t('profile.your_answer', 'Your answer') }}{% endif %}">
                         </div>
                     </div>
                     {% endfor %}
-                    <button class="btn btn-primary">Save Security Questions</button>
-                    <a href="{{ url_for('profile.edit') }}" class="btn btn-secondary ms-2">Cancel</a>
+                    <button class="btn btn-primary">{{ t('profile.save_questions', 'Save Security Questions') }}</button>
+                    <a href="{{ url_for('profile.edit') }}" class="btn btn-secondary ms-2">{{ t('profile.cancel', 'Cancel') }}</a>
                 </form>
             </div>
         </div>

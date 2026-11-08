@@ -368,44 +368,72 @@ audit rounds) of the exact pattern to follow.
 
 ### Translating a web template string
 
-`{{ t('some.key', 'Default text') }}` in any template translates
-`'Default text'` for the current viewer's language, falling back to
-the default (or the key itself, if no default is given) whenever the
-viewer is logged out, has no `language` preference set, is set to
-`'en'`, or no `MenuTranslation` row exists for that key. The common
-case (English, the default for every account) does zero database
-queries.
+Use `{{ t('some.key', 'English source text') }}` in templates, or
+`translate('some.key', 'English source text')` from
+`anetbbs.features.i18n` in Python. Both use the existing
+`MenuTranslation` table; English remains the installation/account default
+and the fallback for missing keys. English needs no catalogue queries;
+other languages load one catalogue per request, shared by templates and
+forms. Terminal menus still use their existing batched lookup.
 
-This is the web-UI counterpart to the terminal menu engine's own
-`MenuTranslation` lookup (added in v1.0b2.68, `menu_engine.py`'s
-`_apply_menu_translations()`) — both share the same
-`(lang, key) -> text` lookup helpers in `anetbbs/features/i18n.py`
-rather than maintaining two copies of the fallback logic. Manage
-translation rows at **Admin → Settings → Translations**
-(`/admin/translations`) — add/edit/delete `(language, key, text)`
-rows directly, no SQL needed. The same CRUD is also available from
-`anetbbs-cfg` (SSH/console)'s own **Translations** section.
+Use namespaced keys (`nav.*`, `auth.*`, `boards.*`, `messages.*`,
+`profile.*`, `menu.<name>.title`, `menu.<name>.item.<hotkey>`). Named
+placeholders use `t('key', 'Hello, {username}!', username=user.username)`;
+keep their names intact in translations. The WTForms `FormTranslations`
+adapter uses the same catalogue and preserves WTForms' `%(min)d` /
+`%(max)d` placeholders and singular/plural selection. Bind form labels
+and custom validator messages per instance, never at module import or by
+mutating validators shared between requests. Keep ordinary Jinja escaping;
+translations are plain text, not trusted HTML. JavaScript strings use
+`tojson` (and `forceescape` inside HTML attributes).
 
-**Current coverage**: the top-level nav bar (`base.html`) and the
-Message Boards page heading — a first pass, not full coverage.
-Extending this to more templates is just adding `t()` calls with a
-new key + English default; nothing else to wire up per template.
+**Enabling Spanish:** select **Español** in the navigation language
+selector and apply it, including before login. The CSRF-protected selector
+stores the explicit choice in the session and a one-year language-only
+cookie, without extending authentication sessions. A signed-in account's
+`User.language` takes precedence; successful login restores its preference,
+new accounts inherit the visitor's selected language, and logout retains
+that selection. Change it with the selector or **Profile → Edit Profile →
+Language**. The profile retains existing German, Portuguese and custom
+language preferences too. The same `User.language = 'es'` selects the
+Spanish terminal menus after reconnecting the terminal session.
 
-**Known limitation**: logged-out visitors have no way to select a
-language before logging in — `current_user.language` only exists
-once an account exists and is signed in, and there's no cookie/
-session-based language picker for anonymous traffic today. A
-pre-login page (the login form itself, the public landing page)
-can't be localized under the current design; this only covers what
-an authenticated user sees after signing in. Worth solving properly
-in a future round (a language-select control on the login/landing
-page, stored in a session cookie) rather than working around it here.
+Defaults are inserted on normal application startup (no schema migration
+or extra dependency). `seed_default_translations()` is idempotent and
+never replaces existing `(lang, key)` rows. SysOps can add/edit overrides
+at **Admin → Settings → Translations** (`/admin/translations`) or in
+`anetbbs-cfg`'s **Translations** section. Reloading defaults preserves
+those edits. Do not wrap user posts, names, board descriptions, MOTDs,
+custom profile fields, security-question text or other SysOp content in
+`t()`.
 
-Pick translation keys namespaced by area, matching the terminal side's
-own `menu.<name>.title`/`menu.<name>.item.<hotkey>` convention — e.g.
-`nav.<item>` for nav bar entries, `boards.heading` for the board list.
-Keeps two different areas from ever colliding on the same key by
-accident.
+**Spanish first-release coverage:** common navigation and home widgets;
+login, registration, verification and password recovery; board listing,
+reading, posting, replying and search; private messages; profile and its
+language preference; generated titles/items in the four built-in terminal
+menus (`main`, `chat_systems`, `game_center`, `sysop_tools`). Hotkeys and
+actions remain unchanged. Bundled terminal translations apply only to
+unchanged built-in labels/actions; custom menu text remains intact.
+Explicitly edited translation rows can still override custom menu text.
+Local private-message bodies keep their original Unicode characters using
+the existing renderer's identity charset path (ANSI/escaping stay enabled).
+With the existing schema, a row exactly equal to the shipped translation
+is treated as bundled because rows have no separate provenance flag.
+
+**Limits:** this is not a complete translation. Admin tools, games, feature
+bodies and prompts inside terminal applications, the optional pre-login web
+matrix, `.ans`/`.asc` art and other pages are outside this first release.
+Generated menu labels fit the existing fixed-width cells. UTF-8 preserves
+accents; CP437 supports the lowercase Spanish accents but lacks several
+accented capitals, so a menu title retains its original case when its
+uppercase form cannot be encoded. Existing PETSCII/other codepage limits
+remain; this does not replace terminal encoding or rendering.
+
+The focused regression suites are reproducible with:
+
+```bash
+venv/bin/python -m pytest tests/test_spanish_localization.py tests/test_spanish_terminal_menus.py
+```
 
 ### Adding a sysop admin page
 

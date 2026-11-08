@@ -4,7 +4,8 @@ User profile blueprint - enhanced with avatars, bio, themes
 """
 import os
 import uuid
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_from_directory
+from copy import deepcopy
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_from_directory, session
 from flask_login import login_required, current_user
 from wtforms import StringField, PasswordField, SubmitField, TextAreaField, BooleanField, SelectField, DateField
 from wtforms.validators import DataRequired, EqualTo, Length, Optional, ValidationError
@@ -14,6 +15,7 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 
 from .validators import PermissiveEmail as Email
+from ..features.i18n import translate as _t, FormTranslations
 from ..models import (db, User, Post, Theme, UserSession, UserSecurityAnswer,
                       SecurityQuestion, PasswordRecoverySettings, UserField,
                       UserFieldValue, get_builtin_field_config, UserSSHKey)
@@ -29,6 +31,32 @@ def _active_security_question_texts():
             .all()]
 
 profile_bp = Blueprint('profile', __name__, url_prefix='/profile')
+
+
+def _localize_form(form, prefix='profile.field'):
+    """Translate bound fields, keeping shared class-level validators intact."""
+    for name, field in form._fields.items():
+        if name == 'csrf_token':
+            continue
+        field.label.text = _t(f'{prefix}.{name}', field.label.text)
+        if field.description:
+            field.description = _t(f'profile.description.{name}', field.description)
+        if isinstance(field, SelectField) and name not in ('theme_id', 'language'):
+            field.choices = [(value, _t(f'profile.choice.{name}.{value}', label))
+                             for value, label in field.choices]
+        # Explicit messages bypass WTForms' gettext adapter. Validators are
+        # otherwise shared between requests, so only update private copies.
+        field.validators = deepcopy(field.validators)
+        for validator in field.validators:
+            if isinstance(validator, Email):
+                validator.message = _t('profile.invalid_email', 'Invalid email address.')
+            elif isinstance(validator, FileAllowed):
+                validator.message = _t('profile.images_only', 'Images only!')
+            elif isinstance(validator, Length) and validator.message:
+                validator.message = _t('profile.password_min_length',
+                                       'Password must be at least 6 characters')
+            elif isinstance(validator, EqualTo) and validator.message:
+                validator.message = _t('profile.passwords_must_match', 'Passwords must match')
 
 
 def get_avatar_url(user):
@@ -83,6 +111,7 @@ class UpdateProfileForm(FlaskForm):
     avatar_url = StringField('Avatar URL', validators=[Optional(), Length(max=500)])
     avatar_file = WTFFileField('Upload Avatar', validators=[Optional(), FileAllowed(['jpg', 'jpeg', 'png', 'gif', 'webp'], 'Images only!')])
     theme_id = SelectField('Theme', coerce=int, validators=[Optional()])
+    language = SelectField('Language', validators=[Optional()])
     nav_position = SelectField('Nav Position', validators=[Optional()], choices=[
         ('left', 'Left'),
         ('top', 'Top'),
@@ -132,9 +161,24 @@ class UpdateProfileForm(FlaskForm):
         "skips it entirely."))
     submit = SubmitField('Update Profile')
 
+    class Meta(FlaskForm.Meta):
+        def get_translations(self, form):
+            return FormTranslations()
+
     def __init__(self, original_email, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.original_email = original_email
+        self.language.choices = [
+            ('en', _t('profile.language.en', 'English')),
+            ('es', _t('profile.language.es', 'Spanish')),
+            ('de', _t('profile.language.de', 'German')),
+            ('pt', _t('profile.language.pt', 'Portuguese')),
+        ]
+        preferred_language = getattr(current_user, 'language', None) or 'en'
+        if preferred_language not in {value for value, _ in self.language.choices}:
+            # Retain an existing language, including a sysop's custom pack.
+            self.language.choices.append((preferred_language, preferred_language))
+        _localize_form(self)
         # Populate theme choices. Choice 0 (theme_id=None) means "use
         # whatever the site's admin-configured default is" -- label it
         # with that theme's actual name rather than a hardcoded
@@ -145,14 +189,15 @@ class UpdateProfileForm(FlaskForm):
         # unstyled :root CSS base.html renders in that case.
         themes = Theme.query.filter_by(is_active=True).all()
         site_default = Theme.query.filter_by(is_default=True, is_active=True).first()
-        default_label = f'Site Default: {site_default.display_name}' if site_default else 'Site Default: Classic Green'
+        default_label = _t('profile.site_default', 'Site Default: {theme}',
+                           theme=site_default.display_name if site_default else 'Classic Green')
         self.theme_id.choices = [(0, default_label)] + [(t.id, t.display_name) for t in themes]
 
     def validate_email(self, field):
         """Check if email is already taken by another user"""
         if field.data != self.original_email:
             if User.query.filter_by(email=field.data).first():
-                raise ValidationError('Email already registered.')
+                raise ValidationError(_t('profile.email_registered', 'Email already registered.'))
 
 
 class ChangePasswordForm(FlaskForm):
@@ -167,6 +212,14 @@ class ChangePasswordForm(FlaskForm):
         EqualTo('new_password', message='Passwords must match')
     ])
     submit = SubmitField('Change Password')
+
+    class Meta(FlaskForm.Meta):
+        def get_translations(self, form):
+            return FormTranslations()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _localize_form(self, 'profile.password_field')
 
 
 def _save_avatar(file_obj, old_filename=None):
@@ -189,7 +242,7 @@ def _save_avatar(file_obj, old_filename=None):
     file_obj.seek(0)
     max_size = current_app.config.get('AVATAR_MAX_SIZE', 2 * 1024 * 1024)
     if size > max_size:
-        return None, 'Avatar too large. Maximum size is 2MB.'
+        return None, _t('profile.avatar_too_large', 'Avatar too large. Maximum size is 2MB.')
 
     # Save with unique name
     original_name = secure_filename(file_obj.filename)
@@ -341,6 +394,8 @@ def edit():
         current_user.cursor_style = form.cursor_style.data or 'default'
         current_user.echomail_name_pref = form.echomail_name_pref.data or 'handle'
         current_user.msg_scan_pref = form.msg_scan_pref.data or 'ask'
+        if form.language.data:
+            current_user.language = form.language.data
 
         # Handle avatar upload
         if form.avatar_file.data and form.avatar_file.data.filename:
@@ -378,7 +433,8 @@ def edit():
                 db.session.delete(ufv)
 
         db.session.commit()
-        flash('Profile updated successfully!', 'success')
+        session['language'] = current_user.language or 'en'
+        flash(_t('profile.updated_success', 'Profile updated successfully!'), 'success')
         return redirect(url_for('profile.view_user', username=current_user.username))
     elif request.method == 'GET':
         form.display_name.data = current_user.display_name
@@ -399,6 +455,7 @@ def edit():
         form.cursor_style.data = current_user.cursor_style or 'default'
         form.echomail_name_pref.data = current_user.echomail_name_pref or 'handle'
         form.msg_scan_pref.data = current_user.msg_scan_pref or 'ask'
+        form.language.data = current_user.language or 'en'
 
     themes = Theme.query.filter_by(is_active=True).all()
     avatar = get_avatar_url(current_user)
@@ -425,7 +482,7 @@ def remove_avatar():
         current_user.avatar_upload = None
     current_user.avatar_url = None
     db.session.commit()
-    flash('Avatar removed.', 'success')
+    flash(_t('profile.avatar_removed', 'Avatar removed.'), 'success')
     return redirect(url_for('profile.edit'))
 
 
@@ -437,13 +494,13 @@ def change_password():
 
     if form.validate_on_submit():
         if not current_user.check_password(form.current_password.data):
-            flash('Current password is incorrect.', 'danger')
+            flash(_t('profile.current_password_incorrect', 'Current password is incorrect.'), 'danger')
             return redirect(url_for('profile.change_password'))
 
         current_user.set_password(form.new_password.data)
         db.session.commit()
 
-        flash('Password changed successfully!', 'success')
+        flash(_t('profile.password_changed', 'Password changed successfully!'), 'success')
         return redirect(url_for('profile.view_user', username=current_user.username))
 
     return render_template('profile/change_password.html', form=form)
@@ -467,34 +524,38 @@ def ssh_keys():
             raw_key = (request.form.get('public_key') or '').strip()
             label = (request.form.get('label') or '').strip() or None
             if not raw_key:
-                flash('Paste a public key first.', 'danger')
+                flash(_t('profile.paste_public_key', 'Paste a public key first.'), 'danger')
                 return redirect(url_for('profile.ssh_keys'))
             try:
                 parsed = asyncssh.import_public_key(raw_key)
                 fingerprint = parsed.get_fingerprint()
             except asyncssh.KeyImportError:
-                flash('That doesn\'t look like a valid OpenSSH public key '
-                     '(the kind starting with "ssh-ed25519 AAAA..." or '
-                     '"ssh-rsa AAAA...").', 'danger')
+                flash(_t('profile.invalid_public_key',
+                         'That doesn\'t look like a valid OpenSSH public key '
+                         '(the kind starting with "ssh-ed25519 AAAA..." or '
+                         '"ssh-rsa AAAA...").'), 'danger')
                 return redirect(url_for('profile.ssh_keys'))
             existing = UserSSHKey.query.filter_by(fingerprint=fingerprint).first()
             if existing:
                 if existing.user_id == current_user.id:
-                    flash('That key is already registered to your account.', 'warning')
+                    flash(_t('profile.key_already_yours',
+                             'That key is already registered to your account.'), 'warning')
                 else:
                     # Deliberately vague -- confirming a specific key
                     # belongs to another named account would leak
                     # account-existence/key-ownership info to anyone
                     # who can paste a public key (they're public by
                     # design, easy to have gotten from anywhere).
-                    flash('That key is already registered to an account.', 'danger')
+                    flash(_t('profile.key_already_registered',
+                             'That key is already registered to an account.'), 'danger')
                 return redirect(url_for('profile.ssh_keys'))
             db.session.add(UserSSHKey(user_id=current_user.id,
                                       public_key=raw_key,
                                       fingerprint=fingerprint,
                                       label=label))
             db.session.commit()
-            flash(f'SSH key added ({fingerprint}).', 'success')
+            flash(_t('profile.key_added', 'SSH key added ({fingerprint}).',
+                     fingerprint=fingerprint), 'success')
         elif action == 'delete':
             key_id = request.form.get('key_id', type=int)
             key_row = UserSSHKey.query.filter_by(
@@ -502,7 +563,7 @@ def ssh_keys():
             if key_row:
                 db.session.delete(key_row)
                 db.session.commit()
-                flash('SSH key removed.', 'success')
+                flash(_t('profile.key_removed', 'SSH key removed.'), 'success')
         return redirect(url_for('profile.ssh_keys'))
 
     keys = (UserSSHKey.query.filter_by(user_id=current_user.id)
@@ -530,8 +591,9 @@ def akas():
 def security_questions():
     """Set or update security questions for password recovery."""
     if not PasswordRecoverySettings.get().security_questions_enabled:
-        flash('Security-question password recovery is currently turned '
-             'off by the sysop.', 'info')
+        flash(_t('profile.security_questions_disabled',
+                 'Security-question password recovery is currently turned '
+                 'off by the sysop.'), 'info')
         return redirect(url_for('profile.index'))
 
     existing = {qa.question: qa for qa in current_user.security_answers}
@@ -571,7 +633,8 @@ def security_questions():
                 db.session.delete(qa)
 
         db.session.commit()
-        flash(f'Security questions updated ({saved} saved).', 'success')
+        flash(_t('profile.questions_updated', 'Security questions updated ({saved} saved).',
+                 saved=saved), 'success')
         return redirect(url_for('profile.security_questions'))
 
     current_answers = list(current_user.security_answers)

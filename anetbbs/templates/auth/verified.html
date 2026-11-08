@@ -1,17 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Email Verified{% endblock %}
+{% block title %}{{ t('auth.email_verified_title', 'Email Verified') }}{% endblock %}
 {% block content %}
 <div class="row justify-content-center mt-4">
 <div class="col-md-6">
     <div class="card text-center p-4">
         <div class="mb-3" style="font-size:3rem;">✅</div>
-        <h2>Email Verified!</h2>
+        <h2>{{ t('auth.email_verified', 'Email Verified!') }}</h2>
         <p class="text-muted mb-3">
-            Your email address has been confirmed, <strong>{{ username }}</strong>.<br>
-            You're now logged in and ready to go.
+            {{ t('auth.email_confirmed', 'Your email address has been confirmed,') }} <strong>{{ username }}</strong>.<br>
+            {{ t('auth.verified_logged_in', "You're now logged in and ready to go.") }}
         </p>
         <a href="{{ url_for('main.index') }}" class="btn btn-primary">
-            <i class="bi bi-house"></i> Go to the BBS
+            <i class="bi bi-house"></i> {{ t('auth.go_to_bbs', 'Go to the BBS') }}
         </a>
     </div>
 </div>

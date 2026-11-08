@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Compose Message - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t('messages.compose_title', 'Compose Message') }} - {{ config.BBS_NAME }}{% endblock %}
 {% block content %}
 <div class="bbs-header">
-    <h1><i class="bi bi-pencil"></i> Compose Message</h1>
+    <h1><i class="bi bi-pencil"></i> {{ t('messages.compose_title', 'Compose Message') }}</h1>
 </div>
 <div class="row justify-content-center">
     <div class="col-md-8">
         <div class="card">
-            <div class="card-header">New Message</div>
+            <div class="card-header">{{ t('messages.new_message', 'New Message') }}</div>
             <div class="card-body">
                 <form method="post" data-draft-key="pm-compose">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -28,18 +28,18 @@
                         {% for e in form.content.errors %}<div class="text-danger">{{ e }}</div>{% endfor %}
                     </div>
                     <div class="mb-2">
-                        <label for="pm_tagline_id" class="form-label">Add a tagline (optional)</label>
+                        <label for="pm_tagline_id" class="form-label">{{ t('messages.add_tagline', 'Add a tagline (optional)') }}</label>
                         <select name="tagline_id" id="pm_tagline_id" class="form-select" size="6">
-                            <option value="">-- None --</option>
-                            {% for t in taglines %}
-                            <option value="{{ t.id }}">{{ t.text }}</option>
+                            <option value="">{{ t('messages.no_tagline', '-- None --') }}</option>
+                            {% for tagline in taglines %}
+                            <option value="{{ tagline.id }}">{{ tagline.text }}</option>
                             {% endfor %}
                         </select>
                     </div>
                     <div class="d-flex gap-2 align-items-center">
                         <small id="draftStatus" class="text-muted me-auto"></small>
                         {{ form.submit(class="btn btn-primary") }}
-                        <a href="{{ url_for('pm.inbox') }}" class="btn btn-secondary">Cancel</a>
+                        <a href="{{ url_for('pm.inbox') }}" class="btn btn-secondary">{{ t('messages.cancel', 'Cancel') }}</a>
                     </div>
                 </form>
 <script>
@@ -54,7 +54,7 @@
             const raw = localStorage.getItem(key); if (!raw) return;
             const data = JSON.parse(raw);
             fields.forEach(f => { if (f.name && data[f.name] && !f.value) f.value = data[f.name]; });
-            if (status) status.textContent = 'Draft restored';
+            if (status) status.textContent = {{ t('messages.draft_restored', 'Draft restored') | tojson }};
         } catch (e) {}
     }
     function save() {
@@ -62,7 +62,7 @@
             const out = {};
             fields.forEach(f => { if (f.name) out[f.name] = f.value; });
             localStorage.setItem(key, JSON.stringify(out));
-            if (status) status.textContent = 'Draft saved ' + new Date().toLocaleTimeString();
+            if (status) status.textContent = {{ t('messages.draft_saved', 'Draft saved ') | tojson }} + new Date().toLocaleTimeString();
         } catch (e) {}
     }
     load();

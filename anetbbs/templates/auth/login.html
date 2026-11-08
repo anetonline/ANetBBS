@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Login - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t('auth.login', 'Login') }} - {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-6">
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-box-arrow-in-right"></i> Login
+                <i class="bi bi-box-arrow-in-right"></i> {{ t('auth.login', 'Login') }}
             </div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('auth.login') }}">
@@ -48,10 +48,10 @@
                 <hr style="border-color: #00ff00;">
                 
                 <p class="text-center mb-2">
-                    <a href="{{ url_for('auth.forgot_password') }}">Forgot your password?</a>
+                    <a href="{{ url_for('auth.forgot_password') }}">{{ t('auth.forgot_password_link', 'Forgot your password?') }}</a>
                 </p>
                 <p class="text-center mb-0">
-                    Don't have an account? <a href="{{ url_for('auth.register') }}">Register here</a>
+                    {{ t('auth.no_account', "Don't have an account?") }} <a href="{{ url_for('auth.register') }}">{{ t('auth.register_here', 'Register here') }}</a>
                 </p>
             </div>
         </div>
