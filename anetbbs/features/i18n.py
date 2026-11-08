@@ -12,6 +12,8 @@ Both callers agree on one convention: 'en' (or no language set at
 all) is the common case and does zero queries -- MenuTranslation rows
 only ever need to exist for non-English overrides.
 """
+import re
+
 from ..models import MenuTranslation
 
 
@@ -82,7 +84,21 @@ class FormTranslations:
 
     def gettext(self, string):
         key = self._keys.get(string)
-        return translate(key, string) if key else string
+        text = translate(key, string) if key else string
+        if '%(' in string:
+            # WTForms interpolates after gettext returns. Check the override
+            # here so a mistyped mapping cannot turn a validation error into
+            # a server error. Consume %% before looking for mapping names.
+            pattern = r'%(?:%|\(([^)]+)\))'
+            required = {name for name in re.findall(pattern, string) if name}
+            supplied = {name for name in re.findall(pattern, text) if name}
+            if supplied != required:
+                return string
+            try:
+                text % {name: '' if name == 'other_name' else 0 for name in required}
+            except (KeyError, TypeError, ValueError, OverflowError):
+                return string
+        return text
 
     def ngettext(self, singular, plural, n):
         return self.gettext(singular if n == 1 else plural)
@@ -657,7 +673,7 @@ DEFAULT_TRANSLATIONS = {
         'profile.privacy': 'Privacidad',
         'profile.public_key': 'Clave pública',
         'profile.question_number': 'Pregunta {number}',
-        'profile.questions_count': '{count} preguntas configuradas actualmente.',
+        'profile.questions_count': 'Preguntas configuradas: {count}',
         'profile.questions_updated': 'Preguntas de seguridad actualizadas ({saved} guardadas).',
         'profile.recent_posts': 'Publicaciones recientes',
         'profile.recovery_questions': 'Preguntas para recuperar la contraseña',

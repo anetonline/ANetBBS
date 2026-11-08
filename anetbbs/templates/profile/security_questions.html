@@ -19,7 +19,7 @@
                 {% if current_answers %}
                 <div class="alert alert-success py-2">
                     <i class="bi bi-check-circle"></i>
-                    {{ t('profile.questions_count', '{count} security questions currently set.', count=current_answers|length) }}
+                    {{ t('profile.questions_count', 'Security questions configured: {count}', count=current_answers|length) }}
                 </div>
                 {% else %}
                 <div class="alert alert-warning py-2">

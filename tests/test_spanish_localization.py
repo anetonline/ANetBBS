@@ -587,3 +587,48 @@ def test_translation_catalogue_is_loaded_once_per_request(localized_app, client,
             assert len(statements) == expected
     finally:
         event.remove(engine, 'before_cursor_execute', capture)
+
+
+@pytest.mark.parametrize('override,expected', [
+    ('Entre %(minimum)d y %(max)d caracteres.',
+     'Field must be between 3 and 80 characters long.'),
+    ('Entre %(min)z y %(max)d caracteres.',
+     'Field must be between 3 and 80 characters long.'),
+    ('Al menos %(min)d caracteres.',
+     'Field must be between 3 and 80 characters long.'),
+    ('Entre %(min)d y %(max)d caracteres (100%%).',
+     'Entre 3 y 80 caracteres (100%).'),
+])
+def test_validation_override_preserves_percent_markers(localized_app, client, override, expected):
+    _language(client, 'es')
+    with _overrides(localized_app, **{'validation.length_range': override}):
+        page = _soup(_post(client, '/auth/login', {
+            'username': 'ab', 'password': 'invalid-form-only',
+        }, token_path='/auth/login'))
+        assert expected in page.get_text(' ', strip=True)
+        assert page.select_one('label[for=password]').get_text(strip=True) == 'Contraseña'
+
+
+@pytest.mark.parametrize('language,expected', [
+    ('en', 'Security questions configured: 1'),
+    ('es', 'Preguntas configuradas: 1'),
+])
+def test_one_security_question_uses_count_neutral_wording(
+        localized_app, client, make_user, language, expected):
+    from anetbbs.models import SecurityQuestion, UserSecurityAnswer
+    user_id, _, _ = make_user(language)
+    _authenticate(client, user_id)
+    with localized_app.app_context():
+        previous = PasswordRecoverySettings.get().security_questions_enabled
+        PasswordRecoverySettings.get().security_questions_enabled = True
+        question = SecurityQuestion.query.filter_by(is_active=True).first().text
+        db.session.add(UserSecurityAnswer(user_id=user_id, question=question,
+                                         answer_hash=UserSecurityAnswer.hash_answer('local answer')))
+        db.session.commit()
+    try:
+        page = _soup(client.get('/profile/security-questions'))
+        assert expected in page.select_one('.alert-success').get_text(' ', strip=True)
+    finally:
+        with localized_app.app_context():
+            PasswordRecoverySettings.get().security_questions_enabled = previous
+            db.session.commit()
