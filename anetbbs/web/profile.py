@@ -2,10 +2,11 @@
 """
 User profile blueprint - enhanced with avatars, bio, themes
 """
+from copy import deepcopy
 import os
 import uuid
-from copy import deepcopy
-from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_from_directory, session
+from flask import session
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_from_directory
 from flask_login import login_required, current_user
 from wtforms import StringField, PasswordField, SubmitField, TextAreaField, BooleanField, SelectField, DateField
 from wtforms.validators import DataRequired, EqualTo, Length, Optional, ValidationError

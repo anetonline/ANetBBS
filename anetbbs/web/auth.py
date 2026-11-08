@@ -2,11 +2,11 @@
 """
 Authentication blueprint for user login, registration, and logout
 """
+from copy import copy
 import random
 import secrets
 import threading
 import time
-from copy import copy
 from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 

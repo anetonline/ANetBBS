@@ -410,7 +410,8 @@ custom profile fields, security-question text or other SysOp content in
 **Spanish first-release coverage:** common navigation and home widgets;
 login, registration, verification and password recovery; board listing,
 reading, posting, replying and search; private messages; profile and its
-language preference; generated titles/items in the four built-in terminal
+language preference; Admin category pages and the web Translations editor;
+generated titles/items in the four built-in terminal
 menus (`main`, `chat_systems`, `game_center`, `sysop_tools`). Hotkeys and
 actions remain unchanged. Bundled terminal translations apply only to
 unchanged built-in labels/actions; custom menu text remains intact.
@@ -420,7 +421,7 @@ the existing renderer's identity charset path (ANSI/escaping stay enabled).
 With the existing schema, a row exactly equal to the shipped translation
 is treated as bundled because rows have no separate provenance flag.
 
-**Limits:** this is not a complete translation. Admin tools, games, feature
+**Limits:** this is not a complete translation. Other Admin tools, games, feature
 bodies and prompts inside terminal applications, the optional pre-login web
 matrix, `.ans`/`.asc` art and other pages are outside this first release.
 Generated menu labels fit the existing fixed-width cells. UTF-8 preserves

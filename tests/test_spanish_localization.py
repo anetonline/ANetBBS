@@ -38,6 +38,7 @@ def localized_app(tmp_path_factory):
         patch.setattr(cfg.TestingConfig, 'SECRET_KEY', 'spanish-integration-tests')
         patch.setattr(cfg.TestingConfig, 'NUV_ENABLED', False)
         patch.setattr(cfg.TestingConfig, 'REGISTRATION_INVITE_CODE', '')
+        patch.setattr(cfg.TestingConfig, 'PUBLIC_BASE_URL', 'http://localhost', raising=False)
         for name in ('DATA_DIR', 'UPLOADS_DIR', 'AVATARS_DIR', 'NETWORK_JOIN_DIR',
                      'GAMES_DATA_DIR', 'ECHOMAIL_DATA_DIR', 'DOWNLOADS_DIR',
                      'FILE_BULLETINS_DIR', 'TDF_FONTS_DIR'):
@@ -100,9 +101,15 @@ def _language(client, language):
         session['language'] = language
 
 
+def _auth_identifier(client, user_id):
+    with client.application.app_context():
+        return db.session.get(User, user_id).get_id()
+
+
 def _authenticate(client, user_id):
+    identifier = _auth_identifier(client, user_id)
     with client.session_transaction() as session:
-        session['_user_id'] = str(user_id)
+        session['_user_id'] = identifier
         session['_fresh'] = True
 
 
@@ -153,6 +160,77 @@ def test_anonymous_home_and_navigation(client, language, new_here, sign_up, home
     assert picker['method'] == 'post'
     assert picker.select_one('input[name=csrf_token]')
     assert picker.select_one(f'option[value={language}]').has_attr('selected')
+
+
+@pytest.mark.parametrize('language,title,code,add,save,delete', [
+    ('es', 'Traducciones', 'Código de idioma', 'Añadir', 'Guardar', 'Eliminar'),
+    ('en', 'Translations', 'Language code', 'Add', 'Save', 'Delete'),
+])
+def test_translation_editor_localizes_controls_but_keeps_catalogue_rows(
+        client, make_user, language, title, code, add, save, delete):
+    user_id, _, _ = make_user(language, is_admin=True)
+    _authenticate(client, user_id)
+    page = _soup(client.get('/admin/translations'))
+
+    assert page.title.get_text(strip=True) == title
+    assert page.select_one('h1').get_text(strip=True) == title
+    assert page.select_one('label[for=translation-lang]').get_text(strip=True) == code
+    assert page.select_one('form.card button').get_text(strip=True) == add
+    rows = page.select('tbody tr')
+    assert {row.select_one('td:first-child').get_text(strip=True)
+            for row in rows} >= {'es', 'de', 'pt'}
+    assert any(row.select_one('input[name=text]')['value'] == 'Início' for row in rows)
+    assert {button.get_text(strip=True) for button in page.select('tbody button')} == {save, delete}
+    assert page.select_one('tbody input[name=text]').get('aria-label')
+
+
+def test_translation_editor_crud_uses_admin_language(client, localized_app, make_user):
+    user_id, _, _ = make_user('es', is_admin=True)
+    _authenticate(client, user_id)
+    path = '/admin/translations'
+    data = {'action': 'add', 'lang': 'pt', 'key': 'test.editor', 'text': 'Olá'}
+    page = _soup(_post(client, path, data, token_path=path, follow_redirects=True))
+    assert 'Traducción añadida.' in page.get_text(' ', strip=True)
+    page = _soup(_post(client, path, data, token_path=path, follow_redirects=True))
+    assert 'Ya existe una traducción para pt/test.editor.' in page.get_text(' ', strip=True)
+    with localized_app.app_context():
+        row_id = MenuTranslation.query.filter_by(lang='pt', key='test.editor').one().id
+    page = _soup(_post(client, path, {
+        'action': 'edit', 'row_id': row_id, 'text': 'Bem-vindo',
+    }, token_path=path, follow_redirects=True))
+    assert 'Traducción actualizada.' in page.get_text(' ', strip=True)
+    assert page.select_one('input[value="Bem-vindo"]')
+    response = _post(client, path, {'action': 'delete', 'row_id': row_id}, token_path=path)
+    assert response.status_code == 302
+    with localized_app.app_context():
+        assert db.session.get(MenuTranslation, row_id) is None
+
+
+def test_admin_hub_preserves_urls_and_uses_localized_card_labels(
+        client, localized_app, make_user):
+    from anetbbs.features.i18n import DEFAULT_TRANSLATIONS
+    from anetbbs.web.admin import ADMIN_HUB_SECTIONS
+
+    user_id, _, _ = make_user('es', is_admin=True)
+    _authenticate(client, user_id)
+    catalogue = DEFAULT_TRANSLATIONS['es']
+    for section, config in ADMIN_HUB_SECTIONS.items():
+        page = _soup(client.get(f'/admin/hub/{section}'))
+        assert page.select_one('h1').get_text(strip=True) == catalogue[f'admin.hub.section.{section}']
+        cards = {node.select_one('.card-title').get_text(strip=True):
+                 node.select_one('.card-text').get_text(strip=True)
+                 for node in page.select('a:has(.card-title)')}
+        for endpoint, _, _, _, *fragment in config['tools']:
+            if endpoint == 'hub_admin.index' and not localized_app.config.get('REGISTRY_MODE_ENABLED'):
+                # The hub card is hidden on non-hub installations.
+                continue
+            key = 'admin.hub.tool.' + '.'.join([endpoint, *fragment])
+            assert cards[catalogue[f'{key}.label']] == catalogue[f'{key}.description']
+    settings = _soup(client.get('/admin/hub/settings'))
+    assert settings.select_one('a[href="/admin/translations"] .card-title').get_text(strip=True) == 'Traducciones'
+    users = _soup(client.get('/admin/hub/users'))
+    nodespy = users.select_one('a[href$="#nodespy"] .card-title')
+    assert nodespy.get_text(strip=True) == 'NodeSpy (desconectar usuarios)'
 
 
 @pytest.mark.parametrize('language,username,password,register,identifier,send', [
@@ -267,7 +345,7 @@ def test_login_account_preference_wins_and_survives_logout(client, make_user, pr
     }, token_path='/auth/login', follow_redirects=True)
     assert _soup(response).html['lang'] == preferred
     with client.session_transaction() as session:
-        assert session['_user_id'] == str(user_id)
+        assert session['_user_id'] == _auth_identifier(client, user_id)
         assert session['language'] == preferred
     assert client.get_cookie('anetbbs_language').value == preferred
     # An authenticated account also wins over stale browser preferences.
@@ -279,6 +357,10 @@ def test_login_account_preference_wins_and_survives_logout(client, make_user, pr
     with client.session_transaction() as session:
         assert '_user_id' not in session
         assert session['language'] == preferred
+    relogged = _soup(_post(client, '/auth/login', {
+        'username': username, 'password': 'localization-password',
+    }, token_path='/auth/login', follow_redirects=True))
+    assert relogged.html['lang'] == preferred
 
 
 @pytest.mark.parametrize('language', ['en', 'es'])
@@ -296,7 +378,7 @@ def test_registration_inherits_anonymous_preference(localized_app, client, langu
         assert user.language == language
         user_id = user.id
     with client.session_transaction() as session:
-        assert session['_user_id'] == str(user_id)
+        assert session['_user_id'] == _auth_identifier(client, user_id)
         assert session['language'] == language
 
 
@@ -314,7 +396,7 @@ def test_email_verification_restores_account_language(localized_app, client, mak
     assert '¡Correo electrónico verificado!' in page.get_text(' ', strip=True)
     with client.session_transaction() as session:
         assert session['language'] == 'es'
-        assert session['_user_id'] == str(user_id)
+        assert session['_user_id'] == _auth_identifier(client, user_id)
 
 
 @pytest.mark.parametrize('language,new_password,updated', [
