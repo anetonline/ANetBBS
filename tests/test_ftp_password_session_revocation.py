@@ -43,6 +43,19 @@ def ftp_server(tmp_path):
     server = FTPServer(('127.0.0.1', 0), Handler, ioloop=loop)
     server.max_cons = 256
     server.max_cons_per_ip = 8
+    # A real OS thread, regardless of whether some earlier-imported test
+    # module already called eventlet.monkey_patch() in this same process
+    # (anetbbs.web_app does this unconditionally at import time). Once
+    # that's happened, a plain threading.Thread here silently becomes a
+    # greenlet, and pyftpdlib's own blocking select/epoll poll loop
+    # (ioloop.py) is not eventlet-aware -- it stalls the whole cooperative
+    # scheduler instead of running concurrently, hanging this fixture's
+    # control-socket round trips for the rest of the test (confirmed live:
+    # ~56 minutes before being killed, when this file ran in the same CI
+    # batch as test_ftp_case_mismatch_crash.py, which imports
+    # anetbbs.web_app). Same fix as the SSH door-cleanup regression test.
+    from eventlet.patcher import original
+    threading = original('threading')
     thread = threading.Thread(target=server.serve_forever, kwargs={
         'timeout': 0.02, 'blocking': True, 'handle_exit': False}, daemon=True)
     thread.start()
@@ -74,7 +87,17 @@ def _replace_password(state):
 
 
 def _on_loop(state, callback):
-    finished = threading.Event()
+    # Real Event, for the same reason the fixture above needs a real
+    # Thread: `run()` below fires on the fixture's (now genuinely OS-
+    # level) server thread, while this function's own caller blocks on
+    # `finished.wait()` from the main test thread. A monkey-patched
+    # (eventlet-green) Event's wait() does not reliably wake up for a
+    # set() coming from a real OS thread -- confirmed live: wait(3)
+    # returned False even though the Event's own repr already showed
+    # "set". Mixing a real Thread with a patched Event here reintroduces
+    # a different hang/flake than the one the fixture's fix above closes.
+    from eventlet.patcher import original
+    finished = original('threading').Event()
     errors = []
 
     def run():
