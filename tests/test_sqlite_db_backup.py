@@ -290,3 +290,66 @@ def test_backup_rejects_active_source_write_without_rolling_it_back(backup_env):
                 'SELECT payload FROM backup_probe WHERE id=2').fetchall() == []
         finally:
             db.session.rollback()
+
+
+def test_backup_aborts_when_another_connection_holds_exclusive_lock(
+        backup_env, monkeypatch, tmp_path, caplog):
+    from eventlet.patcher import original
+    from anetbbs.models import db
+    from anetbbs.web import admin
+
+    database = tmp_path / 'rollback-journal.db'
+    # A native thread can release the lock even while SQLite blocks the event loop.
+    threading = original('threading')
+    lock_acquired = threading.Event()
+    release_lock = threading.Event()
+    real_snapshot = tempfile.NamedTemporaryFile
+    snapshots = []
+
+    def hold_lock():
+        with closing(sqlite3.connect(database, timeout=0)) as writer:
+            writer.execute('BEGIN EXCLUSIVE')
+            lock_acquired.set()
+            # Release even if the backup regresses and waits indefinitely.
+            release_lock.wait(timeout=3)
+
+    lock_thread = threading.Thread(target=hold_lock)
+
+    def create_snapshot(*args, **kwargs):
+        snapshot = real_snapshot(*args, **kwargs)
+        snapshots.append(snapshot)
+        lock_thread.start()
+        assert lock_acquired.wait(timeout=2)
+        return snapshot
+
+    with closing(sqlite3.connect(database, timeout=0)) as source, \
+            backup_env.app.test_request_context('/admin/db-backup'):
+        source.execute('CREATE TABLE sample (id INTEGER)')
+        source.commit()
+        source.execute('PRAGMA busy_timeout=15000')
+        connection = SimpleNamespace(connection=SimpleNamespace(driver_connection=source))
+        monkeypatch.setattr(db.session, 'connection', lambda: connection)
+        monkeypatch.setattr(tempfile, 'NamedTemporaryFile', create_snapshot)
+        # Advance the backup's clock without extending the test's real runtime.
+        clock = iter((0, 6))
+        monkeypatch.setattr(admin, 'monotonic', lambda: next(clock))
+
+        try:
+            view = inspect.unwrap(backup_env.app.view_functions['admin.db_backup'])
+            response = view()
+            assert source.execute('PRAGMA busy_timeout').fetchone() == (15000,)
+            try:
+                assert lock_acquired.is_set()
+                assert response.status_code == 302
+                assert 'Content-Disposition' not in response.headers
+            finally:
+                response.close()
+        finally:
+            release_lock.set()
+            if lock_thread.ident is not None:
+                lock_thread.join()
+
+    assert 'SQLite backup exceeded its retry deadline' in caplog.text
+    assert len(snapshots) == 1
+    assert snapshots[0].closed
+    assert not Path(snapshots[0].name).exists()

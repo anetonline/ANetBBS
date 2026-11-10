@@ -5,6 +5,7 @@ import sys
 import os
 import json
 from datetime import datetime, timedelta
+from time import monotonic
 from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, current_app
 from flask_login import login_required, current_user
 from wtforms import StringField, TextAreaField, SubmitField, BooleanField, PasswordField, IntegerField
@@ -3836,7 +3837,21 @@ def db_backup():
         snapshot = tempfile.NamedTemporaryFile(
             mode='w+b', prefix='anetbbs-backup-', suffix='.db')
         with closing(sqlite3.connect(snapshot.name)) as destination:
-            source.backup(destination)
+            deadline = monotonic() + 5
+
+            def check_backup_deadline(status, _remaining, _total):
+                # CPython retries BUSY and LOCKED even after SQLite's busy timeout.
+                if status != sqlite3.SQLITE_DONE and monotonic() >= deadline:
+                    raise sqlite3.OperationalError('SQLite backup exceeded its retry deadline')
+
+            # Keep a single lock wait shorter than the retry deadline.
+            # Restore the request connection's setting before it returns to the pool.
+            busy_timeout = source.execute('PRAGMA busy_timeout').fetchone()[0]
+            source.execute('PRAGMA busy_timeout=100')
+            try:
+                source.backup(destination, progress=check_backup_deadline)
+            finally:
+                source.execute(f'PRAGMA busy_timeout={busy_timeout}')
             if destination.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
                 raise sqlite3.DatabaseError('SQLite backup integrity check failed')
 
