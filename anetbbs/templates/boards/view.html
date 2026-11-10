@@ -16,11 +16,11 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="btn btn-sm {% if _sub %}btn-warning{% else %}btn-outline-secondary{% endif %}">
                         <i class="bi bi-bell{% if _sub %}-fill{% endif %}"></i>
-                        {% if _sub %}Unsubscribe{% else %}Subscribe{% endif %}
+                        {% if _sub %}{{ t('boards.unsubscribe', 'Unsubscribe') }}{% else %}{{ t('boards.subscribe', 'Subscribe') }}{% endif %}
                     </button>
                 </form>
                 <a href="{{ url_for('boards.new_post', board_id=board.id) }}" class="btn btn-primary btn-sm">
-                    <i class="bi bi-plus-circle"></i> New Post
+                    <i class="bi bi-plus-circle"></i> {{ t('boards.new_post', 'New Post') }}
                 </a>
             </div>
         {% endif %}
@@ -32,7 +32,7 @@
 
 <div class="card">
     <div class="card-header">
-        Topics
+        {{ t('boards.topics', 'Topics') }}
     </div>
     <div class="card-body">
         {% if posts %}
@@ -45,8 +45,9 @@
                         </div>
                         <p class="mb-1">{{ post.content[:150] }}{% if post.content|length > 150 %}...{% endif %}</p>
                         <small>
-                            by {{ post.author.username }} | 
-                            {{ post.replies.count() }} {% if post.replies.count() == 1 %}reply{% else %}replies{% endif %}
+                            {{ t('boards.by', 'by') }} {{ post.author.username }} |
+                            {% set reply_count = post.replies.count() %}
+                            {{ reply_count }} {% if reply_count == 1 %}{{ t('boards.reply_noun', 'reply') }}{% else %}{{ t('boards.replies_noun', 'replies') }}{% endif %}
                         </small>
                     </a>
                 {% endfor %}
@@ -58,7 +59,7 @@
                     <ul class="pagination justify-content-center">
                         {% if pagination.has_prev %}
                             <li class="page-item">
-                                <a class="page-link" href="{{ url_for('boards.view_board', board_id=board.id, page=pagination.prev_num) }}">Previous</a>
+                                <a class="page-link" href="{{ url_for('boards.view_board', board_id=board.id, page=pagination.prev_num) }}">{{ t('boards.previous', 'Previous') }}</a>
                             </li>
                         {% endif %}
                         
@@ -74,17 +75,17 @@
                         
                         {% if pagination.has_next %}
                             <li class="page-item">
-                                <a class="page-link" href="{{ url_for('boards.view_board', board_id=board.id, page=pagination.next_num) }}">Next</a>
+                                <a class="page-link" href="{{ url_for('boards.view_board', board_id=board.id, page=pagination.next_num) }}">{{ t('boards.next', 'Next') }}</a>
                             </li>
                         {% endif %}
                     </ul>
                 </nav>
             {% endif %}
         {% else %}
-            <p>No posts in this board yet. Be the first to post!</p>
+            <p>{{ t('boards.no_posts', 'No posts in this board yet. Be the first to post!') }}</p>
             {% if current_user.is_authenticated %}
                 <a href="{{ url_for('boards.new_post', board_id=board.id) }}" class="btn btn-primary">
-                    <i class="bi bi-plus-circle"></i> Create First Post
+                    <i class="bi bi-plus-circle"></i> {{ t('boards.create_first_post', 'Create First Post') }}
                 </a>
             {% endif %}
         {% endif %}

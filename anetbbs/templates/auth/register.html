@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Register - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t('auth.register', 'Register') }} - {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-7">
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-person-plus"></i> Register
+                <i class="bi bi-person-plus"></i> {{ t('auth.register', 'Register') }}
             </div>
             <div class="card-body">
                 <form method="POST" action="{{ url_for('auth.register') }}">
@@ -49,8 +49,7 @@
                     <hr>
                     <p class="small text-muted mb-3">
                         <i class="bi bi-shield-lock"></i>
-                        Choose <strong>3 security questions</strong> — used to verify your identity if you forget your password.
-                        Pick questions only you know the answer to.
+                        {{ t('auth.choose_questions', 'Choose') }} <strong>{{ t('auth.three_security_questions', '3 security questions') }}</strong> {{ t('auth.security_questions_instructions', '— used to verify your identity if you forget your password. Pick questions only you know the answer to.') }}
                     </p>
 
                     {% for n, q_field, a_field in [
@@ -61,16 +60,16 @@
                     <div class="card mb-3 border-secondary">
                         <div class="card-body py-3">
                             <div class="mb-2">
-                                <label class="form-label fw-semibold small">Security Question {{ n }}</label>
+                                <label class="form-label fw-semibold small">{{ t('auth.security_question_number', 'Security Question {number}', number=n) }}</label>
                                 {{ q_field(class="form-select form-select-sm" + (" is-invalid" if q_field.errors else "")) }}
                                 {% if q_field.errors %}
                                     <div class="invalid-feedback">{% for e in q_field.errors %}{{ e }}{% endfor %}</div>
                                 {% endif %}
                             </div>
                             <div>
-                                <label class="form-label small">Your Answer</label>
+                                <label class="form-label small">{{ t('auth.your_answer', 'Your Answer') }}</label>
                                 {{ a_field(class="form-control form-control-sm" + (" is-invalid" if a_field.errors else ""),
-                                           placeholder="Answer (not case-sensitive)") }}
+                                           placeholder=t('auth.answer_placeholder', 'Answer (not case-sensitive)')) }}
                                 {% if a_field.errors %}
                                     <div class="invalid-feedback">{% for e in a_field.errors %}{{ e }}{% endfor %}</div>
                                 {% endif %}
@@ -97,7 +96,7 @@
 
                 <hr>
                 <p class="text-center mb-0">
-                    Already have an account? <a href="{{ url_for('auth.login') }}">Login here</a>
+                    {{ t('auth.have_account', 'Already have an account?') }} <a href="{{ url_for('auth.login') }}">{{ t('auth.login_here', 'Login here') }}</a>
                 </p>
             </div>
         </div>

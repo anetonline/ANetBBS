@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from ..models import db, User, PrivateMessage
 from ..core.activity_log import web_log_activity
+from ..features.i18n import translate as _t, FormTranslations
 
 pm_bp = Blueprint('pm', __name__, url_prefix='/messages')
 
@@ -25,6 +26,16 @@ class ComposeForm(FlaskForm):
     subject = StringField('Subject', validators=[DataRequired(), Length(max=200)])
     content = TextAreaField('Message', validators=[DataRequired()])
     submit = SubmitField('Send')
+
+    class Meta(FlaskForm.Meta):
+        def get_translations(self, form):
+            return FormTranslations()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in ('recipient', 'subject', 'content', 'submit'):
+            field = self[name]
+            field.label.text = _t(f'messages.field.{name}', field.label.text)
 
 
 # Real gap found in a security/performance audit: both routes below
@@ -79,9 +90,9 @@ def compose(username=None):
                     quoted = '\n'.join('> ' + ln
                                        for ln in (src.body or '').splitlines())
                     form.subject.data = ('Re: ' + (src.subject or '')).strip()
-                    form.content.data = (
-                        f'{src.sender.username if src.sender else "?"} wrote:\n'
-                        f'{quoted}\n\n')
+                    attribution = _t('messages.quote_attribution', '{username} wrote:',
+                                     username=src.sender.username if src.sender else '?')
+                    form.content.data = f'{attribution}\n{quoted}\n\n'
             except Exception:
                 pass
 
@@ -89,11 +100,11 @@ def compose(username=None):
         recipient = User.query.filter(
             db.func.lower(User.username) == form.recipient.data.lower()).first()
         if not recipient:
-            flash('User not found.', 'danger')
+            flash(_t('messages.user_not_found', 'User not found.'), 'danger')
             from ..models import get_active_taglines
             return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
         if recipient.id == current_user.id:
-            flash('You cannot message yourself.', 'danger')
+            flash(_t('messages.cannot_message_self', 'You cannot message yourself.'), 'danger')
             from ..models import get_active_taglines
             return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
 
@@ -101,7 +112,7 @@ def compose(username=None):
         try:
             from .blocks import is_blocked
             if is_blocked(recipient.id, current_user.id) and not getattr(current_user, 'is_admin', False):
-                flash('That user has blocked you.', 'danger')
+                flash(_t('messages.blocked', 'That user has blocked you.'), 'danger')
                 from ..models import get_active_taglines
                 return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
         except Exception:
@@ -115,8 +126,9 @@ def compose(username=None):
                       .filter(PrivateMessage.created_at >= window_start)
                       .count())
             if recent >= _PM_LIMIT:
-                flash(f'PM rate limit exceeded — max {_PM_LIMIT} per '
-                      f'{_PM_WINDOW_SECONDS // 60} minutes.', 'danger')
+                flash(_t('messages.rate_limit',
+                         'PM rate limit exceeded — max {limit} per {minutes} minutes.',
+                         limit=_PM_LIMIT, minutes=_PM_WINDOW_SECONDS // 60), 'danger')
                 from ..models import get_active_taglines
                 return render_template('pm/compose.html', form=form, taglines=get_active_taglines())
 
@@ -130,9 +142,9 @@ def compose(username=None):
         _tagline_id = request.form.get('tagline_id', type=int)
         if _tagline_id:
             from ..models import Tagline, format_tagline_append
-            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
-            if _t:
-                clean_content = clean_content + format_tagline_append(_t.text)
+            _tagline = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _tagline:
+                clean_content = clean_content + format_tagline_append(_tagline.text)
         msg = PrivateMessage(
             sender_id=current_user.id,
             recipient_id=recipient.id,
@@ -167,7 +179,7 @@ def compose(username=None):
                 db.session.rollback()
             except Exception:
                 pass
-        flash('Message sent!', 'success')
+        flash(_t('messages.sent_success', 'Message sent!'), 'success')
         return redirect(url_for('pm.sent'))
 
     from ..models import get_active_taglines
@@ -222,12 +234,12 @@ def delete(message_id):
     if message.recipient_id == current_user.id:
         message.is_deleted_recipient = True
         db.session.commit()
-        flash('Message deleted from inbox.', 'success')
+        flash(_t('messages.deleted_inbox', 'Message deleted from inbox.'), 'success')
         return redirect(url_for('pm.inbox'))
     elif message.sender_id == current_user.id:
         message.is_deleted_sender = True
         db.session.commit()
-        flash('Message deleted from sent.', 'success')
+        flash(_t('messages.deleted_sent', 'Message deleted from sent.'), 'success')
         return redirect(url_for('pm.sent'))
     else:
         abort(403)

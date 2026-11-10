@@ -42,6 +42,14 @@ class MenuTranslationTests(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
+    def setUp(self):
+        # These lookup tests create a controlled, deliberately partial
+        # translation set. Startup also seeds a complete Spanish pack.
+        from anetbbs.models import db, MenuTranslation
+        with self.app.app_context():
+            MenuTranslation.query.delete()
+            db.session.commit()
+
     def test_english_is_a_no_op_no_query(self):
         """'en' (the default) must do zero extra work -- confirmed by
         passing garbage item tuples that would blow up any real query."""

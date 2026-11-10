@@ -154,10 +154,62 @@ def create_app(config_name=None):
                       ping_timeout=60, ping_interval=25,
                       logger=False, engineio_logger=False)
     csrf.init_app(app)
+
+    from flask_wtf.csrf import CSRFError
+
+    @app.errorhandler(CSRFError)
+    def csrf_error(error):
+        # Keep the rejection/status unchanged; only localize the explanation.
+        from .features.i18n import current_language, translate
+        if current_language() == 'es':
+            error.description = translate('auth.csrf_failed', error.description)
+        return error.get_response()
     
     # Configure login manager
     login_manager.login_view = 'auth.login'
     login_manager.login_message = 'Please log in to access this page.'
+    from .features.i18n import current_language, translate
+    login_manager.localize_callback = lambda message: translate('auth.login_required', message)
+
+    @app.post('/language')
+    def set_language():
+        """Choose a UI language without changing any authentication state."""
+        from flask import abort, redirect, session, url_for
+        from urllib.parse import urlsplit
+        language = request.form.get('language')
+        existing_preference = language == current_language()
+        if language not in ('en', 'es') and not existing_preference:
+            abort(400)
+        if current_user.is_authenticated:
+            current_user.language = language
+            db.session.commit()
+        session['language'] = language
+        target = request.form.get('return_to', '')
+        try:
+            parsed = urlsplit(target)
+            local_target = (target.startswith('/') and not target.startswith('//')
+                            and not parsed.scheme and not parsed.netloc
+                            and '\\' not in target
+                            and not any(ord(char) < 32 for char in target))
+        except ValueError:
+            local_target = False
+        if not local_target:
+            target = url_for('main.index')
+        return redirect(target)
+
+    @app.after_request
+    def persist_language(response):
+        # Persist only the explicit preference, without making the login
+        # session permanent or changing remember-cookie/security settings.
+        from flask import session
+        language = session.get('language')
+        if language in ('en', 'es') and request.cookies.get('anetbbs_language') != language:
+            response.set_cookie(
+                'anetbbs_language', language, max_age=365 * 24 * 60 * 60,
+                secure=app.config.get('SESSION_COOKIE_SECURE', False),
+                httponly=True, samesite='Lax',
+                path=app.config.get('SESSION_COOKIE_PATH') or '/')
+        return response
     
     @login_manager.user_loader
     def load_user(user_id):
@@ -373,43 +425,8 @@ def create_app(config_name=None):
 
     @app.context_processor
     def _inject_translate_helper():
-        """Expose {{ t('some.key', 'Default text') }} to every template
-        -- the web-UI counterpart to menu_engine.py's terminal-side
-        MenuTranslation lookup, sharing the same features/i18n.py
-        helpers rather than a second copy of the lookup-with-fallback
-        logic. Falls back to `default` (or `key` if no default given)
-        whenever the viewer's language is English/unset or no override
-        row exists for `key` -- the common case does zero queries.
-
-        Deliberately NOT batched across a whole page render the way
-        the terminal menu engine batches one menu's title + items --
-        web template call sites are scattered, not naturally grouped.
-        Memoized per-request (flask.g) so the same key called twice on
-        one page render only queries once. See docs/17-development.md
-        for the full pattern and rollout status."""
-        from flask import g
-        from flask_login import current_user
-
-        def t(key, default=''):
-            lang = None
-            try:
-                if current_user.is_authenticated:
-                    lang = current_user.language
-            except Exception:
-                lang = None
-            if not lang or lang == 'en':
-                return default or key
-            cache = g.setdefault('_i18n_cache', {})
-            cache_key = (lang, key)
-            if cache_key not in cache:
-                from .features.i18n import get_translation
-                try:
-                    cache[cache_key] = get_translation(lang, key, default or key)
-                except Exception:
-                    cache[cache_key] = default or key
-            return cache[cache_key]
-
-        return {'t': t}
+        """Share the request-batched catalogue with templates and forms."""
+        return {'t': translate, 'current_language': current_language()}
 
     @app.context_processor
     def _inject_qotd():

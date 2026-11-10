@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}New Post - {{ board.name }} - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t('boards.new_post', 'New Post') }} - {{ board.name }} - {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
 <div class="card">
     <div class="card-header">
-        <i class="bi bi-plus-circle"></i> New Post in {{ board.name }}
+        <i class="bi bi-plus-circle"></i> {{ t('boards.new_post_in', 'New Post in {board}', board=board.name) }}
     </div>
     <div class="card-body">
         <form method="POST" action="{{ url_for('boards.new_post', board_id=board.id) }}" data-draft-key="post-board-{{ board.id }}">
@@ -32,9 +32,9 @@
             </div>
             
             <div class="mb-2">
-                <label for="tagline_id" class="form-label">Add a tagline (optional)</label>
+                <label for="tagline_id" class="form-label">{{ t('boards.add_tagline', 'Add a tagline (optional)') }}</label>
                 <select name="tagline_id" id="tagline_id" class="form-select" size="6">
-                    <option value="">-- None --</option>
+                    <option value="">{{ t('boards.no_tagline', '-- None --') }}</option>
                     {% for t in taglines %}
                     <option value="{{ t.id }}">{{ t.text }}</option>
                     {% endfor %}
@@ -43,7 +43,7 @@
 
             <div class="d-grid gap-2 d-md-flex justify-content-md-end align-items-center">
                 <small id="draftStatus" class="text-muted me-auto"></small>
-                <a href="{{ url_for('boards.view_board', board_id=board.id) }}" class="btn btn-secondary">Cancel</a>
+                <a href="{{ url_for('boards.view_board', board_id=board.id) }}" class="btn btn-secondary">{{ t('boards.cancel', 'Cancel') }}</a>
                 {{ form.submit(class="btn btn-primary") }}
             </div>
         </form>
@@ -65,7 +65,7 @@
             fields.forEach(f => {
                 if (f.name && data[f.name] && !f.value) f.value = data[f.name];
             });
-            if (status) status.textContent = 'Draft restored';
+            if (status) status.textContent = {{ t('boards.draft_restored', 'Draft restored')|tojson }};
         } catch (e) {}
     }
     function save() {
@@ -73,7 +73,7 @@
             const out = {};
             fields.forEach(f => { if (f.name) out[f.name] = f.value; });
             localStorage.setItem(key, JSON.stringify(out));
-            if (status) status.textContent = 'Draft saved ' + new Date().toLocaleTimeString();
+            if (status) status.textContent = {{ t('boards.draft_saved', 'Draft saved {time}')|tojson }}.replace('{time}', new Date().toLocaleTimeString());
         } catch (e) {}
     }
     function clear() {

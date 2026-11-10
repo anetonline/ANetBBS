@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ user.display_name or user.username }}'s Profile - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t('profile.user_title', "{username}'s Profile", username=user.display_name or user.username) }} - {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
 <div class="row">
@@ -9,7 +9,7 @@
         <div class="card mb-3">
             <div class="card-body text-center">
                 {% if avatar %}
-                    <img src="{{ avatar }}" alt="Avatar" class="rounded-circle mb-2" style="width:100px;height:100px;object-fit:cover;border:2px solid var(--theme-primary);">
+                    <img src="{{ avatar }}" alt="{{ t('profile.avatar', 'Avatar') }}" class="rounded-circle mb-2" style="width:100px;height:100px;object-fit:cover;border:2px solid var(--theme-primary);">
                 {% else %}
                     <i class="bi bi-person-circle" style="font-size:5rem;"></i>
                 {% endif %}
@@ -18,19 +18,19 @@
                     <p class="small">@{{ user.username }}</p>
                 {% endif %}
                 {% if online %}
-                    <span><i class="bi bi-circle-fill text-success" style="font-size:0.6rem;"></i> Online</span>
+                    <span><i class="bi bi-circle-fill text-success" style="font-size:0.6rem;"></i> {{ t('profile.online', 'Online') }}</span>
                 {% else %}
-                    <span><i class="bi bi-circle" style="font-size:0.6rem;"></i> Offline</span>
+                    <span><i class="bi bi-circle" style="font-size:0.6rem;"></i> {{ t('profile.offline', 'Offline') }}</span>
                 {% endif %}
                 {% if user.is_admin %}
-                    <div><span class="badge bg-warning text-dark mt-1">Admin</span></div>
+                    <div><span class="badge bg-warning text-dark mt-1">{{ t('profile.admin', 'Admin') }}</span></div>
                 {% endif %}
-                <div class="text-muted small mt-1">User #{{ user.id }}</div>
+                <div class="text-muted small mt-1">{{ t('profile.user_number', 'User #{id}', id=user.id) }}</div>
             </div>
         </div>
 
         <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-info-circle"></i> Info</div>
+            <div class="card-header"><i class="bi bi-info-circle"></i> {{ t('profile.info', 'Info') }}</div>
             <div class="card-body">
                 {% if field_config.location and user.location %}
                     <p><i class="bi bi-geo-alt"></i> {{ user.location }}</p>
@@ -57,9 +57,9 @@
                 {% if field_config.show_email and user.show_email %}
                     <p><i class="bi bi-envelope"></i> {{ user.email }}</p>
                 {% endif %}
-                <p><i class="bi bi-calendar"></i> Joined {{ user.created_at|eastern('%Y-%m-%d') }}</p>
+                <p><i class="bi bi-calendar"></i> {{ t('profile.joined', 'Joined') }} {{ user.created_at|eastern('%Y-%m-%d') }}</p>
                 {% if user.last_login %}
-                    <p><i class="bi bi-clock"></i> Last login {{ user.last_login|eastern('%Y-%m-%d') }}</p>
+                    <p><i class="bi bi-clock"></i> {{ t('profile.last_login', 'Last login') }} {{ user.last_login|eastern('%Y-%m-%d') }}</p>
                 {% endif %}
                 {% for cf in custom_fields_list %}
                     {% set val = custom_values.get(cf.id) %}
@@ -86,22 +86,22 @@
         </div>
 
         <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-graph-up"></i> Stats</div>
+            <div class="card-header"><i class="bi bi-graph-up"></i> {{ t('profile.stats', 'Stats') }}</div>
             <div class="card-body">
-                <p><strong>Posts:</strong> {{ stats.total_posts }}</p>
-                <p><strong>Replies:</strong> {{ stats.total_replies }}</p>
-                <p><strong>Member for:</strong> {{ stats.account_age }} days</p>
+                <p><strong>{{ t('profile.posts', 'Posts:') }}</strong> {{ stats.total_posts }}</p>
+                <p><strong>{{ t('profile.replies', 'Replies:') }}</strong> {{ stats.total_replies }}</p>
+                <p>{{ t('profile.member_days', 'Member for: {days} days', days=stats.account_age) }}</p>
             </div>
         </div>
 
         {% if current_user.is_authenticated and current_user.username == user.username %}
         <div class="d-grid gap-2">
-            <a href="{{ url_for('profile.edit') }}" class="btn btn-primary"><i class="bi bi-pencil"></i> Edit Profile</a>
-            <a href="{{ url_for('profile.change_password') }}" class="btn btn-primary"><i class="bi bi-key"></i> Change Password</a>
+            <a href="{{ url_for('profile.edit') }}" class="btn btn-primary"><i class="bi bi-pencil"></i> {{ t('profile.edit_title', 'Edit Profile') }}</a>
+            <a href="{{ url_for('profile.change_password') }}" class="btn btn-primary"><i class="bi bi-key"></i> {{ t('profile.change_password', 'Change Password') }}</a>
         </div>
         {% elif current_user.is_authenticated %}
         <div class="d-grid">
-            <a href="{{ url_for('pm.compose', username=user.username) }}" class="btn btn-primary"><i class="bi bi-envelope"></i> Send Message</a>
+            <a href="{{ url_for('pm.compose', username=user.username) }}" class="btn btn-primary"><i class="bi bi-envelope"></i> {{ t('profile.send_message', 'Send Message') }}</a>
         </div>
         {% endif %}
     </div>
@@ -110,7 +110,7 @@
     <div class="col-md-9">
         {% if field_config.bio and user.bio %}
         <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-person"></i> About</div>
+            <div class="card-header"><i class="bi bi-person"></i> {{ t('profile.about', 'About') }}</div>
             <div class="card-body">
                 <p>{{ user.bio }}</p>
             </div>
@@ -119,7 +119,7 @@
 
         {% if field_config.signature and user.signature %}
         <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-pen"></i> Signature</div>
+            <div class="card-header"><i class="bi bi-pen"></i> {{ t('profile.signature', 'Signature') }}</div>
             <div class="card-body">
                 <em>{{ user.signature }}</em>
             </div>
@@ -128,12 +128,12 @@
 
         {% if groups %}
         <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-people-fill"></i> Groups ({{ groups|length }})</div>
+            <div class="card-header"><i class="bi bi-people-fill"></i> {{ t('profile.groups', 'Groups') }} ({{ groups|length }})</div>
             <div class="card-body">
                 {% for gm in groups %}
                 <a href="{{ url_for('groups.view', group_id=gm.group.id) }}" class="badge bg-secondary me-1 mb-1 text-decoration-none" style="font-size:0.9rem;">
                     {% if gm.group.tag %}[{{ gm.group.tag }}] {% endif %}{{ gm.group.name }}
-                    {% if gm.is_leader %}<i class="bi bi-star-fill text-warning ms-1" title="Leader"></i>{% endif %}
+                    {% if gm.is_leader %}<i class="bi bi-star-fill text-warning ms-1" title="{{ t('profile.leader', 'Leader') }}"></i>{% endif %}
                 </a>
                 {% endfor %}
             </div>
@@ -142,7 +142,7 @@
 
         {% if achievements %}
         <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-trophy"></i> Achievements ({{ achievements|length }})</div>
+            <div class="card-header"><i class="bi bi-trophy"></i> {{ t('profile.achievements', 'Achievements') }} ({{ achievements|length }})</div>
             <div class="card-body">
                 <div class="row">
                     {% for a in achievements %}
@@ -152,7 +152,7 @@
                             <div>
                                 <strong>{{ a.name }}</strong>
                                 <div class="text-muted small">{{ a.description }}</div>
-                                <div class="text-muted" style="font-size:0.7rem;">earned {{ a.earned_at|eastern('%Y-%m-%d') }}</div>
+                                <div class="text-muted" style="font-size:0.7rem;">{{ t('profile.earned', 'earned') }} {{ a.earned_at|eastern('%Y-%m-%d') }}</div>
                             </div>
                         </div>
                     </div>
@@ -163,7 +163,7 @@
         {% endif %}
 
         <div class="card">
-            <div class="card-header"><i class="bi bi-chat-left-text"></i> Recent Posts</div>
+            <div class="card-header"><i class="bi bi-chat-left-text"></i> {{ t('profile.recent_posts', 'Recent Posts') }}</div>
             <div class="card-body p-0">
                 {% if recent_posts %}
                 <div class="list-group list-group-flush">
@@ -175,12 +175,12 @@
                             <strong>{{ post.subject }}</strong>
                             <small>{{ post.created_at|eastern('%Y-%m-%d') }}</small>
                         </div>
-                        <small>in {{ post.board.name }}</small>
+                        <small>{{ t('profile.post_in', 'in') }} {{ post.board.name }}</small>
                     </a>
                     {% endfor %}
                 </div>
                 {% else %}
-                <p class="p-3">No posts yet.</p>
+                <p class="p-3">{{ t('profile.no_posts', 'No posts yet.') }}</p>
                 {% endif %}
             </div>
         </div>

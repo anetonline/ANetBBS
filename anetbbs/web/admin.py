@@ -15,6 +15,7 @@ from flask_wtf import FlaskForm
 
 from sqlalchemy.exc import IntegrityError
 
+from ..features.i18n import translate
 from .validators import PermissiveEmail as Email
 from ..models import (db, User, Board, Post, Message, Theme, UserSession,
                        UserActivity, RegistrationAttempt, PasswordResetToken,
@@ -3351,18 +3352,20 @@ def translations():
             text = (request.form.get('text') or '').strip()
             if lang and key and text:
                 if MenuTranslation.query.filter_by(lang=lang, key=key).first():
-                    flash(f'A translation for {lang}/{key} already exists.', 'danger')
+                    flash(translate('admin.translations.duplicate',
+                                    'A translation for {language}/{entry} already exists.',
+                                    language=lang, entry=key), 'danger')
                 else:
                     db.session.add(MenuTranslation(lang=lang, key=key, text=text))
                     db.session.commit()
-                    flash('Translation added.', 'success')
+                    flash(translate('admin.translations.added', 'Translation added.'), 'success')
         elif action == 'edit':
             row = MenuTranslation.query.get_or_404(request.form.get('row_id', type=int))
             new_text = (request.form.get('text') or '').strip()
             if new_text:
                 row.text = new_text
                 db.session.commit()
-                flash('Translation updated.', 'success')
+                flash(translate('admin.translations.saved', 'Translation updated.'), 'success')
         elif action == 'delete':
             row = MenuTranslation.query.get_or_404(request.form.get('row_id', type=int))
             db.session.delete(row)

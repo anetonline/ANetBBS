@@ -1,22 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Verify Your Email{% endblock %}
+{% block title %}{{ t('auth.verify_email_title', 'Verify Your Email') }}{% endblock %}
 {% block content %}
 <div class="row justify-content-center mt-4">
 <div class="col-md-6">
     <div class="card text-center p-4">
         <div class="mb-3" style="font-size:3rem;">📧</div>
-        <h2>Check your email</h2>
+        <h2>{{ t('auth.check_email_heading', 'Check your email') }}</h2>
         <p class="text-muted mb-3">
-            We sent a verification link to <strong>{{ email }}</strong>.<br>
-            Click the link in that email to activate your account.
+            {{ t('auth.verification_link_sent', 'We sent a verification link to') }} <strong>{{ email }}</strong>.<br>
+            {{ t('auth.activate_email_instructions', 'Click the link in that email to activate your account.') }}
         </p>
         <p class="text-muted small">
-            The link expires in <strong>24 hours</strong>. If you don't see it, check your spam folder.
+            {{ t('auth.verification_link_expires', 'The link expires in') }} <strong>{{ t('auth.verification_link_lifetime', '24 hours') }}</strong>. {{ t('auth.check_spam', "If you don't see it, check your spam folder.") }}
         </p>
         <hr>
         <p class="small">
-            Didn't receive it?
-            <a href="{{ url_for('auth.resend_verification') }}">Resend verification email</a>
+            {{ t('auth.verification_email_missing', "Didn't receive it?") }}
+            <a href="{{ url_for('auth.resend_verification') }}">{{ t('auth.resend_verification_email', 'Resend verification email') }}</a>
         </p>
     </div>
 </div>
