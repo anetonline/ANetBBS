@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Home - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t("home.index.home", "Home -") }} {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
 <div class="bbs-header">
@@ -17,29 +17,25 @@
       <div class="col-md-8">
         <h2 class="mb-2" style="font-weight:600;">
           <i class="bi bi-people-fill"></i>
-          New here?
+          {{ t("home.index.new_here", "New here?") }}
         </h2>
         <p class="mb-2" style="opacity:.9;">
-          {{ config.BBS_NAME }} is a modern take on the classic
-          FidoNet-era BBS — message boards, file libraries, door
-          games (Trade Wars, LORD), inter-BBS chat, and federation
-          with other ANetBBS systems. Sign up for a free account or
-          dial in over telnet / SSH / rlogin.
+          {{ config.BBS_NAME }} {{ t("home.index.is_a_modern_take_on_the_classic_fidonet_era_bbs_message_boards_file_librari", "is a modern take on the classic FidoNet-era BBS — message boards, file libraries, door games (Trade Wars, LORD), inter-BBS chat, and federation with other ANetBBS systems. Sign up for a free account or dial in over telnet / SSH / rlogin.") }}
         </p>
         <p class="mb-0 small" style="opacity:.75;">
-          {% if stats.total_users %}{{ stats.total_users }} active members ·{% endif %}
-          {% if stats.total_posts %}{{ stats.total_posts }} posts ·{% endif %}
-          {% if stats.total_boards %}{{ stats.total_boards }} boards ·{% endif %}
-          Sysop: {{ config.SYSOP_NAME or 'Sysop' }}
+          {% if stats.total_users %}{{ stats.total_users }} {{ t("home.index.active_members", "active members ·") }}{% endif %}
+          {% if stats.total_posts %}{{ stats.total_posts }} {{ t("home.index.member_posts", "posts ·") }}{% endif %}
+          {% if stats.total_boards %}{{ stats.total_boards }} {{ t("home.index.member_boards", "boards ·") }}{% endif %}
+          {{ t("home.index.sysop", "Sysop:") }} {{ config.SYSOP_NAME or 'Sysop' }}
           {% if config.SYSOP_EMAIL %}<span class="ms-1">&lt;{{ config.SYSOP_EMAIL }}&gt;</span>{% endif %}
         </p>
       </div>
       <div class="col-md-4 text-md-end mt-3 mt-md-0">
         <a href="{{ url_for('auth.register') }}" class="btn btn-light btn-lg me-2">
-          <i class="bi bi-person-plus"></i> Sign up
+          <i class="bi bi-person-plus"></i> {{ t("home.index.sign_up", "Sign up") }}
         </a>
         <a href="{{ url_for('auth.login') }}" class="btn btn-outline-light btn-lg">
-          <i class="bi bi-box-arrow-in-right"></i> Log in
+          <i class="bi bi-box-arrow-in-right"></i> {{ t("home.index.log_in", "Log in") }}
         </a>
       </div>
     </div>
@@ -50,7 +46,7 @@
 {% if qotd %}
 <div class="card mb-3" style="border-left:3px solid var(--theme-accent);">
     <div class="card-body py-2">
-        <small class="text-muted me-2"><i class="bi bi-quote"></i> MOTD:</small>
+        <small class="text-muted me-2"><i class="bi bi-quote"></i> {{ t("home.index.motd", "MOTD:") }}</small>
         <em>{{ qotd }}</em>
     </div>
 </div>
@@ -59,12 +55,12 @@
 {% if active_poll %}
 <div class="card mb-3" style="border-left:3px solid var(--theme-primary);">
     <div class="card-header py-2">
-        <i class="bi bi-bar-chart"></i> Active Poll
+        <i class="bi bi-bar-chart"></i> {{ t("home.index.active_poll", "Active Poll") }}
     </div>
     <div class="card-body py-2">
         <strong>{{ active_poll.question }}</strong>
         <a href="{{ url_for('polls.view_poll', poll_id=active_poll.id) }}" class="btn btn-sm btn-primary float-end">
-            Vote &rarr;
+            {{ t("home.index.vote", "Vote →") }}
         </a>
     </div>
 </div>
@@ -75,7 +71,7 @@
         <!-- Recent Posts -->
         <div class="card mb-3">
             <div class="card-header">
-                <i class="bi bi-chat-left-text"></i> Recent Posts
+                <i class="bi bi-chat-left-text"></i> {{ t("home.index.recent_posts", "Recent Posts") }}
             </div>
             <div class="card-body">
                 {% if recent_posts %}
@@ -87,12 +83,12 @@
                                     <small>{{ post.created_at|eastern('%Y-%m-%d %H:%M') }}</small>
                                 </div>
                                 <p class="mb-1">{{ post.content[:100] }}{% if post.content|length > 100 %}...{% endif %}</p>
-                                <small>by {{ post.author.username }} in {{ post.board.name }}</small>
+                                <small>{{ t("home.index.by", "by") }} {{ post.author.username }} {{ t("home.index.in", "in") }} {{ post.board.name }}</small>
                             </a>
                         {% endfor %}
                     </div>
                 {% else %}
-                    <p>No posts yet. Be the first to post!</p>
+                    <p>{{ t("home.index.no_posts_yet_be_the_first_to_post", "No posts yet. Be the first to post!") }}</p>
                 {% endif %}
             </div>
         </div>
@@ -100,7 +96,7 @@
         <!-- Message Boards -->
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-list"></i> Message Boards
+                <i class="bi bi-list"></i> {{ t("home.index.message_boards", "Message Boards") }}
             </div>
             <div class="card-body">
                 {% if boards %}
@@ -115,7 +111,7 @@
                         {% endfor %}
                     </div>
                 {% else %}
-                    <p>No boards available.</p>
+                    <p>{{ t("home.index.no_boards_available", "No boards available.") }}</p>
                 {% endif %}
             </div>
         </div>
@@ -126,14 +122,14 @@
         {% if bulletins %}
             <div class="card mb-3">
                 <div class="card-header">
-                    <i class="bi bi-megaphone"></i> Bulletins
+                    <i class="bi bi-megaphone"></i> {{ t("home.index.bulletins", "Bulletins") }}
                 </div>
                 <div class="card-body">
                     {% for bulletin in bulletins %}
                         <div class="mb-3">
                             <h6>{{ bulletin.title }}</h6>
                             <p class="small">{{ bulletin.content }}</p>
-                            <small class="text-muted">Posted {{ bulletin.created_at|eastern('%Y-%m-%d') }}</small>
+                            <small class="text-muted">{{ t("home.index.posted", "Posted") }} {{ bulletin.created_at|eastern('%Y-%m-%d') }}</small>
                         </div>
                         {% if not loop.last %}<hr>{% endif %}
                     {% endfor %}
@@ -144,32 +140,32 @@
         <!-- Statistics -->
         <div class="card mb-3">
             <div class="card-header">
-                <i class="bi bi-graph-up"></i> Statistics
+                <i class="bi bi-graph-up"></i> {{ t("home.index.statistics", "Statistics") }}
             </div>
             <div class="card-body">
-                <p><strong>Boards:</strong> {{ stats.total_boards }}</p>
-                <p><strong>Posts:</strong> {{ stats.total_posts }}</p>
-                <p><strong>Active Users:</strong> {{ stats.total_users }}</p>
+                <p><strong>{{ t("home.index.boards", "Boards:") }}</strong> {{ stats.total_boards }}</p>
+                <p><strong>{{ t("home.index.posts", "Posts:") }}</strong> {{ stats.total_posts }}</p>
+                <p><strong>{{ t("home.index.active_users", "Active Users:") }}</strong> {{ stats.total_users }}</p>
             </div>
         </div>
 
         <!-- Quick Links -->
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-link-45deg"></i> Quick Links
+                <i class="bi bi-link-45deg"></i> {{ t("home.index.quick_links", "Quick Links") }}
             </div>
             <div class="card-body">
                 <ul class="list-unstyled">
-                    <li><a href="{{ url_for('boards.list_boards') }}"><i class="bi bi-arrow-right"></i> Browse Boards</a></li>
-                    <li><a href="{{ url_for('files.list_files') }}"><i class="bi bi-arrow-right"></i> File Gallery</a></li>
+                    <li><a href="{{ url_for('boards.list_boards') }}"><i class="bi bi-arrow-right"></i> {{ t("home.index.browse_boards", "Browse Boards") }}</a></li>
+                    <li><a href="{{ url_for('files.list_files') }}"><i class="bi bi-arrow-right"></i> {{ t("home.index.file_gallery", "File Gallery") }}</a></li>
                     {% if current_user.is_authenticated %}
-                        <li><a href="{{ url_for('mrc.index') }}"><i class="bi bi-arrow-right"></i> MRC Chat</a></li>
-                        <li><a href="{{ url_for('irc.index') }}"><i class="bi bi-arrow-right"></i> IRC</a></li>
-                        <li><a href="{{ url_for('profile.index') }}"><i class="bi bi-arrow-right"></i> My Profile</a></li>
-                        <li><a href="{{ url_for('pm.inbox') }}"><i class="bi bi-arrow-right"></i> Messages</a></li>
+                        <li><a href="{{ url_for('mrc.index') }}"><i class="bi bi-arrow-right"></i> {{ t("home.index.mrc_chat", "MRC Chat") }}</a></li>
+                        <li><a href="{{ url_for('irc.index') }}"><i class="bi bi-arrow-right"></i> {{ t("home.index.irc", "IRC") }}</a></li>
+                        <li><a href="{{ url_for('profile.index') }}"><i class="bi bi-arrow-right"></i> {{ t("home.index.my_profile", "My Profile") }}</a></li>
+                        <li><a href="{{ url_for('pm.inbox') }}"><i class="bi bi-arrow-right"></i> {{ t("home.index.messages", "Messages") }}</a></li>
                     {% else %}
-                        <li><a href="{{ url_for('auth.register') }}"><i class="bi bi-arrow-right"></i> Register</a></li>
-                        <li><a href="{{ url_for('auth.login') }}"><i class="bi bi-arrow-right"></i> Login</a></li>
+                        <li><a href="{{ url_for('auth.register') }}"><i class="bi bi-arrow-right"></i> {{ t("home.index.register", "Register") }}</a></li>
+                        <li><a href="{{ url_for('auth.login') }}"><i class="bi bi-arrow-right"></i> {{ t("home.index.login", "Login") }}</a></li>
                     {% endif %}
                 </ul>
             </div>
@@ -179,9 +175,9 @@
         {% if online_users %}
         <div class="card mt-3">
             <div class="card-header">
-                <i class="bi bi-people"></i> Who's Online ({{ online_users | length }})
+                <i class="bi bi-people"></i> {{ t("home.index.who_s_online", "Who's Online (") }}{{ online_users | length }})
                 <a href="{{ url_for('who.index') if current_user.is_authenticated else '#' }}"
-                   class="float-end small">all</a>
+                   class="float-end small">{{ t("home.index.all", "all") }}</a>
             </div>
             <div class="card-body">
                 <ul class="list-unstyled mb-0">
@@ -198,37 +194,37 @@
         {% if config.MRC_NETWORK_STATS_ENABLED %}
         <div class="card mt-3">
             <div class="card-header">
-                <i class="bi bi-broadcast"></i> MRC Stats
+                <i class="bi bi-broadcast"></i> {{ t("home.index.mrc_stats", "MRC Stats") }}
             </div>
             <div class="card-body" id="mrc-network-stats">
                 <div class="d-flex justify-content-between mb-1">
-                    <span class="text-muted">BBSes</span>
+                    <span class="text-muted">{{ t("home.index.bbses", "BBSes") }}</span>
                     <span class="fw-bold text-success" id="mrc-stat-bbses">&mdash;</span>
                 </div>
                 <div class="d-flex justify-content-between mb-1">
-                    <span class="text-muted">Rooms</span>
+                    <span class="text-muted">{{ t("home.index.rooms", "Rooms") }}</span>
                     <span class="fw-bold text-success" id="mrc-stat-rooms">&mdash;</span>
                 </div>
                 <div class="d-flex justify-content-between mb-1">
-                    <span class="text-muted">Users</span>
+                    <span class="text-muted">{{ t("home.index.users", "Users") }}</span>
                     <span class="fw-bold text-success" id="mrc-stat-users">&mdash;</span>
                 </div>
                 <div class="d-flex justify-content-between mb-2">
-                    <span class="text-muted">Activity</span>
+                    <span class="text-muted">{{ t("home.index.activity", "Activity") }}</span>
                     <span class="fw-bold text-success" id="mrc-stat-activity">&mdash;</span>
                 </div>
-                <div class="text-muted small mb-0" id="mrc-stat-updated">Updating&hellip;</div>
+                <div class="text-muted small mb-0" id="mrc-stat-updated">{{ t("home.index.updating", "Updating…") }}</div>
             </div>
         </div>
         {% endif %}
 
         {% if todays_birthdays %}
         <div class="card mt-3 border-warning">
-            <div class="card-header">🎂 Birthdays Today</div>
+            <div class="card-header">{{ t("home.index.birthdays_today", "🎂 Birthdays Today") }}</div>
             <div class="card-body">
                 {% for u in todays_birthdays %}
                     <div><strong>{{ u.username }}</strong>
-                        — wish them a happy one!</div>
+                        {{ t("home.index.wish_them_a_happy_one", "— wish them a happy one!") }}</div>
                 {% endfor %}
             </div>
         </div>
@@ -236,7 +232,7 @@
 
         {% if active_broadcasts %}
         <div class="card mt-3 border-warning">
-            <div class="card-header"><i class="bi bi-megaphone-fill text-warning"></i> Sysop Broadcasts</div>
+            <div class="card-header"><i class="bi bi-megaphone-fill text-warning"></i> {{ t("home.index.sysop_broadcasts", "Sysop Broadcasts") }}</div>
             <div class="card-body">
                 {% for b in active_broadcasts %}
                 <div class="mb-2"><strong>{{ b.sender.username if b.sender else 'sysop' }}:</strong>
@@ -250,14 +246,14 @@
 
         {% if today_stats %}
         <div class="card mt-3">
-            <div class="card-header"><i class="bi bi-bar-chart"></i> Last 24 hours</div>
+            <div class="card-header"><i class="bi bi-bar-chart"></i> {{ t("home.index.last_24_hours", "Last 24 hours") }}</div>
             <div class="card-body">
                 <ul class="list-unstyled mb-0 small">
-                    <li>📝 {{ today_stats.posts }} board posts</li>
-                    <li>📨 {{ today_stats.echomail }} echomail</li>
-                    <li>📣 {{ today_stats.shouts }} shouts</li>
-                    <li>👋 {{ today_stats.new_users }} new users</li>
-                    {% if file_area_count %}<li>📂 {{ file_area_count }} file areas</li>{% endif %}
+                    <li>📝 {{ today_stats.posts }} {{ t("home.index.board_posts", "board posts") }}</li>
+                    <li>📨 {{ today_stats.echomail }} {{ t("home.index.echomail", "echomail") }}</li>
+                    <li>📣 {{ today_stats.shouts }} {{ t("home.index.shouts", "shouts") }}</li>
+                    <li>👋 {{ today_stats.new_users }} {{ t("home.index.new_users", "new users") }}</li>
+                    {% if file_area_count %}<li>📂 {{ file_area_count }} {{ t("home.index.file_areas", "file areas") }}</li>{% endif %}
                 </ul>
             </div>
         </div>
@@ -266,8 +262,8 @@
         {% if recent_shouts and current_user.is_authenticated %}
         <div class="card mt-3">
             <div class="card-header">
-                <i class="bi bi-megaphone"></i> Latest Shouts
-                <a href="{{ url_for('shoutbox.index') }}" class="float-end small">all</a>
+                <i class="bi bi-megaphone"></i> {{ t("home.index.latest_shouts", "Latest Shouts") }}
+                <a href="{{ url_for('shoutbox.index') }}" class="float-end small">{{ t("home.index.all", "all") }}</a>
             </div>
             <div class="card-body">
                 {% for s in recent_shouts %}
@@ -283,15 +279,15 @@
         {% if latest_echomail and current_user.is_authenticated %}
         <div class="card mt-3">
             <div class="card-header">
-                <i class="bi bi-envelope-paper"></i> Latest Echomail
-                <a href="{{ url_for('echomail.index') }}" class="float-end small">all</a>
+                <i class="bi bi-envelope-paper"></i> {{ t("home.index.latest_echomail", "Latest Echomail") }}
+                <a href="{{ url_for('echomail.index') }}" class="float-end small">{{ t("home.index.all", "all") }}</a>
             </div>
             <div class="card-body">
                 <ul class="list-unstyled mb-0 small">
                     {% for em in latest_echomail %}
                     <li class="mb-1">
                         <a href="{{ url_for('echomail.read', area_id=em.area_id, message_id=em.id) }}">
-                            {{ em.subject[:48] if em.subject else '(no subject)' }}
+                            {{ em.subject[:48] if em.subject else t('common.no_subject', '(no subject)') }}
                         </a>
                         <div class="text-muted" style="font-size:0.75rem;">
                             {{ em.from_name }} — {{ em.created_at|eastern('%m/%d %H:%M') }}
@@ -312,6 +308,7 @@
 (function () {
     'use strict';
     var ACTIVITY_CLASS = {NONE: 'text-muted', LOW: 'text-success', MED: 'text-warning', HIGH: 'text-danger'};
+    var ACTIVITY_LABEL = {"NONE": {{ t("home.index.activity_none", "NONE") | tojson }}, "LOW": {{ t("home.index.activity_low", "LOW") | tojson }}, "MED": {{ t("home.index.activity_med", "MED") | tojson }}, "HIGH": {{ t("home.index.activity_high", "HIGH") | tojson }}};
 
     function setStat(id, value) {
         var el = document.getElementById(id);
@@ -328,13 +325,13 @@
                 setStat('mrc-stat-users', data.users);
                 var activityEl = document.getElementById('mrc-stat-activity');
                 if (activityEl) {
-                    activityEl.textContent = data.activity_label;
+                    activityEl.textContent = ACTIVITY_LABEL[data.activity_label] || data.activity_label;
                     activityEl.className = 'fw-bold ' + (ACTIVITY_CLASS[data.activity_label] || 'text-success');
                 }
                 var updatedEl = document.getElementById('mrc-stat-updated');
                 if (updatedEl) {
-                    var when = new Date().toLocaleTimeString();
-                    updatedEl.textContent = (data.stale ? 'Last known ' : 'Updated ') + when;
+                    var when = new Date().toLocaleTimeString(document.documentElement.lang);
+                    updatedEl.textContent = (data.stale ? {{ t("home.index.last_known", "Last known ") | tojson }} : {{ t("home.index.updated", "Updated ") | tojson }}) + when;
                 }
             })
             .catch(function () { /* best-effort widget -- stay quiet on failure */ });

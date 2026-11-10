@@ -14,6 +14,7 @@ from sqlalchemy import func, and_, or_
 from ..models import db, Board, Post, BoardSubscription, BoardLastRead
 from ..features.access_control import evaluate_access
 from ..features.rate_limit import rate_limit, _user_or_ip
+from ..features.i18n import FormTranslations, translate as _t
 
 boards_bp = Blueprint('boards', __name__, url_prefix='/boards')
 
@@ -34,17 +35,34 @@ def _check_board_access(board):
         abort(403)
 
 
-class PostForm(FlaskForm):
+class _BoardForm(FlaskForm):
+    class Meta:
+        def get_translations(self, form):
+            return FormTranslations()
+
+
+class PostForm(_BoardForm):
     """Form for creating/editing posts"""
     subject = StringField('Subject', validators=[DataRequired(), Length(min=3, max=200)])
     content = TextAreaField('Content', validators=[DataRequired(), Length(min=10)])
     submit = SubmitField('Post')
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.subject.label.text = _t('boards.subject', 'Subject')
+        self.content.label.text = _t('boards.content', 'Content')
+        self.submit.label.text = _t('boards.post', 'Post')
 
-class ReplyForm(FlaskForm):
+
+class ReplyForm(_BoardForm):
     """Form for replying to posts"""
     content = TextAreaField('Reply', validators=[DataRequired(), Length(min=1)])
     submit = SubmitField('Reply')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.content.label.text = _t('boards.reply', 'Reply')
+        self.submit.label.text = _t('boards.reply', 'Reply')
 
 
 @boards_bp.route('/')
@@ -226,9 +244,9 @@ def new_post(board_id):
         _tagline_id = request.form.get('tagline_id', type=int)
         if _tagline_id:
             from ..models import Tagline, format_tagline_append
-            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
-            if _t:
-                clean_content = clean_content + format_tagline_append(_t.text)
+            _tagline = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _tagline:
+                clean_content = clean_content + format_tagline_append(_tagline.text)
         post = Post(
             board_id=board_id,
             author_id=current_user.id,
@@ -292,7 +310,7 @@ def new_post(board_id):
         web_log_activity(current_user.id, 'board_post',
                          details=f'{board.name}: {clean_subject[:100]}')
 
-        flash('Post created successfully!', 'success')
+        flash(_t('boards.created', 'Post created successfully!'), 'success')
         return redirect(url_for('boards.view_post', post_id=post.id))
     
     from ..models import get_active_taglines
@@ -418,7 +436,7 @@ def reply_post(post_id):
 
     # Locked threads: only mods + admins may reply.
     if getattr(root, 'is_locked', False) and not _can_moderate_post(root):
-        flash('This thread is locked.', 'warning')
+        flash(_t('boards.thread_locked', 'This thread is locked.'), 'warning')
         return redirect(url_for('boards.view_post', post_id=root.id))
 
     # Optional explicit parent for nested threading.
@@ -457,9 +475,9 @@ def reply_post(post_id):
         _tagline_id = request.form.get('tagline_id', type=int)
         if _tagline_id:
             from ..models import Tagline, format_tagline_append
-            _t = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
-            if _t:
-                clean_content = clean_content + format_tagline_append(_t.text)
+            _tagline = Tagline.query.filter_by(id=_tagline_id, is_active=True).first()
+            if _tagline:
+                clean_content = clean_content + format_tagline_append(_tagline.text)
         reply = Post(
             board_id=parent_post.board_id,
             author_id=current_user.id,
@@ -512,9 +530,9 @@ def reply_post(post_id):
         web_log_activity(current_user.id, 'board_reply',
                          details=f'{parent_post.board.name}: {reply.subject[:100]}')
 
-        flash('Reply posted successfully!', 'success')
+        flash(_t('boards.reply_posted', 'Reply posted successfully!'), 'success')
     else:
-        flash('Error posting reply. Please check your input.', 'danger')
+        flash(_t('boards.reply_error', 'Error posting reply. Please check your input.'), 'danger')
 
     return redirect(url_for('boards.view_post', post_id=root.id))
 
@@ -545,7 +563,7 @@ def delete_post(post_id):
     db.session.delete(post)
     db.session.commit()
     
-    flash('Post deleted successfully!', 'success')
+    flash(_t('boards.deleted', 'Post deleted successfully!'), 'success')
     
     # Redirect appropriately
     if parent_id:
@@ -564,7 +582,7 @@ def subscribe(board_id):
         # Always allow unsubscribing, even if access was revoked after
         # the fact -- only NEW subscriptions need the access check below.
         db.session.delete(existing); db.session.commit()
-        flash(f'Unsubscribed from {board.name}.', 'info')
+        flash(_t('boards.unsubscribed', 'Unsubscribed from {board}.', board=board.name), 'info')
     else:
         # Real gap found in a full message-boards security audit: this
         # had no board-access check at all -- a below-level user could
@@ -576,7 +594,7 @@ def subscribe(board_id):
         db.session.add(BoardSubscription(
             user_id=current_user.id, board_id=board.id))
         db.session.commit()
-        flash(f'Subscribed to {board.name}.', 'success')
+        flash(_t('boards.subscribed', 'Subscribed to {board}.', board=board.name), 'success')
     return redirect(url_for('boards.view_board', board_id=board.id))
 
 
@@ -603,7 +621,8 @@ def toggle_pin(post_id):
         abort(403)
     post.is_pinned = not bool(post.is_pinned)
     db.session.commit()
-    flash('Post ' + ('pinned.' if post.is_pinned else 'unpinned.'), 'success')
+    flash(_t('boards.post_pinned', 'Post pinned.') if post.is_pinned
+          else _t('boards.post_unpinned', 'Post unpinned.'), 'success')
     return redirect(url_for('boards.view_post', post_id=post.id))
 
 
@@ -615,7 +634,8 @@ def toggle_lock(post_id):
         abort(403)
     post.is_locked = not bool(post.is_locked)
     db.session.commit()
-    flash('Thread ' + ('locked.' if post.is_locked else 'unlocked.'), 'success')
+    flash(_t('boards.thread_locked_success', 'Thread locked.') if post.is_locked
+          else _t('boards.thread_unlocked', 'Thread unlocked.'), 'success')
     return redirect(url_for('boards.view_post', post_id=post.id))
 
 

@@ -1,15 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Translations{% endblock %}
+{% block title %}{{ t('admin.translations.title', 'Translations') }}{% endblock %}
 
 {% block content %}
 <div class="bbs-header">
-    <h1><i class="bi bi-translate"></i> Translations</h1>
-    <p>Text overrides by (language, key) — read by both the terminal
-    menu engine and the web UI's <code>t()</code> helper. English
-    ('en') is the built-in fallback and never needs a row here. See
-    <a href="https://github.com/anetonline/ANetBBS/blob/main/docs/17-development.md#translating-a-web-template-string">docs/17-development.md</a>
-    for the key-naming convention and current template coverage.</p>
+    <h1><i class="bi bi-translate"></i> {{ t('admin.translations.title', 'Translations') }}</h1>
+    <p>{{ t('admin.translations.help', 'Customize the text for each language and key. These entries are used by the terminal menus and the web interface. English (en) is the built-in fallback and needs no entry here.') }}
+    <a href="https://github.com/anetonline/ANetBBS/blob/main/docs/17-development.md#translating-a-web-template-string">{{ t('admin.translations.documentation', 'Key naming and template coverage') }}</a>.</p>
 </div>
 
 <form method="post" class="card mb-3">
@@ -18,19 +15,19 @@
     <div class="card-body">
         <div class="row g-2 align-items-end">
             <div class="col-md-2">
-                <label class="form-label">Language code</label>
-                <input type="text" name="lang" class="form-control" placeholder="es" maxlength="8" required>
+                <label class="form-label" for="translation-lang">{{ t('admin.translations.language_code', 'Language code') }}</label>
+                <input type="text" id="translation-lang" name="lang" class="form-control" placeholder="es" maxlength="8" required>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Key</label>
-                <input type="text" name="key" class="form-control" placeholder="nav.home" maxlength="200" required>
+                <label class="form-label" for="translation-key">{{ t('admin.translations.key', 'Key') }}</label>
+                <input type="text" id="translation-key" name="key" class="form-control" placeholder="nav.home" maxlength="200" required>
             </div>
             <div class="col-md-5">
-                <label class="form-label">Translated text</label>
-                <input type="text" name="text" class="form-control" required>
+                <label class="form-label" for="translation-text">{{ t('admin.translations.translated_text', 'Translated text') }}</label>
+                <input type="text" id="translation-text" name="text" class="form-control" required>
             </div>
             <div class="col-md-1">
-                <button class="btn btn-primary w-100">Add</button>
+                <button class="btn btn-primary w-100">{{ t('admin.translations.add', 'Add') }}</button>
             </div>
         </div>
     </div>
@@ -40,7 +37,13 @@
     <div class="card-body p-0">
     {% if rows %}
         <table class="table table-sm mb-0">
-            <thead><tr><th>Lang</th><th>Key</th><th>Text</th><th>Updated</th><th></th></tr></thead>
+            <thead><tr>
+                <th scope="col">{{ t('admin.translations.language', 'Language') }}</th>
+                <th scope="col">{{ t('admin.translations.key', 'Key') }}</th>
+                <th scope="col">{{ t('admin.translations.text', 'Text') }}</th>
+                <th scope="col">{{ t('admin.translations.updated', 'Updated') }}</th>
+                <th></th>
+            </tr></thead>
             <tbody>
             {% for r in rows %}
                 <tr>
@@ -51,8 +54,10 @@
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="action" value="edit">
                             <input type="hidden" name="row_id" value="{{ r.id }}">
-                            <input type="text" name="text" class="form-control form-control-sm" value="{{ r.text }}">
-                            <button class="btn btn-outline-secondary btn-sm">Save</button>
+                            <input type="text" name="text" class="form-control form-control-sm"
+                                   aria-label="{{ t('admin.translations.row_text', 'Translated text for {language}/{entry}', language=r.lang, entry=r.key) }}"
+                                   value="{{ r.text }}">
+                            <button class="btn btn-outline-secondary btn-sm">{{ t('admin.translations.save', 'Save') }}</button>
                         </form>
                     </td>
                     <td><small>{{ r.updated_at|eastern('%Y-%m-%d') if r.updated_at else '' }}</small></td>
@@ -61,14 +66,14 @@
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <input type="hidden" name="action" value="delete">
                             <input type="hidden" name="row_id" value="{{ r.id }}">
-                            <button class="btn btn-link btn-sm text-danger p-0">delete</button>
+                            <button class="btn btn-link btn-sm text-danger p-0">{{ t('admin.translations.delete', 'Delete') }}</button>
                         </form>
                     </td>
                 </tr>
             {% endfor %}
             </tbody>
         </table>
-    {% else %}<div class="p-3 text-muted">No translation overrides yet — add one above.</div>{% endif %}
+    {% else %}<div class="p-3 text-muted">{{ t('admin.translations.empty', 'No translation overrides yet. Add one above.') }}</div>{% endif %}
     </div>
 </div>
 {% endblock %}

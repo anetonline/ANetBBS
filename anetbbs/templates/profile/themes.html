@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Theme Preview - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t('profile.theme_preview', 'Theme Preview') }} - {{ config.BBS_NAME }}{% endblock %}
 
 {% block content %}
 <div class="bbs-header">
-    <h1><i class="bi bi-palette"></i> Available Themes</h1>
+    <h1><i class="bi bi-palette"></i> {{ t('profile.available_themes', 'Available Themes') }}</h1>
 </div>
 
-<p>Click on a theme preview to select it. <a href="{{ url_for('profile.edit') }}">Go to profile edit</a> to save your choice.</p>
+<p>{{ t('profile.theme_preview_instruction', 'Click on a theme preview to select it.') }} <a href="{{ url_for('profile.edit') }}">{{ t('profile.go_edit', 'Go to profile edit') }}</a> {{ t('profile.save_theme_instruction', 'to save your choice.') }}</p>
 
 <div class="row g-3">
     {% for theme in themes %}
@@ -23,17 +23,17 @@
                     <p style="color:{{ vars.get('--theme-primary', '#00ff00') }};">{{ theme.display_name }}</p>
                     <p style="color:{{ vars.get('--theme-primary', '#00ff00') }};font-size:0.8rem;">{{ theme.description }}</p>
                     <div style="background-color:{{ vars.get('--theme-input-bg', '#000') }};border:1px solid {{ vars.get('--theme-primary', '#00ff00') }};padding:5px;color:{{ vars.get('--theme-primary', '#00ff00') }};font-size:0.8rem;">
-                        Sample text input
+                        {{ t('profile.sample_input', 'Sample text input') }}
                     </div>
                 </div>
             </div>
             <div class="card-footer">
                 <strong>{{ theme.display_name }}</strong>
                 {% if current_user.is_authenticated and current_user.theme_id == theme.id %}
-                <span class="badge bg-success">Current</span>
+                <span class="badge bg-success">{{ t('profile.current', 'Current') }}</span>
                 {% endif %}
                 {% if theme.is_default %}
-                <span class="badge bg-warning text-dark">Default</span>
+                <span class="badge bg-warning text-dark">{{ t('profile.default', 'Default') }}</span>
                 {% endif %}
             </div>
         </div>

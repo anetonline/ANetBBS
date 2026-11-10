@@ -2,6 +2,7 @@
 """
 Authentication blueprint for user login, registration, and logout
 """
+from copy import copy
 import random
 import secrets
 import threading
@@ -23,6 +24,7 @@ from ..models import (db, User, PasswordResetToken, RegistrationAttempt,
                       PasswordRecoverySettings,
                       EmailVerifyToken, AutoBanConfig)
 from ..features.rate_limit import rate_limit
+from ..features.i18n import FormTranslations, current_language, translate as _t
 
 
 def _active_security_questions():
@@ -283,14 +285,65 @@ REGISTER_LIMIT_WINDOW_MINUTES = 60
 PASSWORD_RESET_TTL_HOURS = 2
 
 
-class LoginForm(FlaskForm):
+class AuthForm(FlaskForm):
+    """Translate bound form text for each request, never at import time."""
+    class Meta(FlaskForm.Meta):
+        def get_translations(self, form):
+            return FormTranslations()
+
+    _label_keys = {
+        'Username': 'auth.username',
+        'Email': 'auth.email',
+        'Password': 'auth.password',
+        'Confirm Password': 'auth.confirm_password',
+        'Login': 'auth.login',
+        'Register': 'auth.register',
+        'Invite Code': 'auth.invite_code',
+        'Username or Email': 'auth.username_or_email',
+        'Send Reset Link': 'auth.send_reset_link',
+        'New Password': 'auth.new_password',
+        'Set Password': 'auth.set_password',
+    }
+    _message_keys = {
+        'Username must be between 3 and 80 characters': 'validation.username_length',
+        'Username must start with a letter or digit, and only use letters, digits, spaces, dot, apostrophe, hyphen, or underscore.': 'validation.username_characters',
+        'Password must be at least 6 characters': 'validation.password_length',
+        'Passwords must match': 'validation.passwords_match',
+        'Invalid email address.': 'validation.email',
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self:
+            default = field.label.text
+            if default in self._label_keys:
+                field.label.text = _t(self._label_keys[default], default)
+            # WTForms reuses the class-level validator instances. Copy before
+            # translating their custom messages so another request's language
+            # cannot leak into this form.
+            field.validators = [copy(validator) for validator in field.validators]
+            for validator in field.validators:
+                default = getattr(validator, 'message', None)
+                if default in self._message_keys:
+                    validator.message = _t(self._message_keys[default], default)
+        for number in range(1, 4):
+            question = getattr(self, f'question_{number}', None)
+            answer = getattr(self, f'answer_{number}', None)
+            if question is not None:
+                question.label.text = _t('auth.security_question_number',
+                                         'Security Question {number}', number=number)
+            if answer is not None:
+                answer.label.text = _t('auth.answer_number', 'Answer {number}', number=number)
+
+
+class LoginForm(AuthForm):
     """Login form"""
     username = StringField('Username', validators=[DataRequired(), Length(min=3, max=80)])
     password = PasswordField('Password', validators=[DataRequired()])
     submit = SubmitField('Login')
 
 
-class RegisterForm(FlaskForm):
+class RegisterForm(AuthForm):
     """Registration form"""
     username = StringField('Username', validators=[
         DataRequired(),
@@ -379,27 +432,27 @@ class RegisterForm(FlaskForm):
         if User.query.filter(
             db.func.lower(User.username) == field.data.lower()
         ).first():
-            raise ValidationError('Username already taken. Please choose a different one.')
+            raise ValidationError(_t('validation.username_taken', 'Username already taken. Please choose a different one.'))
 
     def validate_email(self, field):
         if User.query.filter(
             db.func.lower(User.email) == field.data.lower()
         ).first():
-            raise ValidationError('Email already registered. Please use a different one.')
+            raise ValidationError(_t('validation.email_registered', 'Email already registered. Please use a different one.'))
 
     def validate_invite_code(self, field):
         required = current_app.config.get('REGISTRATION_INVITE_CODE', '')
         if required and field.data != required:
-            raise ValidationError('Incorrect invite code.')
+            raise ValidationError(_t('validation.invite_code', 'Incorrect invite code.'))
 
     def validate_question_2(self, field):
         if field.data and field.data == self.question_1.data:
-            raise ValidationError('Please choose a different question.')
+            raise ValidationError(_t('validation.different_question', 'Please choose a different question.'))
 
     def validate_question_3(self, field):
         if field.data and (field.data == self.question_1.data
                            or field.data == self.question_2.data):
-            raise ValidationError('Please choose a different question.')
+            raise ValidationError(_t('validation.different_question', 'Please choose a different question.'))
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
@@ -415,11 +468,11 @@ def login():
     ip = _client_ip()
     # IP ban check — refuse the login attempt entirely.
     if _ip_is_banned(ip):
-        flash('Your IP has been banned. Contact the sysop if you believe this is a mistake.', 'danger')
+        flash(_t('auth.ip_banned', 'Your IP has been banned. Contact the sysop if you believe this is a mistake.'), 'danger')
         return redirect(url_for('auth.login'))
     # Country block check.
     if _ip_country_blocked(ip):
-        flash('Access from your region is not permitted.', 'danger')
+        flash(_t('auth.region_blocked', 'Access from your region is not permitted.'), 'danger')
         return redirect(url_for('auth.login'))
 
     form = LoginForm()
@@ -434,37 +487,38 @@ def login():
             # takes statistically the same time as a real username
             # with a wrong password, not a short-circuited instant return.
             check_password_hash(_DUMMY_PASSWORD_HASH, form.password.data)
-            flash('Invalid username or password', 'danger')
+            flash(_t('auth.invalid_credentials', 'Invalid username or password'), 'danger')
             return redirect(url_for('auth.login'))
         if not user.check_password(form.password.data):
-            flash('Invalid username or password', 'danger')
+            flash(_t('auth.invalid_credentials', 'Invalid username or password'), 'danger')
             return redirect(url_for('auth.login'))
 
         if not user.is_active:
-            flash('Your account has been deactivated. Please contact an administrator.', 'warning')
+            flash(_t('auth.account_deactivated', 'Your account has been deactivated. Please contact an administrator.'), 'warning')
             return redirect(url_for('auth.login'))
 
         if getattr(user, 'is_locked', False):
-            flash('This account is locked. Contact the sysop.', 'danger')
+            flash(_t('auth.account_locked', 'This account is locked. Contact the sysop.'), 'danger')
             return redirect(url_for('auth.login'))
 
         # Block unverified accounts.
         if not getattr(user, 'is_verified', True) and not user.is_admin:
             from ..mailer import email_verify_enabled
             if email_verify_enabled():
-                flash('Please verify your email address before logging in. '
-                      'Check your inbox for the verification link.', 'warning')
+                flash(_t('auth.verify_before_login', 'Please verify your email address before logging in. '
+                         'Check your inbox for the verification link.'), 'warning')
             elif current_app.config.get('NUV_ENABLED'):
-                flash('Your account is awaiting sysop approval. '
-                      'Try again later.', 'warning')
+                flash(_t('auth.approval_pending', 'Your account is awaiting sysop approval. '
+                         'Try again later.'), 'warning')
             else:
-                flash('Your account has not been verified. Contact the sysop.', 'warning')
+                flash(_t('auth.account_unverified', 'Your account has not been verified. Contact the sysop.'), 'warning')
             return redirect(url_for('auth.login'))
         
         # Update login information
         user.update_login()
 
         login_user(user, remember=True)
+        flask_session['language'] = user.language or 'en'
         # Caller log row — best effort, never block the login. Created
         # BEFORE _log_activity('login') and its id stashed in
         # flask_session so every UserActivity event logged for the rest
@@ -523,10 +577,10 @@ def login():
         try:
             from ..features.achievements import check_for_user
             for code in check_for_user(user):
-                flash(f'🏆 New achievement unlocked: {code}', 'success')
+                flash(_t('auth.achievement_unlocked', '🏆 New achievement unlocked: {code}', code=code), 'success')
         except Exception:
             db.session.rollback()
-        flash(f'Welcome back, {user.username}!', 'success')
+        flash(_t('auth.welcome_back', 'Welcome back, {username}!', username=user.username), 'success')
         
         # Redirect to next page or home
         # Validate the post-login redirect target to prevent open-redirects.
@@ -572,15 +626,15 @@ def register():
         return redirect(url_for('main.index'))
 
     if not current_app.config.get('REGISTRATION_OPEN', True):
-        flash('New account registration is currently closed.', 'warning')
+        flash(_t('auth.registration_closed', 'New account registration is currently closed.'), 'warning')
         return redirect(url_for('auth.login'))
 
     ip = _client_ip()
     if _ip_is_banned(ip):
-        flash('Registrations from your IP are not permitted.', 'danger')
+        flash(_t('auth.registration_ip_blocked', 'Registrations from your IP are not permitted.'), 'danger')
         return redirect(url_for('auth.login'))
     if _ip_country_blocked(ip):
-        flash('Registrations from your region are not permitted.', 'danger')
+        flash(_t('auth.registration_region_blocked', 'Registrations from your region are not permitted.'), 'danger')
         return redirect(url_for('auth.login'))
     form = RegisterForm()
 
@@ -602,8 +656,8 @@ def register():
             ))
             db.session.commit()
             flash(
-                f'Too many registration attempts from this IP — please wait '
-                f'{REGISTER_LIMIT_WINDOW_MINUTES} minutes and try again.',
+                _t('auth.registration_rate_limited', 'Too many registration attempts from this IP — please wait '
+                   '{minutes} minutes and try again.', minutes=REGISTER_LIMIT_WINDOW_MINUTES),
                 'danger')
             return render_template('auth/register.html', form=form)
 
@@ -616,6 +670,7 @@ def register():
         user = User(
             username=form.username.data,
             email=form.email.data,
+            language=current_language(),
             is_verified=(not start_unverified),
         )
         user.set_password(form.password.data)
@@ -641,9 +696,9 @@ def register():
         except IntegrityError as exc:
             db.session.rollback()
             if 'username' in str(exc.orig).lower():
-                flash('That username is already taken.', 'danger')
+                flash(_t('auth.username_taken', 'That username is already taken.'), 'danger')
             else:
-                flash('That email address is already registered.', 'danger')
+                flash(_t('auth.email_registered', 'That email address is already registered.'), 'danger')
             return render_template('auth/register.html', form=form)
 
         # Save security questions chosen during registration
@@ -711,7 +766,7 @@ def register():
             # runs on a LATER, separate login -- never here.
             return render_template('auth/pending_approval.html', username=user.username)
 
-        flash(f'Account created successfully! Welcome, {user.username}!', 'success')
+        flash(_t('auth.account_created', 'Account created successfully! Welcome, {username}!', username=user.username), 'success')
 
         # Real gap found live (2026-09-01, reported by Jerry): a user
         # who registers straight into a session (no NUV/email
@@ -727,6 +782,7 @@ def register():
         # session, not just its second.
         user.update_login()
         login_user(user, remember=True)
+        flask_session['language'] = user.language or 'en'
         try:
             from ..models import CallerLog
             _cl = CallerLog(
@@ -818,6 +874,7 @@ def logout():
     """Logout the current user"""
     uid = current_user.id
     uname = current_user.username
+    flask_session['language'] = current_language()
     # Fix for a real bug found live: CallerLog.duration_seconds was
     # declared on the model and shown in two admin templates but never
     # written anywhere -- every row showed 0s. Written here, before
@@ -861,7 +918,7 @@ def logout():
     _log_activity(uid, 'logout')
     flask_session.pop('caller_log_id', None)
     flask_session.pop('presence_session_key', None)
-    flash('You have been logged out.', 'info')
+    flash(_t('auth.logged_out', 'You have been logged out.'), 'info')
     return redirect(url_for('main.index'))
 
 
@@ -869,14 +926,14 @@ def logout():
 # Password reset flow
 # ---------------------------------------------------------------------------
 
-class ForgotPasswordForm(FlaskForm):
+class ForgotPasswordForm(AuthForm):
     """Step 1: user submits their email/username; we issue a token."""
     identifier = StringField('Username or Email', validators=[
         DataRequired(), Length(min=3, max=120)])
     submit = SubmitField('Send Reset Link')
 
 
-class ResetPasswordForm(FlaskForm):
+class ResetPasswordForm(AuthForm):
     """Step 2: user submits a new password along with the token."""
     password = PasswordField('New Password', validators=[
         DataRequired(), Length(min=6)])
@@ -1068,7 +1125,7 @@ def security_question_verify():
 
     nonce = flask_session.get('sq_nonce')
     if not nonce:
-        flash('Session expired. Please try again.', 'warning')
+        flash(_t('auth.session_expired', 'Session expired. Please try again.'), 'warning')
         return redirect(url_for('auth.forgot_password'))
 
     user_id = flask_session.get('sq_user_id')
@@ -1080,14 +1137,14 @@ def security_question_verify():
         qa = UserSecurityAnswer.query.get(answer_id)
         if qa is None or qa.user_id != user_id:
             _clear_sq_session()
-            flash('Session expired. Please try again.', 'warning')
+            flash(_t('auth.session_expired', 'Session expired. Please try again.'), 'warning')
             return redirect(url_for('auth.forgot_password'))
         question = qa.question
     elif decoy_question:
         question = decoy_question
     else:
         _clear_sq_session()
-        flash('Session expired. Please try again.', 'warning')
+        flash(_t('auth.session_expired', 'Session expired. Please try again.'), 'warning')
         return redirect(url_for('auth.forgot_password'))
 
     error = None
@@ -1096,12 +1153,12 @@ def security_question_verify():
         flask_session['sq_attempts'] = attempts
         if attempts > 5:
             _clear_sq_session()
-            flash('Too many attempts. Please start over.', 'danger')
+            flash(_t('auth.too_many_attempts', 'Too many attempts. Please start over.'), 'danger')
             return redirect(url_for('auth.forgot_password'))
 
         raw = request.form.get('answer', '').strip()
         if not raw:
-            error = 'Please enter your answer.'
+            error = _t('auth.answer_required', 'Please enter your answer.')
         elif qa is not None and qa.check_answer(raw):
             # Correct — issue reset token and send user straight to reset page
             _clear_sq_session()
@@ -1123,7 +1180,7 @@ def security_question_verify():
             # answer, instead of a short-circuited instant return.
             if qa is None:
                 check_password_hash(_DUMMY_PASSWORD_HASH, raw)
-            error = 'Incorrect answer. Please try again.'
+            error = _t('auth.incorrect_answer', 'Incorrect answer. Please try again.')
 
     return render_template('auth/security_question_verify.html',
                            question=question, error=error)
@@ -1137,7 +1194,7 @@ def reset_password(token):
 
     rt = PasswordResetToken.query.filter_by(token=token).first()
     if rt is None or not rt.is_valid:
-        flash('Reset link is invalid or has expired.', 'danger')
+        flash(_t('auth.invalid_reset_link', 'Reset link is invalid or has expired.'), 'danger')
         return redirect(url_for('auth.forgot_password'))
 
     form = ResetPasswordForm()
@@ -1146,7 +1203,7 @@ def reset_password(token):
         rt.used_at = datetime.utcnow()
         db.session.commit()
         _log_activity(rt.user.id, 'password_reset_applied')
-        flash('Password updated. You can log in now.', 'success')
+        flash(_t('auth.password_updated', 'Password updated. You can log in now.'), 'success')
         return redirect(url_for('auth.login'))
 
     return render_template('auth/reset_password.html', form=form, token=token)
@@ -1161,8 +1218,8 @@ def verify_email(token):
     """Click-through email verification link."""
     vt = EmailVerifyToken.query.filter_by(token=token).first()
     if vt is None or not vt.is_valid:
-        flash('Verification link is invalid or has expired. '
-              'Contact the sysop or try registering again.', 'danger')
+        flash(_t('auth.invalid_verification_link', 'Verification link is invalid or has expired. '
+                 'Contact the sysop or try registering again.'), 'danger')
         return redirect(url_for('auth.login'))
 
     user = vt.user
@@ -1171,6 +1228,7 @@ def verify_email(token):
     db.session.commit()
     _log_activity(user.id, 'email_verified')
     login_user(user, remember=True)
+    flask_session['language'] = user.language or 'en'
     return render_template('auth/verified.html', username=user.username)
 
 
@@ -1199,7 +1257,7 @@ def resend_verification():
         elif user.check_password(pw) and not user.is_verified:
             from ..mailer import send_verification_email, email_verify_enabled
             if not email_verify_enabled():
-                flash('Email verification is not enabled. Contact the sysop.', 'warning')
+                flash(_t('auth.verification_disabled', 'Email verification is not enabled. Contact the sysop.'), 'warning')
                 return redirect(url_for('auth.login'))
             token = secrets.token_urlsafe(32)
             db.session.add(EmailVerifyToken(
@@ -1211,6 +1269,6 @@ def resend_verification():
             verify_url = url_for('auth.verify_email', token=token, _external=True)
             send_verification_email(user, verify_url)
             return render_template('auth/verify_sent.html', email=user.email)
-        error = 'Invalid credentials or account already verified.'
+        error = _t('auth.invalid_or_verified', 'Invalid credentials or account already verified.')
 
     return render_template('auth/resend_verification.html', error=error)

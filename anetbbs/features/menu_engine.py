@@ -815,6 +815,11 @@ def _apply_menu_translations(menu_name, title, item_list, lang):
     key, matching MenuTranslation's own docstring. One batched query for
     the whole menu, not one per item.
 
+    Bundled Spanish labels only apply to unchanged default entries, so
+    seeding the language pack cannot replace a sysop's custom wording
+    or a repurposed hotkey. A translation edited away from the bundled
+    value remains an explicit override and applies to custom entries.
+
     Must be called inside an app context (queries MenuTranslation).
     Pulled out of run_menu() as its own function so it's testable without
     driving the full async menu-render loop.
@@ -822,17 +827,34 @@ def _apply_menu_translations(menu_name, title, item_list, lang):
     if not lang or lang == 'en':
         return title, item_list
 
-    from anetbbs.features.i18n import get_translations
+    from anetbbs.features.i18n import DEFAULT_TRANSLATIONS, get_translations
 
     title_key = f'menu.{menu_name}.title'
     item_keys = [f'menu.{menu_name}.item.{hk}' for hk, _l, _a, _ar in item_list]
     translations = get_translations(lang, [title_key] + item_keys)
 
+    bundled = DEFAULT_TRANSLATIONS.get('es', {}) if lang == 'es' else {}
+    default_menu = next((menu for menu in DEFAULT_MENUS
+                         if menu['name'] == menu_name), None)
+
     new_title = translations.get(title_key, title)
-    new_item_list = [
-        (hk, translations.get(f'menu.{menu_name}.item.{hk}', label), action_type, action_args)
-        for hk, label, action_type, action_args in item_list
-    ]
+    if (title_key in bundled and new_title == bundled[title_key]
+            and (not default_menu or title != default_menu['title'])):
+        new_title = title
+
+    default_items = ({item['hotkey']: item for item in default_menu['items']}
+                     if default_menu else {})
+    new_item_list = []
+    for hk, label, action_type, action_args in item_list:
+        key = f'menu.{menu_name}.item.{hk}'
+        translated = translations.get(key, label)
+        if key in bundled and translated == bundled[key]:
+            default = default_items.get(hk)
+            if (not default or (label, action_type, action_args or '') !=
+                    (default['label'], default['action_type'],
+                     default.get('action_args') or '')):
+                translated = label
+        new_item_list.append((hk, translated, action_type, action_args))
     return new_title, new_item_list
 
 
@@ -993,6 +1015,15 @@ async def run_menu(session, start='main'):
             # defined in the schema but never read anywhere.
             lang = (session.user.get('language') or 'en') if isinstance(session.user, dict) else 'en'
             title, item_list = _apply_menu_translations(menu.name, title, item_list, lang)
+            # CP437 supports Spanish lowercase accents but lacks several
+            # uppercase forms (such as Ú in MENÚ). Keep the source case
+            # when uppercasing would turn a valid title into replacement
+            # characters in the terminal's negotiated encoding.
+            display_title = title.upper()
+            try:
+                display_title.encode(getattr(session, 'encoding', 'cp437'))
+            except (UnicodeEncodeError, LookupError):
+                display_title = title
             # Mode-aware screen content lookup, mods-first (same
             # precedence every other data/mods/ override in this
             # project already uses -- see ansi_ui.py's load_menu_ansi()
@@ -1130,7 +1161,7 @@ async def run_menu(session, start='main'):
                 # ASCII auto-render: plain text, no escape codes, ASCII box chars.
                 inner_w = 64
                 bar = '+' + '-' * (inner_w - 2) + '+'
-                cell = f'| {title.upper()}'.ljust(inner_w - 1) + '|'
+                cell = f'| {display_title}'.ljust(inner_w - 1) + '|'
                 await session.write(f"{bar}\r\n{cell}\r\n{bar}\r\n")
 
                 # Single-column item list for ASCII readability
@@ -1145,7 +1176,7 @@ async def run_menu(session, start='main'):
                 top_bar = '▄' * inner_w
                 bot_bar = '▀' * inner_w
                 await session.write(f"{FG['cyan']}{BG['blk']}{top_bar}{RESET}\r\n")
-                cell = f"╣ {title.upper()} ╠".center(inner_w)
+                cell = f"╣ {display_title} ╠".center(inner_w)
                 await session.write(
                     f"{BG['cya']}{FG['wht']}{BOLD}{cell}{RESET}\r\n")
                 await session.write(f"{FG['cyan']}{BG['blk']}{bot_bar}{RESET}\r\n")
