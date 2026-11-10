@@ -184,6 +184,18 @@ class _TcpBridgeHarness(unittest.IsolatedAsyncioTestCase):
         reader, writer = await self._connect()
         await self._iamhere(writer, handle, room)
         session_id, _ = await self._wait_for_single_session()
+        # The session exists before the bridge has finished its join
+        # sequence (_complete_join_after_identify, then
+        # _send_join_payloads, whose last packet is always CHATTERS).
+        # On a slow runner the tail of that sequence used to land after a
+        # test's own sent.clear(), right next to the packets it measures:
+        # CI saw a 0.0009 s "gap" before the first chat chunk. Wait for the
+        # join to finish so callers start from a quiet connection.
+        ok = await self._wait_until(
+            lambda: any(m["message"] == "CHATTERS"
+                        for m in self.app.mrc.sent_messages()),
+            timeout=5.0)
+        self.assertTrue(ok, "join sequence did not finish (no CHATTERS sent)")
         return reader, writer, session_id
 
 
