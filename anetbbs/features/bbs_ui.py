@@ -5401,7 +5401,7 @@ BBSMenuUI.edit_profile = _edit_profile
 
 async def _change_password(self):
     from anetbbs.models import db, User
-    from werkzeug.security import check_password_hash, generate_password_hash
+    from werkzeug.security import check_password_hash
     cur = await self.session.read_password("\r\nCurrent password: ")
     new1 = await self.session.read_password("New password: ")
     new2 = await self.session.read_password("Confirm new: ")
@@ -5415,7 +5415,7 @@ async def _change_password(self):
             await self.session.write("\r\nCurrent password incorrect.\r\n")
             await self.session.read_line("Press Enter...")
             return
-        u.password_hash = generate_password_hash(new1)
+        u.set_password(new1)
         db.session.commit()
     await self.session.write("\r\nPassword changed.\r\n")
     await self.session.read_line("Press Enter...")
@@ -5849,7 +5849,6 @@ BBSMenuUI.sysop_users = _sysop_users
 
 async def _sysop_edit_user(self, uid):
     from anetbbs.models import db, User
-    from werkzeug.security import generate_password_hash
     from .ansi_ui import banner, menu_item, footer, FG, RESET, prompt as _p, ui_width
     with _app().app_context():
         u = User.query.get(uid)
@@ -5915,7 +5914,7 @@ async def _sysop_edit_user(self, uid):
             elif choice == 'P':
                 new = await self.session.read_line("New password: ")
                 if new:
-                    u.password_hash = generate_password_hash(new)
+                    u.set_password(new)
                     await self.session.write(f"\r\n{FG['grn']}Password updated.{RESET}\r\n")
             elif choice == 'D':
                 if is_self:

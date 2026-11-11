@@ -123,15 +123,16 @@ services:
     # unconditionally hard-fails with "FATAL: ANETBBS_DB_URL is not
     # set" if it's missing, so this container could never actually
     # start via `docker compose up -d` at all; it would crash-loop
-    # immediately every time. mrc.bridge.main itself doesn't read the
-    # DB vars, but the shared entrypoint it runs through requires them
-    # regardless, exactly like finger/binkp below.
+    # immediately every time. Browser cookie validation also reads the
+    # shared users table, so the data volume below must match the web
+    # service as well as these environment variables.
     env_file: [.env]
     environment: *anetbbs-db-env
     ports:
       - "8080:8080"
       # - "5010:5010"  # native umrc-client -- see the top-of-file note
     volumes:
+      - anetbbs_data:/app/data
       - anetbbs_mrc_data:/app/mrc/bridge/data
       - ./mrc-bridge-config.json:/app/mrc/bridge/config.json:ro
     healthcheck:

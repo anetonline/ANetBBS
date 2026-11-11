@@ -242,6 +242,9 @@ class AnetbbsAuthorizer(DummyAuthorizer):
         # register under the exact `username` parameter (what the client
         # actually sent), never a normalized/canonical form, so the two
         # lookups always agree regardless of what case anyone typed.
+        # Bind only human BBS accounts; anonymous/QWK credentials have a
+        # separate lifecycle and must not inherit a previous login token.
+        handler._bbs_auth = None
         if username == 'anonymous':
             return super().validate_authentication(username, password, handler)
 
@@ -276,6 +279,7 @@ class AnetbbsAuthorizer(DummyAuthorizer):
                     self.remove_user(username)
                 self.add_user(username, password=password,
                               homedir=home, perm=perm)
+                handler._bbs_auth = (user.id, user.auth_version)
                 return
 
             # 2. Try QWK node (packet_id as username, plaintext password).
@@ -337,12 +341,84 @@ class AnetbbsFTPHandler(FTPHandler):
     # Set by the authorizer during validate_authentication for QWK sessions.
     _qwk_node_id = None
     _qwk_packet_id = None
+    _bbs_auth = None
+    _bbs_transfer_auth = None
+    _auth_recheck = None
+
+    def _cancel_auth_recheck(self):
+        if self._auth_recheck is not None:
+            self._auth_recheck.cancel()
+            self._auth_recheck = None
+
+    def _recheck_auth(self):
+        """Revoke human logins and their data channels after password change."""
+        if self._closed:
+            self._cancel_auth_recheck()
+            return False
+        transfer = self._bbs_transfer_auth
+        if transfer is not None and (
+                self.data_channel is not transfer[0] or transfer[0]._closed):
+            self._bbs_transfer_auth = None
+            transfer = None
+        bindings = [self._bbs_auth] if self._bbs_auth is not None else []
+        if transfer is not None:
+            bindings.append(transfer[1])
+        if not bindings:
+            self._cancel_auth_recheck()
+            return True
+        try:
+            from ..models import User, db
+            with self.app.app_context():
+                for user_id, version in bindings:
+                    user = db.session.get(User, user_id, populate_existing=True)
+                    if user is None or user.auth_version != version:
+                        self.close()
+                        return False
+        except Exception:
+            logger.exception('FTP: authentication recheck failed; closing session')
+            self.close()
+            return False
+        return True
+
+    def pre_process_command(self, line, cmd, arg):
+        if not self._recheck_auth():
+            return
+        return super().pre_process_command(line, cmd, arg)
+
+    def on_logout(self, username):
+        # USER/REIN/QUIT may leave an active transfer running. Keep that
+        # channel's original generation until it ends, including a later
+        # login as an anonymous/QWK/different human account.
+        if self._bbs_auth is not None and self.data_channel is not None:
+            if (self._bbs_transfer_auth is None
+                    or self._bbs_transfer_auth[0] is not self.data_channel):
+                self._bbs_transfer_auth = (self.data_channel, self._bbs_auth)
+        self._bbs_auth = None
+        if self._bbs_transfer_auth is None:
+            self._cancel_auth_recheck()
+
+    def close(self):
+        self._cancel_auth_recheck()
+        self._bbs_auth = None
+        self._bbs_transfer_auth = None
+        # Base cleanup also closes passive/active data channels and files.
+        return super().close()
+
+    def on_disconnect(self):
+        # TLS_FTPHandler.close() calls FTPHandler.close() directly, so this
+        # dynamic hook also cancels its timer without changing TLS behavior.
+        self._cancel_auth_recheck()
+        self._bbs_auth = None
+        self._bbs_transfer_auth = None
 
     def on_connect(self):
         logger.info('FTP: connect from %s', self.remote_ip)
 
     def on_login(self, username):
         logger.info('FTP: login %s from %s', username, self.remote_ip)
+        if ((self._bbs_auth is not None or self._bbs_transfer_auth is not None)
+                and self._auth_recheck is None):
+            self._auth_recheck = self.ioloop.call_every(5, self._recheck_auth)
         if self._qwk_node_id is None or self.app is None:
             return
         # QWK node logged in — generate their packet now so it's ready for RETR.

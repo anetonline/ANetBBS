@@ -53,6 +53,19 @@ class DockerComposeMrcBridgeEnvTests(unittest.TestCase):
                       'like every other service')
         self.assertIn('env_file: [.env]', block)
 
+    def test_browser_cookie_validation_uses_the_web_database_volume(self):
+        # A correct DATABASE_URL alone still opens an empty container-local
+        # DB if the BBS volume is missing, rejecting every browser login.
+        def data_mounts(service):
+            block = _service_block(self.text, service)
+            return [(name, mode or 'rw') for name, mode in re.findall(
+                r'^\s*-\s*([^:\s]+):/app/data(?::([^\s#]+))?\s*$',
+                block, re.MULTILINE)]
+
+        web_mounts = data_mounts('web')
+        self.assertTrue(web_mounts)
+        self.assertEqual(data_mounts('mrc-bridge'), web_mounts)
+
     def test_every_entrypoint_sh_service_sets_the_db_env_anchor(self):
         """Broader guard: any CURRENT or future service invoking the
         plain entrypoint.sh (not entrypoint-web.sh, which handles its

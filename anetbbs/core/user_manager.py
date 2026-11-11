@@ -183,6 +183,9 @@ class UserManager:
             "is_admin": bool(user.is_admin),
             "is_active": bool(user.is_active),
             "is_locked": bool(getattr(user, 'is_locked', False)),
+            # Snapshot the login generation; the terminal watchdog must not
+            # replace it with the current database value after a reset.
+            "auth_version": getattr(user, 'auth_version', None),
             "access_level": getattr(user, 'access_level', None) or 10,
             "codepage": getattr(user, 'codepage', None) or 'cp437',
             "cursor_style": getattr(user, 'cursor_style', None) or 'default',

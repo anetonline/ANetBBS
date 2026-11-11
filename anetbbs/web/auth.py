@@ -4,13 +4,16 @@ Authentication blueprint for user login, registration, and logout
 """
 from copy import copy
 import random
+import ipaddress
 import secrets
 import threading
 import time
+import idna
 from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 from sqlalchemy.exc import IntegrityError
 
-from flask import (Blueprint, render_template, redirect, url_for, flash,
+from flask import (Blueprint, render_template, redirect, url_for, flash, abort,
                    request, current_app, session as flask_session)
 from flask_login import login_user, logout_user, login_required, current_user
 from wtforms import StringField, PasswordField, SubmitField, SelectField
@@ -261,6 +264,77 @@ def _log_activity(user_id, activity_type, details=None, caller_log_id=None):
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
+
+def _password_recovery_origin():
+    """Return a configured origin, independently of all request headers."""
+    raw = current_app.config.get('PUBLIC_BASE_URL') or ''
+    if not raw:
+        domain = current_app.config.get('BBS_DOMAIN') or ''
+        raw = domain if '://' in domain else f'https://{domain}' if domain else ''
+    if not isinstance(raw, str) or not raw:
+        raise ValueError('Set PUBLIC_BASE_URL or BBS_DOMAIN for password recovery')
+    # urlsplit strips some control characters; reject them before parsing.
+    if any(c.isspace() or ord(c) < 32 for c in raw) or '\\' in raw:
+        raise ValueError('Password recovery origin contains invalid characters')
+    try:
+        parts = urlsplit(raw)
+        port = parts.port
+        if (parts.scheme not in ('http', 'https') or not parts.hostname
+                or parts.username is not None or parts.password is not None
+                or parts.path not in ('', '/') or '?' in raw or '#' in raw
+                or (port is not None and not 0 < port <= 65535)):
+            raise ValueError
+        host = parts.hostname
+        if ':' in host:
+            host = str(ipaddress.IPv6Address(host))
+        else:
+            # Built-in IDNA2003 maps e.g. faß to fass, a different DNS
+            # origin. Use browsers' non-transitional UTS46 identity.
+            host = idna.encode(host, uts46=True, std3_rules=True,
+                               transitional=False).decode('ascii').lower()
+    except (ValueError, UnicodeError):
+        raise ValueError('Password recovery requires a valid HTTP(S) origin') from None
+    if ':' in host:  # Preserve IPv6 authority brackets.
+        host = f'[{host}]'
+    authority = host + (f':{port}' if port is not None else '')
+    return f'{parts.scheme}://{authority}'
+
+
+@auth_bp.before_request
+def _check_password_recovery_host():
+    """Reject alternate hosts only on the sensitive recovery endpoints."""
+    if request.endpoint not in {
+            'auth.forgot_password', 'auth.security_question_verify',
+            'auth.reset_password'}:
+        return
+    try:
+        origin = urlsplit(_password_recovery_origin())
+    except ValueError as exc:
+        if request.endpoint == 'auth.forgot_password':
+            # Keep the generic response independent of account existence.
+            # Token issuance below fails closed when no origin is configured.
+            return
+        current_app.logger.error('Password recovery unavailable: %s', exc)
+        abort(503)
+    try:
+        host = request.host
+        supplied = urlsplit('http://' + host)
+        supplied_host = supplied.hostname or ''
+        if ':' in supplied_host:
+            supplied_host = str(ipaddress.IPv6Address(supplied_host))
+        default_port = 443 if origin.scheme == 'https' else 80
+        matches = (supplied_host == origin.hostname
+                   and (supplied.port if supplied.port is not None else default_port)
+                   == (origin.port if origin.port is not None else default_port)
+                   and supplied.username is None and supplied.password is None
+                   and not (supplied.path or supplied.query or supplied.fragment)
+                   and not any(c.isspace() or ord(c) < 32 for c in host)
+                   and '\\' not in host)
+    except ValueError:
+        matches = False
+    if not matches:
+        abort(400, description='Use the configured public host for password recovery.')
+
 # Real gap found in a security/performance audit: login()'s check used
 # to be `if user is None or not user.check_password(...)`. Python's
 # `or` short-circuits, so a NONEXISTENT username never reached
@@ -493,6 +567,11 @@ def login():
             flash(_t('auth.invalid_credentials', 'Invalid username or password'), 'danger')
             return redirect(url_for('auth.login'))
 
+        # Login bookkeeping commits and expires this ORM object. Do not
+        # adopt a generation created by a concurrent password reset when
+        # login_user later reloads it.
+        verified_auth_version = user.auth_version
+
         if not user.is_active:
             flash(_t('auth.account_deactivated', 'Your account has been deactivated. Please contact an administrator.'), 'warning')
             return redirect(url_for('auth.login'))
@@ -516,6 +595,11 @@ def login():
         
         # Update login information
         user.update_login()
+
+        if user.auth_version != verified_auth_version:
+            logout_user()
+            flash('Invalid username or password', 'danger')
+            return redirect(url_for('auth.login'))
 
         login_user(user, remember=True)
         flask_session['language'] = user.language or 'en'
@@ -1054,6 +1138,11 @@ def _issue_reset_token_and_notify(user):
     SECURITY docstrings on forgot_password() for the timing/enumeration
     reasoning this preserves: the DB write here stays synchronous, only
     the SMTP send is backgrounded."""
+    try:
+        origin = _password_recovery_origin()
+    except ValueError as exc:
+        current_app.logger.error('Password recovery unavailable: %s', exc)
+        return
     token = secrets.token_urlsafe(32)
     db.session.add(PasswordResetToken(
         user_id=user.id,
@@ -1062,7 +1151,7 @@ def _issue_reset_token_and_notify(user):
         requested_ip=_client_ip(),
     ))
     db.session.commit()
-    reset_url = url_for('auth.reset_password', token=token, _external=True)
+    reset_url = origin + url_for('auth.reset_password', token=token, _external=False)
     from ..mailer import smtp_enabled, send_password_reset_email
     if smtp_enabled():
         # Re-query by ID inside the thread's own app context rather

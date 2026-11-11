@@ -38,6 +38,7 @@ from aiohttp import web
 from .db import BridgeDB
 from .latency import LatencyTracker
 from .mrc_protocol import MRCProtocol
+from .bbs_auth import bind_bbs_cookie_auth
 
 # MRC_BRIDGE_LOG_LEVEL=DEBUG enables full raw packet tracing (every
 # outgoing send_packet() call and every incoming line, both directions,
@@ -64,6 +65,7 @@ _BRIDGE_DIR = Path(__file__).parent
 _WEB_DIR    = _BRIDGE_DIR.parent / "web"
 
 MRC_MAX_MESSAGE_LEN = 140
+BBS_AUTH_RECHECK_SECONDS = 5
 
 # Longest style suffix (pipe codes included) a user can set, matching
 # umrc-client's chatterNameSuffix (32 chars). Stored as plain JSON in
@@ -2092,6 +2094,16 @@ class BridgeApp:
     # ------------------------------------------------------------------
 
     async def handle_websocket(self, request):
+        # Browser connections carry the same signed cookies nginx checked
+        # at upgrade. Bind that credential so changing a password also
+        # revokes an already-open socket. Direct terminal clients do not
+        # use BBS cookies and retain their existing transport trust model.
+        try:
+            bbs_auth = (await asyncio.to_thread(
+                bind_bbs_cookie_auth, dict(request.cookies))
+                if request.cookies else None)
+        except Exception:
+            return web.Response(status=401, text='BBS login is invalid or expired')
         # heartbeat=30: aiohttp sends a protocol-level ping every 30s and
         # closes the connection if no pong comes back. Without this, a
         # client that goes silent without a clean close (cable pull,
@@ -2145,12 +2157,32 @@ class BridgeApp:
         self._ws_remote_ip[ws_id] = remote_ip
         logger.info(f"WebSocket connected: {ws_id}")
 
+        auth_watch = None
+
+        async def bbs_auth_is_current():
+            try:
+                return await asyncio.to_thread(bbs_auth.is_current)
+            except Exception:
+                return False
+
+        async def watch_bbs_auth():
+            while not ws.closed:
+                await asyncio.sleep(BBS_AUTH_RECHECK_SECONDS)
+                if not await bbs_auth_is_current():
+                    await ws.close(code=1008, message=b'BBS login revoked')
+                    return
+
         try:
+            if bbs_auth is not None:
+                auth_watch = asyncio.create_task(watch_bbs_auth())
             await self._safe_send(ws, {"type": "welcome", "message": "Connected to MRC Bridge", "server": self.config["mrc_host"]})
             await self._safe_send(ws, {"type": "bridge_status", "status": "upstream_connected" if self.mrc.connected else "upstream_disconnected"})
 
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
+                    if bbs_auth is not None and not await bbs_auth_is_current():
+                        await ws.close(code=1008, message=b'BBS login revoked')
+                        break
                     try:
                         data = json.loads(msg.data)
                     except json.JSONDecodeError:
@@ -2158,6 +2190,14 @@ class BridgeApp:
                         continue
                     await self.handle_ws_message(ws_id, data)
         finally:
+            if auth_watch is not None:
+                auth_watch.cancel()
+                try:
+                    await auth_watch
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.warning('MRC browser authentication watchdog stopped')
             self.websockets.pop(ws_id, None)
             self._ws_remote_ip.pop(ws_id, None)
             # Real gap found in a security/performance audit: every

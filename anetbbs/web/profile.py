@@ -7,7 +7,7 @@ import os
 import uuid
 from flask import session
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app, send_from_directory
-from flask_login import login_required, current_user
+from flask_login import login_required, current_user, login_user
 from wtforms import StringField, PasswordField, SubmitField, TextAreaField, BooleanField, SelectField, DateField
 from wtforms.validators import DataRequired, EqualTo, Length, Optional, ValidationError
 from flask_wtf import FlaskForm
@@ -498,8 +498,20 @@ def change_password():
             flash(_t('profile.current_password_incorrect', 'Current password is incorrect.'), 'danger')
             return redirect(url_for('profile.change_password'))
 
-        current_user.set_password(form.new_password.data)
+        user = current_user._get_current_object()
+        user.set_password(form.new_password.data)
+        changed_auth_version = user.auth_version
         db.session.commit()
+        # A later concurrent reset may win after this commit expires the
+        # ORM object. Only renew the generation this request actually set.
+        if user.auth_version != changed_auth_version:
+            from flask_login import logout_user
+            logout_user()
+            flash('Your password changed again. Please log in.', 'warning')
+            return redirect(url_for('auth.login'))
+        # Keep this browser authenticated under the new generation. Copies
+        # of its old cookies, other browsers and terminal sessions expire.
+        login_user(user, remember=True, fresh=True)
 
         flash(_t('profile.password_changed', 'Password changed successfully!'), 'success')
         return redirect(url_for('profile.view_user', username=current_user.username))

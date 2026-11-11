@@ -534,3 +534,58 @@ restart anetbbs`.
   turned on at install time. If you're on an install that predates
   this and hit the problem, re-run `sudo bash update.sh` to get the
   hook installed retroactively.
+
+## Password recovery and session revocation (H02/H06)
+
+Set `PUBLIC_BASE_URL` to the externally reachable origin, for example
+`https://bbs.example.org` (or `http://127.0.0.1:5000` for a local lab).
+Use a scheme, hostname and optional port, without credentials, a path,
+query or fragment. Recovery requests must use that hostname and port;
+reverse proxies must preserve the configured public authority. Neither
+`Host` nor forwarded headers are used to construct recovery links.
+Existing `BBS_DOMAIN` configurations remain supported, defaulting to HTTPS.
+Without either setting, emailed recovery creates no token and keeps its
+generic response; security-question verification/reset pages return 503
+until a valid origin is configured. Login and logout are unaffected.
+
+For an existing installation, back up the database and stop all BBS
+processes before upgrading. Start the updated web application first: its
+normal lightweight migration adds nullable `users.auth_version VARCHAR(64)`.
+No backfill or password rehash is required. Startup fails if that security
+column could not be added. Then restart every terminal/web worker and
+other BBS service using the updated code; do not mix old and new workers.
+Terminal-only installations must run the web application's normal
+one-shot schema initialization before starting the updated terminal.
+From the installation root, with the same `DATABASE_URL` as the services:
+
+```bash
+ANETBBS_SCHEMA_MIGRATE_ONLY=1 venv/bin/python -c \
+  "from anetbbs.web_app import create_app; create_app('production')"
+```
+
+Existing numeric login cookies and legacy terminal snapshots stay valid
+until the account's password is replaced. Each replacement rotates a
+random authentication generation atomically with the password hash.
+Old session and remember cookies are rejected on their next request;
+the browser performing a normal password change receives a refreshed
+cookie and stays logged in. Recovery requires a new login everywhere.
+Terminal sessions (including SSH-key logins) disconnect on the next
+watchdog check, every five seconds, with a bounded disconnect notice.
+The terminal performing its own password change must also log in again.
+Socket.IO checks before events and periodically disconnects idle sockets.
+Human-user FTP sessions recheck before commands and periodically, closing
+their data channels too. Browser MRC WebSockets bind the existing signed
+BBS cookies and recheck before messages and while idle. The MRC bridge
+must use the same `SECRET_KEY` and database as the web/terminal services
+(the standard shared environment already supplies these); restart it too.
+Cookie-less bridge clients, anonymous FTP and QWK shared-secret logins
+retain their existing trust/credential model rather than becoming BBS
+password sessions. Terminal MRC connections close with their parent session.
+Database failures can delay periodic checks, so this is not a hard
+five-second availability guarantee. Registered SSH keys and credentials
+for external services are not deleted or rotated by a password change.
+
+Rolling back to code that only understands numeric login IDs requires
+discarding the newer versioned cookies; otherwise the old loader cannot
+parse them. Plan rollback together with the database backup and session
+invalidation, rather than running older workers beside the new code.
