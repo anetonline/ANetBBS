@@ -1147,6 +1147,7 @@ def _issue_reset_token_and_notify(user):
     db.session.add(PasswordResetToken(
         user_id=user.id,
         token=token,
+        auth_version=user.auth_version,
         expires_at=datetime.utcnow() + timedelta(hours=PASSWORD_RESET_TTL_HOURS),
         requested_ip=_client_ip(),
     ))
@@ -1251,10 +1252,15 @@ def security_question_verify():
         elif qa is not None and qa.check_answer(raw):
             # Correct — issue reset token and send user straight to reset page
             _clear_sq_session()
+            user = db.session.get(User, user_id)
+            if user is None:
+                flash(_t('auth.session_expired', 'Session expired. Please try again.'), 'warning')
+                return redirect(url_for('auth.forgot_password'))
             token = secrets.token_urlsafe(32)
             db.session.add(PasswordResetToken(
                 user_id=user_id,
                 token=token,
+                auth_version=user.auth_version,
                 expires_at=datetime.utcnow() + timedelta(hours=PASSWORD_RESET_TTL_HOURS),
                 requested_ip=_client_ip(),
             ))
@@ -1288,8 +1294,10 @@ def reset_password(token):
 
     form = ResetPasswordForm()
     if form.validate_on_submit():
-        rt.user.set_password(form.password.data)
-        rt.used_at = datetime.utcnow()
+        if not rt.apply_password(form.password.data):
+            db.session.rollback()
+            flash(_t('auth.invalid_reset_link', 'Reset link is invalid or has expired.'), 'danger')
+            return redirect(url_for('auth.forgot_password'))
         db.session.commit()
         _log_activity(rt.user.id, 'password_reset_applied')
         flash(_t('auth.password_updated', 'Password updated. You can log in now.'), 'success')
