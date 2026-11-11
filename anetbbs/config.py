@@ -323,6 +323,8 @@ class Config:
     REGISTRATION_OPEN = os.environ.get(
         'REGISTRATION_OPEN', 'true').lower() == 'true'
     REGISTRATION_INVITE_CODE = os.environ.get('REGISTRATION_INVITE_CODE', '')
+    REGISTRATION_REQUIRE_VERIFIED_EMAIL = os.environ.get(
+        'REGISTRATION_REQUIRE_VERIFIED_EMAIL', 'false').lower() == 'true'
     # Who's Online IP address display (anetbbs/web/who.py) -- previously
     # a bare hardcoded "admins only" conditional with no config flag and
     # no regression test backing it (confirmed via git blame: it used to
