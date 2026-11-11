@@ -113,7 +113,7 @@ class _IrcSession:
     def __init__(self, sid, server, port, use_ssl, nick, username, realname,
                  sasl_user=None, sasl_pass=None, user_id=None,
                  sasl_mechanism='PLAIN',
-                 client_cert_path=None, client_key_path=None):
+                 client_cert_path=None, client_key_path=None, autojoin=()):
         self.sid = sid
         self.user_id = user_id
         self.server = server
@@ -127,6 +127,7 @@ class _IrcSession:
         self.connected = False
         self.channels = set()
         self.current_channel = ''
+        self._pending_autojoin = autojoin
         # SASL state — None = not attempted, 'pending'/'auth_sent'/'done'/'failed'.
         # `sasl_mechanism` is 'PLAIN' (user/pass) or 'EXTERNAL' (CertFP from
         # the TLS client cert presented at connect time).
@@ -524,6 +525,21 @@ class _IrcSession:
             # Welcome / server info / MOTD — show in (server) channel.
             msg = trailing or ' '.join(params[1:])
             self._emit('irc_system', {'text': msg})
+            if command == '001':
+                # Registration (including any CAP/SASL exchange) is complete.
+                autojoin, self._pending_autojoin = self._pending_autojoin, ()
+                for entry in autojoin:
+                    if not isinstance(entry, str) or '\r' in entry or '\n' in entry:
+                        continue
+                    parts = entry.strip().split(None, 1)
+                    if not parts:
+                        continue
+                    channel = parts[0] if parts[0].startswith('#') else '#' + parts[0]
+                    if len(parts) == 2:
+                        self.channel_keys[channel] = parts[1]
+                        self.send_raw(f'JOIN {channel} {parts[1]}')
+                    else:
+                        self.send_raw(f'JOIN {channel}')
         elif command == '332' and len(params) >= 2:
             # RPL_TOPIC
             self._emit('irc_topic', {'channel': params[1], 'topic': trailing,
@@ -756,7 +772,8 @@ def register_socketio_handlers(socketio):
                            sasl_mechanism=sasl_mechanism,
                            client_cert_path=client_cert_path,
                            client_key_path=client_key_path,
-                           user_id=current_user.id)
+                           user_id=current_user.id,
+                           autojoin=data.get('autojoin') or ())
         sess._temp_cert_dir = temp_cert_dir
         if not sess.connect():
             sess._cleanup_temp_cert()
@@ -764,25 +781,11 @@ def register_socketio_handlers(socketio):
 
         with _sessions_lock:
             _sessions[sid] = sess
-        # Run the read loop in an eventlet greenthread.
-        socketio.start_background_task(sess.run)
         emit('irc_connected', {
             'server': server, 'port': port, 'nick': nick, 'use_ssl': use_ssl,
             'sasl': bool(sasl_user) or sasl_mechanism == 'EXTERNAL'})
-
-        # Auto-join configured channels — supports "#chan" or "#chan key"
-        for ch in (data.get('autojoin') or []):
-            ch = (ch or '').strip()
-            if not ch:
-                continue
-            parts = ch.split(None, 1)
-            chan = parts[0] if parts[0].startswith('#') else '#' + parts[0]
-            key = parts[1] if len(parts) > 1 else ''
-            if key:
-                sess.channel_keys[chan] = key
-                sess.send_raw(f'JOIN {chan} {key}')
-            else:
-                sess.send_raw(f'JOIN {chan}')
+        # Run the read loop in an eventlet greenthread.
+        socketio.start_background_task(sess.run)
 
     @socketio.on('irc_send', namespace='/irc')
     def on_irc_send(data):
