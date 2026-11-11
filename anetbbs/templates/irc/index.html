@@ -1,26 +1,35 @@
 {% extends "base.html" %}
 
-{% block title %}IRC Chat - {{ config.BBS_NAME }}{% endblock %}
+{% block title %}{{ t("irc.title", "IRC Chat") }} - {{ config.BBS_NAME }}{% endblock %}
 
 {% block extra_css %}
 <style>
-.irc-shell { display:grid; grid-template-columns:180px 1fr 160px; grid-template-rows:auto 1fr auto; height:75vh; gap:0; border:1px solid var(--theme-primary); }
-@media (max-width:900px) {
-    /* Phone layout: hide users panel, channels become a horizontal scroller. */
-    .irc-shell { grid-template-columns:120px 1fr; height:80vh; }
-    .irc-users { display:none; }
-    .irc-input { grid-column:2/3; }
-    .irc-channels { font-size:0.8rem; }
-    .irc-config { gap:4px; }
-    .irc-config input { width:auto !important; min-width:80px; }
+.irc-shell {
+    display:grid;
+    grid-template-areas:"config config config" "channels log users" "channels input users";
+    grid-template-columns:180px minmax(0, 1fr) 160px;
+    grid-template-rows:auto minmax(16rem, 1fr) auto;
+    min-height:75vh;
+    border:1px solid var(--theme-primary);
 }
-.irc-config { grid-column:1/-1; padding:8px; background:var(--theme-bg-dark); display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
+.irc-config { grid-area:config; min-width:0; padding:8px; background:var(--theme-bg-dark); }
+.irc-fields, .irc-actions, .irc-cert-panel { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; }
+.irc-fields > div { min-width:0; }
+.irc-fields .irc-server, .irc-fields .irc-autojoin { flex:2 1 10rem; }
+.irc-fields .irc-nick, .irc-fields .irc-auth-field { flex:1 1 8rem; }
+.irc-fields .irc-port { flex:0 1 6rem; }
+.irc-config .form-check { display:flex; align-items:center; gap:.4rem; padding-left:0; }
+.irc-config .form-check-input { float:none; flex:none; width:1.1rem; height:1.1rem; min-width:0; margin:0; }
+.irc-advanced { margin:8px 0; }
+.irc-advanced[open] > summary { margin-bottom:8px; }
+.irc-cert-panel { margin-top:8px; align-items:stretch; }
+.irc-cert-panel > div { flex:1 1 14rem; min-width:0; }
 .irc-config input, .irc-config select, .irc-config button { font-size:0.85rem; }
-.irc-channels { background:var(--theme-bg-dark); border-right:1px solid var(--theme-primary); overflow-y:auto; padding:4px; }
+.irc-channels { grid-area:channels; background:var(--theme-bg-dark); border-right:1px solid var(--theme-primary); overflow:auto; padding:4px; }
 .irc-channels .channel-item { padding:4px 8px; cursor:pointer; border-radius:4px; }
 .irc-channels .channel-item.active { background:var(--theme-primary); color:#000; }
 .irc-channels .channel-item:hover { background:#333; }
-.irc-log { background:#000; color:#0f0; font-family:monospace; font-size:0.85rem; overflow-y:auto; padding:6px; white-space:pre-wrap; }
+.irc-log { grid-area:log; min-width:0; background:#000; color:#0f0; font-family:monospace; font-size:0.85rem; overflow-y:auto; overflow-wrap:anywhere; padding:6px; white-space:pre-wrap; }
 .irc-log .line { padding:1px 0; }
 .irc-log .system { color:#aaa; }
 .irc-log .error { color:#f33; }
@@ -31,98 +40,122 @@
 .irc-log .action { color:#ff6; font-style:italic; }
 .irc-log .highlight { background:#ff0; color:#000; padding:1px 2px; border-radius:2px; }
 .irc-log .mention { border-left:3px solid #ff0; padding-left:4px; }
-.irc-users { background:var(--theme-bg-dark); border-left:1px solid var(--theme-primary); overflow-y:auto; padding:4px; font-family:monospace; font-size:0.8rem; }
+.irc-users { grid-area:users; background:var(--theme-bg-dark); border-left:1px solid var(--theme-primary); overflow-y:auto; padding:4px; font-family:monospace; font-size:0.8rem; }
 .irc-users .user-item { padding:1px 4px; cursor:pointer; border-radius:3px; }
 .irc-users .user-item:hover { background:#333; }
 .irc-users .op { color:#0f0; }
 .irc-users .voice { color:#0ff; }
 .irc-users .header { color:#aaa; font-weight:bold; padding:4px; border-bottom:1px solid #333; margin-bottom:4px; }
-.irc-input { grid-column:2/3; padding:6px; background:var(--theme-bg-dark); border-top:1px solid var(--theme-primary); display:flex; gap:6px; }
-.irc-input input { flex:1; }
+.irc-input { grid-area:input; min-width:0; padding:6px; background:var(--theme-bg-dark); border-top:1px solid var(--theme-primary); display:flex; align-items:center; gap:6px; }
+.irc-input input { flex:1; min-width:0; }
+#current_channel { max-width:25%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width:900px) {
+    .irc-header { padding:12px 8px; margin-bottom:12px; }
+    .irc-header p { margin-bottom:0; }
+    .irc-shell {
+        grid-template-areas:"config" "channels" "log" "input";
+        grid-template-columns:minmax(0, 1fr);
+        grid-template-rows:auto auto minmax(16rem, 45vh) auto;
+        min-height:0;
+    }
+    .irc-users { display:none; }
+    .irc-channels { display:flex; gap:4px; overflow-x:auto; border-right:0; border-bottom:1px solid var(--theme-primary); }
+    .irc-channels .channel-item { flex:none; white-space:nowrap; }
+    .irc-shell .form-control { font-size:1rem; }
+    .irc-input button { flex:none; min-width:44px; min-height:44px; }
+}
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="bbs-header">
-    <h1><i class="bi bi-broadcast-pin"></i> IRC Chat</h1>
-    <p>Connect to any IRC network from your browser.</p>
+<div class="bbs-header irc-header">
+    <h1><i class="bi bi-broadcast-pin"></i> {{ t("irc.title", "IRC Chat") }}</h1>
+    <p>{{ t("irc.description", "Connect to any IRC network from your browser.") }}</p>
 </div>
 
 <div class="irc-shell">
     <div class="irc-config">
-        <div>
-            <label class="form-label mb-0" style="font-size:0.75rem;">Server</label>
+      <div class="irc-fields">
+        <div class="irc-server">
+            <label class="form-label mb-0 small" for="cfg_server">{{ t("irc.server", "Server") }}</label>
             <input id="cfg_server" type="text" class="form-control form-control-sm"
-                   value="{{ saved.server if saved else (default_preset.server if default_preset else 'irc.libera.chat') }}" style="width:160px;">
+                   value="{{ saved.server if saved else (default_preset.server if default_preset else 'irc.libera.chat') }}">
         </div>
-        <div>
-            <label class="form-label mb-0" style="font-size:0.75rem;">Port</label>
+        <div class="irc-port">
+            <label class="form-label mb-0 small" for="cfg_port">{{ t("irc.port", "Port") }}</label>
             <input id="cfg_port" type="number" class="form-control form-control-sm"
-                   value="{{ saved.port if saved else (default_preset.port if default_preset else 6667) }}" style="width:80px;">
+                   value="{{ saved.port if saved else (default_preset.port if default_preset else 6667) }}">
         </div>
         <div class="form-check mb-1">
             <input id="cfg_ssl" class="form-check-input" type="checkbox"
                    {% if (saved and saved.use_ssl) or (not saved and default_preset and default_preset.use_ssl) %}checked{% endif %}>
-            <label class="form-check-label" for="cfg_ssl" style="font-size:0.85rem;">SSL</label>
+            <label class="form-check-label small" for="cfg_ssl">TLS</label>
         </div>
-        <div>
-            <label class="form-label mb-0" style="font-size:0.75rem;">Nick</label>
+        <div class="irc-nick">
+            <label class="form-label mb-0 small" for="cfg_nick">{{ t("irc.nick", "Nick") }}</label>
             <input id="cfg_nick" type="text" class="form-control form-control-sm"
-                   value="{{ saved.nick if saved else ((default_preset.default_nick if default_preset and default_preset.default_nick else default_nick)) }}" style="width:120px;">
+                   value="{{ saved.nick if saved else ((default_preset.default_nick if default_preset and default_preset.default_nick else default_nick)) }}">
         </div>
-        <div>
-            <label class="form-label mb-0" style="font-size:0.75rem;">Auto-join channels (comma)</label>
+        <div class="irc-autojoin">
+            <label class="form-label mb-0 small" for="cfg_channels">{{ t("irc.autojoin", "Auto-join channels (comma-separated)") }}</label>
             <input id="cfg_channels" type="text" class="form-control form-control-sm"
-                   value="{{ saved.channels if saved else (default_preset.channels if default_preset else '') }}"
-                   placeholder="#hangout,#bbs" style="width:220px;">
+                   value="{{ (saved.channels if saved else (default_preset.channels if default_preset else '')) or '' }}"
+                   placeholder="#hangout,#bbs">
         </div>
-        <div>
-            <label class="form-label mb-0" style="font-size:0.75rem;">SASL Account</label>
+      </div>
+      <details class="irc-advanced">
+        <summary>{{ t("irc.advanced", "Advanced authentication") }}</summary>
+        <div class="irc-fields">
+          <div class="irc-auth-field">
+            <label class="form-label mb-0 small" for="cfg_sasl_user">{{ t("irc.sasl_account", "SASL account") }}</label>
             <input id="cfg_sasl_user" type="text" class="form-control form-control-sm"
-                   placeholder="(optional)" style="width:120px;" autocomplete="off">
-        </div>
-        <div>
-            <label class="form-label mb-0" style="font-size:0.75rem;">SASL Password</label>
+                   placeholder="{{ t('irc.optional', '(optional)') }}" autocomplete="off">
+          </div>
+          <div class="irc-auth-field">
+            <label class="form-label mb-0 small" for="cfg_sasl_pass">{{ t("irc.sasl_password", "SASL password") }}</label>
             <input id="cfg_sasl_pass" type="password" class="form-control form-control-sm"
-                   placeholder="" style="width:120px;" autocomplete="new-password">
-        </div>
-        <div class="form-check mb-1">
+                   autocomplete="new-password">
+          </div>
+          <div class="form-check mb-1">
             <input id="cfg_cert_toggle" class="form-check-input" type="checkbox">
-            <label class="form-check-label" for="cfg_cert_toggle" style="font-size:0.85rem;"
-                   title="SASL EXTERNAL -- authenticate via a TLS client certificate instead of a password">
-                Client Cert
+            <label class="form-check-label small" for="cfg_cert_toggle"
+                   title="{{ t('irc.cert_help', 'SASL EXTERNAL — authenticate with a TLS client certificate') }}">
+                {{ t("irc.cert", "Client certificate") }}
             </label>
+          </div>
         </div>
-        <button id="btn_connect" class="btn btn-success btn-sm">
-            <i class="bi bi-plug"></i> Connect
-        </button>
-        <button id="btn_disconnect" class="btn btn-danger btn-sm" disabled>
-            <i class="bi bi-x-circle"></i> Disconnect
-        </button>
-        <button id="btn_save" class="btn btn-outline-secondary btn-sm" title="Save these settings">
-            <i class="bi bi-bookmark"></i>
-        </button>
-    </div>
-
-    <div class="irc-config" id="cfg_cert_panel" style="display:none;">
-        <div style="flex:1; min-width:260px;">
-            <label class="form-label mb-0" style="font-size:0.75rem;">
-                Client Certificate (PEM) — SASL EXTERNAL / CertFP
+        <div class="irc-cert-panel" id="cfg_cert_panel" style="display:none;">
+          <div>
+            <label class="form-label mb-0 small" for="cfg_cert_pem">
+                {{ t("irc.cert_pem", "Client certificate (PEM) — SASL EXTERNAL / CertFP") }}
             </label>
-            <textarea id="cfg_cert_pem" class="form-control form-control-sm" rows="4"
-                      style="font-family:monospace; font-size:0.75rem;"
+            <textarea id="cfg_cert_pem" class="form-control form-control-sm font-monospace" rows="4"
                       placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
                       autocomplete="off" spellcheck="false"></textarea>
-        </div>
-        <div style="flex:1; min-width:260px;">
-            <label class="form-label mb-0" style="font-size:0.75rem;">
-                Client Private Key (PEM) — never leaves this connection except to be stored briefly server-side for the duration of your session
+          </div>
+          <div>
+            <label class="form-label mb-0 small" for="cfg_key_pem">
+                {{ t("irc.key_pem", "Client private key (PEM) — held briefly by the server for this session") }}
             </label>
-            <textarea id="cfg_key_pem" class="form-control form-control-sm" rows="4"
-                      style="font-family:monospace; font-size:0.75rem;"
+            <textarea id="cfg_key_pem" class="form-control form-control-sm font-monospace" rows="4"
                       placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"
                       autocomplete="off" spellcheck="false"></textarea>
+          </div>
         </div>
+      </details>
+      <div class="irc-actions">
+        <button id="btn_connect" class="btn btn-success btn-sm">
+            <i class="bi bi-plug"></i> {{ t("irc.connect", "Connect") }}
+        </button>
+        <button id="btn_disconnect" class="btn btn-danger btn-sm" disabled>
+            <i class="bi bi-x-circle"></i> {{ t("irc.disconnect", "Disconnect") }}
+        </button>
+        <button id="btn_save" class="btn btn-outline-secondary btn-sm"
+                title="{{ t('irc.save_settings', 'Save these settings') }}"
+                aria-label="{{ t('irc.save_settings', 'Save these settings') }}">
+            <i class="bi bi-bookmark"></i>
+        </button>
+      </div>
     </div>
 
     <div class="irc-channels" id="channels">
@@ -130,7 +163,7 @@
     </div>
 
     <div class="irc-log" id="log">
-        <div class="line system">[Click <b>Connect</b> to begin.]</div>
+        <div class="line system">{{ t("irc.start", "Select Connect to begin.") }}</div>
     </div>
 
     <div class="irc-users" id="users">
@@ -139,10 +172,11 @@
     </div>
 
     <div class="irc-input">
-        <span id="current_channel" class="text-muted" style="white-space:nowrap;">(server)</span>
+        <span id="current_channel" class="text-muted">(server)</span>
         <input id="input_line" class="form-control form-control-sm" type="text"
-               placeholder="Type a message or /command (e.g. /join #channel)…" disabled>
-        <button id="btn_send" class="btn btn-primary btn-sm" disabled>
+               placeholder="{{ t('irc.message_placeholder', 'Message or /command…') }}"
+               aria-label="{{ t('irc.message', 'Message') }}" disabled>
+        <button id="btn_send" class="btn btn-primary btn-sm" aria-label="{{ t('irc.send', 'Send') }}" disabled>
             <i class="bi bi-send"></i>
         </button>
     </div>

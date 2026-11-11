@@ -907,6 +907,31 @@ DEFAULT_TRANSLATIONS = {
 }
 
 
+DEFAULT_TRANSLATIONS['es'].update({
+    'irc.advanced': 'Autenticación avanzada',
+    'irc.autojoin': 'Canales (separados por comas)',
+    'irc.cert': 'Certificado de cliente',
+    'irc.cert_help': 'SASL EXTERNAL — autentícate con un certificado TLS de cliente',
+    'irc.cert_pem': 'Certificado de cliente (PEM) — SASL EXTERNAL / CertFP',
+    'irc.connect': 'Conectar',
+    'irc.description': 'Conéctate a cualquier red IRC desde el navegador.',
+    'irc.disconnect': 'Desconectar',
+    'irc.key_pem': 'Clave privada de cliente (PEM) — el servidor la conserva temporalmente durante esta sesión',
+    'irc.message': 'Mensaje',
+    'irc.message_placeholder': 'Mensaje o /comando…',
+    'irc.nick': 'Apodo',
+    'irc.optional': '(opcional)',
+    'irc.port': 'Puerto',
+    'irc.sasl_account': 'Cuenta SASL',
+    'irc.sasl_password': 'Contraseña SASL',
+    'irc.save_settings': 'Guardar estos ajustes',
+    'irc.send': 'Enviar',
+    'irc.server': 'Servidor',
+    'irc.start': 'Pulsa Conectar para empezar.',
+    'irc.title': 'Chat IRC',
+})
+
+
 def seed_default_translations():
     """Idempotent: insert any (lang, key) pair from DEFAULT_TRANSLATIONS
     that doesn't already have a MenuTranslation row. Never overwrites an
