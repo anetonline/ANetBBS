@@ -5,6 +5,7 @@ import sys
 import os
 import json
 from datetime import datetime, timedelta
+from time import monotonic
 from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, current_app
 from flask_login import login_required, current_user
 from wtforms import StringField, TextAreaField, SubmitField, BooleanField, PasswordField, IntegerField
@@ -3818,42 +3819,61 @@ def time_budgets():
 @login_required
 @admin_required
 def db_backup():
-    """Stream the SQLite DB file as a download. Only for sqlite installs.
+    """Download a verified SQLite snapshot, independent of the live DB/WAL."""
+    from contextlib import closing
+    import sqlite3
+    import tempfile
+    from flask import send_file as _send_file
 
-    Forces a WAL checkpoint first: in WAL mode (anetbbs/models.py's
-    connect-time PRAGMA hook), recently committed writes can sit only
-    in the separate `-wal` file until checkpointed -- a raw copy of
-    just the main .db file (which is all send_file() below sees) could
-    silently miss them. `PRAGMA wal_checkpoint(TRUNCATE)` merges
-    everything back into the main file and empties the WAL, so the
-    file this route streams is always self-contained regardless of
-    journal mode. update.sh's own pre-update backup already avoided
-    this problem a different way (`sqlite3 .backup`, safe under any
-    journal mode) -- this route needed its own fix since it does a
-    plain file copy instead.
-    """
-    from flask import send_file as _send_file, current_app as _ca
-    uri = _ca.config.get('SQLALCHEMY_DATABASE_URI', '')
-    if not uri.startswith('sqlite'):
+    if db.engine.dialect.name != 'sqlite':
         flash('DB backup only supports SQLite installs.', 'warning')
         return redirect(url_for('admin.dashboard'))
-    path = uri.replace('sqlite:///', '').replace('sqlite:////', '/')
-    if not path.startswith('/'):
-        path = '/' + path
-    if not os.path.isfile(path):
-        flash(f'DB file not found: {path}', 'danger')
-        return redirect(url_for('admin.dashboard'))
+
+    snapshot = None
     try:
-        from sqlalchemy import text as _text
-        db.session.execute(_text('PRAGMA wal_checkpoint(TRUNCATE)'))
+        # Borrow the configured connection; its lifetime belongs to the
+        # request's session (a second raw checkout can share it on StaticPool).
+        source = db.session.connection().connection.driver_connection
+        if source.in_transaction:
+            # SQLite backup cannot progress on its own write transaction.
+            raise sqlite3.OperationalError('Backup source has an active transaction')
+        snapshot = tempfile.NamedTemporaryFile(
+            mode='w+b', prefix='anetbbs-backup-', suffix='.db')
+        with closing(sqlite3.connect(snapshot.name)) as destination:
+            deadline = monotonic() + 5
+
+            def check_backup_deadline(status, _remaining, _total):
+                # CPython retries BUSY and LOCKED even after SQLite's busy timeout.
+                if status != sqlite3.SQLITE_DONE and monotonic() >= deadline:
+                    raise sqlite3.OperationalError('SQLite backup exceeded its retry deadline')
+
+            # Keep a single lock wait shorter than the retry deadline.
+            # Restore the request connection's setting before it returns to the pool.
+            busy_timeout = source.execute('PRAGMA busy_timeout').fetchone()[0]
+            source.execute('PRAGMA busy_timeout=100')
+            try:
+                source.backup(destination, progress=check_backup_deadline)
+            finally:
+                source.execute(f'PRAGMA busy_timeout={busy_timeout}')
+            if destination.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
+                raise sqlite3.DatabaseError('SQLite backup integrity check failed')
+
+        # Close SQLite before streaming so any destination WAL is checkpointed.
+        # The WSGI file wrapper closes/deletes the temporary file on completion
+        # or client disconnect; passing a file object also avoids X-Sendfile.
+        snapshot.seek(0)
+        response = _send_file(
+            snapshot, as_attachment=True,
+            download_name=f'anetbbs-backup-{datetime.utcnow().strftime("%Y%m%d-%H%M")}.db',
+            mimetype='application/octet-stream')
+        response.content_length = os.fstat(snapshot.fileno()).st_size
+        return response
     except Exception as exc:  # pylint: disable=broad-except
-        import logging as _logging
-        _logging.getLogger(__name__).warning(
-            'db_backup: WAL checkpoint failed (continuing anyway): %s', exc)
-    return _send_file(path,
-                      as_attachment=True,
-                      download_name=f'anetbbs-backup-{datetime.utcnow().strftime("%Y%m%d-%H%M")}.db',
-                      mimetype='application/octet-stream')
+        if snapshot is not None:
+            snapshot.close()
+        current_app.logger.error('db_backup: SQLite snapshot failed: %s', exc)
+        flash('Database backup failed. Please try again.', 'danger')
+        return redirect(url_for('admin.dashboard'))
 
 
 @admin_bp.route('/theme-builder', methods=['GET', 'POST'])
