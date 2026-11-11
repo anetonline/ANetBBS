@@ -1,11 +1,21 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.67`** (November 2026). This file covers `v1.0.0`
+Current release: **`v1.1.68`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.68 — Password-change session revocation, consistent backups, Spanish localization (November 2026)
+
+Password changes now revoke every other active session for that account across every front-end at once — web (including Socket.IO), terminal (telnet/SSH/rlogin), FTP, and the MRC bridge's shared cookie-based auth — instead of leaving a session that logged in under the old password still connected. Session cleanup on revocation now also reaps an orphaned door-game subprocess still attached to a revoked session, on every transport, not just the common ones. Password-recovery links now preserve the canonical request origin, including IDN and IPv6 hosts, instead of a value that could drift from the actual recovery host; a login renewal can no longer race a concurrent password reset.
+
+Web database backups now take a consistent SQLite snapshot through SQLite's own online backup API and verify it before streaming, instead of reading pages that could be mid-write; backup retries under contention are now bounded instead of retrying indefinitely.
+
+Added Spanish localization for the core web and terminal flows — navigation, login/registration/recovery, boards, private messages, profile, the built-in terminal menus, and the Admin translations editor — selectable from the navigation language selector or a signed-in account's profile. The web IRC client's layout was improved for mobile screens and gained its own Spanish translations.
+
+A CI-only timing race in the MRC bridge's test suite (a test could sample sent packets before the real join sequence's final packet went out) was fixed by waiting for that packet deterministically; this is test/CI hardening only, with no runtime behavior change.
 
 ## v1.1.67 — Orphaned door session cleanup fix (November 2026)
 
