@@ -17,12 +17,14 @@ sysop after using it and having to fall back to the terminal client:
 3. `/msg target text` never echoed anything back to the sender (IRC
    servers don't echo your own PRIVMSGs) -- e.g. `/msg nickserv
    identify ...` looked like it silently did nothing.
+4. Configured channels were joined before the server accepted IRC
+   registration, causing servers such as UnrealIRCd to reject the JOIN.
 """
 import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -165,6 +167,74 @@ class IrcWebClientGapsTests(unittest.TestCase):
         event, payload = captured[0]
         self.assertEqual(event, 'irc_message')
         self.assertEqual(payload['target'], '#lobby')
+
+
+class IrcWebAutojoinTests(unittest.TestCase):
+    def test_connect_autojoin_waits_for_welcome_and_runs_once(self):
+        from flask import Flask
+        from flask_login import LoginManager, UserMixin
+        from flask_socketio import SocketIO
+        from anetbbs.web.irc_web import _IrcSession, register_socketio_handlers
+
+        app = Flask(__name__)
+        app.config.update(TESTING=True, SECRET_KEY='irc-autojoin-test')
+        login_manager = LoginManager(app)
+
+        class TestUser(UserMixin):
+            id = '1'
+            username = 'MyNick'
+
+        @login_manager.user_loader
+        def load_user(user_id):
+            if user_id == TestUser.id:
+                return TestUser()
+
+        socketio = SocketIO(app, async_mode='threading')
+        register_socketio_handlers(socketio)
+        browser = app.test_client()
+        with browser.session_transaction() as session:
+            session['_user_id'] = TestUser.id
+        client = socketio.test_client(app, flask_test_client=browser, namespace='/irc')
+        self.assertTrue(client.is_connected('/irc'))
+        self.addCleanup(client.disconnect, namespace='/irc')
+
+        with patch.object(socketio, 'start_background_task') as start, \
+             patch.object(_IrcSession, 'connect', return_value=True), \
+             patch.object(_IrcSession, 'send_raw', autospec=True) as send, \
+             patch.object(_IrcSession, '_emit'):
+            client.emit('irc_connect', {
+                'server': 'irc.example.com', 'nick': 'MyNick',
+                'autojoin': ['#gks', 'staff passcode'],
+            }, namespace='/irc')
+            start.assert_called_once()
+            sess = start.call_args.args[0].__self__
+            send.assert_not_called()
+
+            sess._handle_line('PING :registration')
+            send.assert_called_once_with(sess, 'PONG :registration')
+            send.reset_mock()
+
+            sess._handle_line(':irc.example.com 001 MyNick :Welcome')
+            sess._handle_line(':irc.example.com 001 MyNick :Welcome again')
+            self.assertEqual(send.call_args_list,
+                             [call(sess, 'JOIN #gks'),
+                              call(sess, 'JOIN #staff passcode')])
+            self.assertEqual(sess.channel_keys['#staff'], 'passcode')
+
+    def test_sasl_success_does_not_autojoin_before_welcome(self):
+        from anetbbs.web.irc_web import _IrcSession
+
+        sess = _IrcSession('fake-sid', 'irc.example.com', 6697, True,
+                           'MyNick', 'myuser', 'My Real Name',
+                           sasl_user='account', sasl_pass='passcode',
+                           autojoin=['#gks'])
+        with patch.object(sess, 'send_raw') as send, patch.object(sess, '_emit'):
+            sess._handle_line(':irc.example.com 903 MyNick :SASL successful')
+            send.assert_called_once_with('CAP END')
+            send.reset_mock()
+
+            sess._handle_line(':irc.example.com 001 MyNick :Welcome')
+            send.assert_called_once_with('JOIN #gks')
 
 
 if __name__ == '__main__':
