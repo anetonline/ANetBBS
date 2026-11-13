@@ -8,8 +8,11 @@ Returns (ok: bool, error: str) so callers decide whether to flash/log.
 """
 import logging
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+from flask import current_app, has_app_context
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +34,15 @@ def smtp_enabled():
     return _get_config() is not None
 
 
+def _require_verified_tls():
+    return has_app_context() and current_app.config.get('REGISTRATION_REQUIRE_VERIFIED_EMAIL', False)
+
+
 def email_verify_enabled():
     """True if SMTP is ready AND email verification is turned on."""
     cfg = _get_config()
-    return bool(cfg and cfg.email_verify_enabled)
+    return bool(cfg and cfg.email_verify_enabled
+                and (not _require_verified_tls() or cfg.use_ssl or cfg.use_tls))
 
 
 def send_email(to_address, subject, body_text, body_html=None):
@@ -52,6 +60,9 @@ def send_email(to_address, subject, body_text, body_html=None):
     cfg = _get_config()
     if not cfg:
         return False, 'SMTP relay not configured or disabled'
+    require_verified_tls = _require_verified_tls()
+    if require_verified_tls and not (cfg.use_ssl or cfg.use_tls):
+        return False, 'The SMTP relay must use TLS'
 
     from_addr = cfg.from_address.strip()
     from_header = (f'{cfg.from_name} <{from_addr}>'
@@ -69,13 +80,14 @@ def send_email(to_address, subject, body_text, body_html=None):
     msg['To'] = to_address
 
     try:
+        tls_context = ssl.create_default_context() if require_verified_tls else None
         if cfg.use_ssl:
-            server = smtplib.SMTP_SSL(cfg.host, cfg.port or 465, timeout=15)
+            server = smtplib.SMTP_SSL(cfg.host, cfg.port or 465, timeout=15, context=tls_context)
         else:
             server = smtplib.SMTP(cfg.host, cfg.port or 587, timeout=15)
             if cfg.use_tls:
                 server.ehlo()
-                server.starttls()
+                server.starttls(context=tls_context)
                 server.ehlo()
         if cfg.username:
             server.login(cfg.username.strip(), cfg.password or '')
@@ -90,7 +102,6 @@ def send_email(to_address, subject, body_text, body_html=None):
 
 def send_verification_email(user, verify_url):
     """Send an email verification link to a newly registered user."""
-    from flask import current_app
     bbs_name = current_app.config.get('BBS_NAME', 'This BBS')
     subject = f'Verify your email — {bbs_name}'
     text = (

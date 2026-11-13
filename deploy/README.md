@@ -1,5 +1,20 @@
 # ANetBBS -- Deployment Guide
 
+## Public registration with verified email
+
+Configure a canonical HTTPS `PUBLIC_BASE_URL` and enable email verification
+in the SysOp SMTP settings. Use an SMTP relay with a trusted certificate via
+implicit TLS or STARTTLS. Set `REGISTRATION_OPEN=true`,
+`REGISTRATION_REQUIRE_VERIFIED_EMAIL=true` and `NUV_ENABLED=false`.
+This mode registers users on the web. The link confirms the email address
+and the user signs in separately with their password.
+
+An unavailable or incompatible verification configuration blocks new signups.
+If a configured relay fails to send, the account stays unverified and the user
+can request a new link. Test delivery and resend with a controlled mailbox
+before opening the live flow. To pause signups, set `REGISTRATION_OPEN=false`
+and retain verification for accounts already waiting on their link.
+
 ## Quick Start (Ubuntu / Debian)
 
 Run the automated installer from the repository root:

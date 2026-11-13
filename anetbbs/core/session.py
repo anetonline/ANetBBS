@@ -2520,6 +2520,9 @@ class BBSSession:
         if not _cfg.get('REGISTRATION_OPEN', True):
             await self.write("\r\nNew account registration is currently closed.\r\n")
             return False
+        if _cfg.get('REGISTRATION_REQUIRE_VERIFIED_EMAIL'):
+            await self.write("\r\nPlease register on the BBS website to verify your email.\r\n")
+            return False
         _invite_code = _cfg.get('REGISTRATION_INVITE_CODE', '')
         if _invite_code:
             entered = await self.read_line("Invite code: ")

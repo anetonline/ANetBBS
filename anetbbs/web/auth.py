@@ -583,7 +583,7 @@ def login():
         # Block unverified accounts.
         if not getattr(user, 'is_verified', True) and not user.is_admin:
             from ..mailer import email_verify_enabled
-            if email_verify_enabled():
+            if current_app.config.get('REGISTRATION_REQUIRE_VERIFIED_EMAIL') or email_verify_enabled():
                 flash(_t('auth.verify_before_login', 'Please verify your email address before logging in. '
                          'Check your inbox for the verification link.'), 'warning')
             elif current_app.config.get('NUV_ENABLED'):
@@ -750,6 +750,13 @@ def register():
         from ..mailer import email_verify_enabled as _ev_enabled
         nuv_on = bool(current_app.config.get('NUV_ENABLED'))
         ev_on = _ev_enabled()
+        verification_origin = None
+        if current_app.config.get('REGISTRATION_REQUIRE_VERIFIED_EMAIL'):
+            verification_origin = _strict_verification_origin()
+            if nuv_on or not ev_on or not verification_origin:
+                flash(_t('auth.registration_verification_unavailable',
+                         'Email verification is temporarily unavailable. Please try again later.'), 'warning')
+                return render_template('auth/register.html', form=form), 503
         start_unverified = nuv_on or ev_on
         user = User(
             username=form.username.data,
@@ -833,7 +840,7 @@ def register():
                 expires_at=datetime.utcnow() + timedelta(hours=24),
             ))
             db.session.commit()
-            verify_url = url_for('auth.verify_email', token=token, _external=True)
+            verify_url = _email_verification_url(token, verification_origin)
             ok, err = send_verification_email(user, verify_url)
             if not ok:
                 current_app.logger.warning(
@@ -1302,6 +1309,21 @@ def reset_password(token):
 # Email verification
 # ---------------------------------------------------------------------------
 
+def _strict_verification_origin():
+    """Use the same canonical origin as account recovery, with HTTPS required."""
+    try:
+        origin = _password_recovery_origin()
+    except ValueError:
+        return None
+    return origin if origin.startswith('https://') else None
+
+
+def _email_verification_url(token, origin):
+    if origin:
+        return origin + url_for('auth.verify_email', token=token, _external=False)
+    return url_for('auth.verify_email', token=token, _external=True)
+
+
 @auth_bp.route('/verify/<token>')
 def verify_email(token):
     """Click-through email verification link."""
@@ -1312,10 +1334,17 @@ def verify_email(token):
         return redirect(url_for('auth.login'))
 
     user = vt.user
+    require_password = current_app.config.get('REGISTRATION_REQUIRE_VERIFIED_EMAIL')
+    if require_password and (not user.is_active or user.is_locked):
+        return redirect(url_for('auth.login'))
     vt.used_at = datetime.utcnow()
     user.is_verified = True
     db.session.commit()
     _log_activity(user.id, 'email_verified')
+    if require_password:
+        flash(_t('auth.email_verified_sign_in',
+                 'Email verified. You can now sign in with your password.'), 'success')
+        return redirect(url_for('auth.login'))
     login_user(user, remember=True)
     flask_session['language'] = user.language or 'en'
     return render_template('auth/verified.html', username=user.username)
@@ -1348,6 +1377,13 @@ def resend_verification():
             if not email_verify_enabled():
                 flash(_t('auth.verification_disabled', 'Email verification is not enabled. Contact the sysop.'), 'warning')
                 return redirect(url_for('auth.login'))
+            verification_origin = None
+            if current_app.config.get('REGISTRATION_REQUIRE_VERIFIED_EMAIL'):
+                verification_origin = _strict_verification_origin()
+                if current_app.config.get('NUV_ENABLED') or not verification_origin:
+                    flash(_t('auth.registration_verification_unavailable',
+                             'Email verification is temporarily unavailable. Please try again later.'), 'warning')
+                    return redirect(url_for('auth.login'))
             token = secrets.token_urlsafe(32)
             db.session.add(EmailVerifyToken(
                 user_id=user.id,
@@ -1355,7 +1391,7 @@ def resend_verification():
                 expires_at=datetime.utcnow() + timedelta(hours=24),
             ))
             db.session.commit()
-            verify_url = url_for('auth.verify_email', token=token, _external=True)
+            verify_url = _email_verification_url(token, verification_origin)
             send_verification_email(user, verify_url)
             return render_template('auth/verify_sent.html', email=user.email)
         error = _t('auth.invalid_or_verified', 'Invalid credentials or account already verified.')
