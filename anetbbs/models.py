@@ -7,8 +7,9 @@ from datetime import datetime
 import secrets
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import object_session
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
@@ -1332,6 +1333,7 @@ class PasswordResetToken(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
                         nullable=False, index=True)
     token = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    auth_version = db.Column(db.String(64), nullable=True)
     expires_at = db.Column(db.DateTime, nullable=False, index=True)
     used_at = db.Column(db.DateTime)
     requested_ip = db.Column(db.String(45))
@@ -1343,9 +1345,30 @@ class PasswordResetToken(db.Model):
 
     @property
     def is_valid(self):
-        if self.used_at is not None:
-            return False
-        return datetime.utcnow() < self.expires_at
+        return (self.used_at is None and datetime.utcnow() < self.expires_at
+                and self.user is not None and self.user.auth_version == self.auth_version)
+
+    def apply_password(self, password):
+        """Replace the password only if this token's generation is still current."""
+        password_hash = generate_password_hash(password)
+        now = datetime.utcnow()
+        token_is_current = select(PasswordResetToken.id).where(
+            PasswordResetToken.id == self.id,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at > now,
+        ).exists()
+        session = object_session(self)
+        # Update the account, not just the token, so two links for the same
+        # account cannot win together. The caller commits both writes at once.
+        updated = session.query(User).filter_by(
+            id=self.user_id, auth_version=self.auth_version,
+        ).filter(token_is_current).update({
+            User.password_hash: password_hash,
+            User.auth_version: secrets.token_urlsafe(32),
+        }, synchronize_session='fetch')
+        if updated:
+            self.used_at = now
+        return updated == 1
 
     def __repr__(self):
         return f'<PasswordResetToken user={self.user_id} valid={self.is_valid}>'

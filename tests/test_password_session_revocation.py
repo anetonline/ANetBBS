@@ -92,6 +92,75 @@ def test_reset_password_revokes_session_and_remember_cookie(account):
             token='local-reset-token').one().used_at is not None
 
 
+def test_password_change_revokes_pending_links_but_fresh_link_works(account):
+    app, uid = account
+    from anetbbs.models import PasswordResetToken, User, db
+
+    with app.app_context():
+        user = db.session.get(User, uid)
+        expiry = datetime.utcnow() + timedelta(hours=1)
+        pending = PasswordResetToken(user=user, token='pending', expires_at=expiry,
+                                     auth_version=user.auth_version)
+        db.session.add(pending)
+        db.session.commit()
+        assert pending.is_valid
+
+        user.set_password('profile-or-admin-replacement')
+        db.session.commit()
+        assert not pending.is_valid
+
+        fresh = PasswordResetToken(user=user, token='fresh', expires_at=expiry,
+                                   auth_version=user.auth_version)
+        db.session.add(fresh)
+        db.session.commit()
+        assert fresh.is_valid
+
+    response = app.test_client().post('/auth/reset/fresh', data={
+        'password': 'second-replacement', 'password2': 'second-replacement'})
+    assert '/auth/login' in response.location
+    _login(app, password='second-replacement')
+
+
+@pytest.mark.parametrize('same_link', [True, False])
+def test_recovery_transaction_allows_one_password_change(account, same_link):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from anetbbs.models import PasswordResetToken, User, db
+
+    app, uid = account
+    with app.app_context():
+        expiry = datetime.utcnow() + timedelta(hours=1)
+        db.session.add_all([
+            PasswordResetToken(user_id=uid, token=token, expires_at=expiry)
+            for token in ('first-link', 'second-link')])
+        db.session.commit()
+
+    loaded = Barrier(2, timeout=15)
+
+    def replace_password(link, password):
+        with app.app_context():
+            token = PasswordResetToken.query.filter_by(token=link).one()
+            assert token.is_valid
+            loaded.wait()
+            applied = token.apply_password(password)
+            if applied:
+                db.session.commit()
+            else:
+                db.session.rollback()
+            return password if applied else None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(replace_password, 'first-link', 'first-replacement')
+        second = pool.submit(replace_password, 'first-link' if same_link else 'second-link',
+                             'second-replacement')
+        winners = [password for password in (first.result(), second.result()) if password]
+
+    assert len(winners) == 1
+    with app.app_context():
+        assert db.session.get(User, uid).check_password(winners[0])
+        assert not any(token.is_valid for token in PasswordResetToken.query.all())
+
+
 def test_wrong_current_password_does_not_revoke_other_sessions(account):
     app, uid = account
     current, old = _login(app), _login(app)
