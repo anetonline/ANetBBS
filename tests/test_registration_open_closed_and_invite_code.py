@@ -14,6 +14,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -126,9 +127,7 @@ class WebRegistrationOpenClosedTests(unittest.TestCase):
 
 class _FakeTerminalSession:
     """Minimal fake for BBSSession.handle_registration()'s own gate
-    check -- only needs write()/read_line() for the two early-return
-    paths this test exercises (closed, wrong invite code), never
-    reaching the rest of the real registration flow."""
+    checks, without running the rest of the real registration flow."""
 
     def __init__(self, responses):
         self._responses = list(responses)
@@ -180,6 +179,31 @@ class TerminalRegistrationOpenClosedTests(unittest.TestCase):
             self.app.config['REGISTRATION_OPEN'] = True
         self.assertFalse(result)
         self.assertIn('currently closed', session.transcript())
+
+    def test_required_email_verification_directs_terminal_signup_to_website(self):
+        from anetbbs.core.session import BBSSession
+
+        session = _FakeTerminalSession([])
+        session.read_line = AsyncMock(wraps=session.read_line)
+        session.read_password = AsyncMock()
+        session.user_manager = Mock()
+
+        with (
+            patch.dict(self.app.config, {
+                'REGISTRATION_OPEN': True,
+                'REGISTRATION_INVITE_CODE': '',
+                'REGISTRATION_REQUIRE_VERIFIED_EMAIL': True,
+            }),
+            patch('anetbbs.features.bbs_ui._app', return_value=self.app),
+        ):
+            result = asyncio.run(BBSSession.handle_registration(session))
+
+        self.assertIs(result, False)
+        self.assertIn('Please register on the BBS website to verify your email.',
+                      session.transcript())
+        session.read_line.assert_not_called()
+        session.read_password.assert_not_called()
+        session.user_manager.create_user.assert_not_called()
 
     def test_wrong_invite_code_refuses(self):
         from anetbbs.core.session import BBSSession
