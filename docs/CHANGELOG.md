@@ -1,11 +1,19 @@
 # ANetBBS Changelog
 
-Current private test candidate: **`v1.1.70`** (November 2026). This file covers `v1.0.0`
+Current private test candidate: **`v1.1.71`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.71 — Spanish admin-hub label for Internet Mail (private test candidate, November 2026)
+
+The Internet Mail card added to **Admin → Settings** in v1.1.69 had no
+Spanish catalogue entry, so Spanish-language sysops saw an untranslated
+card and the localization test failed the Docker CI workflow. Added the
+missing `admin.hub.tool.admin.mail_settings` label and description
+("Correo de Internet", matching the existing main-menu wording).
 
 ## v1.1.70 — Code-scan fix for Internet Mail body rendering (private test candidate, November 2026)
 

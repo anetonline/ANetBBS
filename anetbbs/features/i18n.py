@@ -184,6 +184,8 @@ DEFAULT_TRANSLATIONS = {
         'admin.hub.tool.admin.ip_whitelist.label': 'Lista de IP permitidas',
         'admin.hub.tool.admin.irc_presets.description': 'Lista de servidores IRC guardados',
         'admin.hub.tool.admin.irc_presets.label': 'Servidores IRC preconfigurados',
+        'admin.hub.tool.admin.mail_settings.description': 'Función de correo de Internet, dominio, política de acceso y cuotas',
+        'admin.hub.tool.admin.mail_settings.label': 'Correo de Internet',
         'admin.hub.tool.admin.motd_admin.description': 'Rotación de mensajes del día',
         'admin.hub.tool.admin.motd_admin.label': 'Mensajes del día',
         'admin.hub.tool.admin.newsletter.description': 'Enviar novedades por correo a los usuarios',
