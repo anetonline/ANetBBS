@@ -36,7 +36,7 @@ def _identifier_is_current(identifier):
         return bool(
             user is not None and user.get_id() == identifier
             and user.is_active and not user.is_locked
-            and (user.is_verified or user.is_admin)
+            and (getattr(user, 'is_verified', True) or user.is_admin)
         )
 
 

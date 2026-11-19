@@ -165,6 +165,20 @@ class User(UserMixin, db.Model):
     # first place that data is shown to the anonymous public internet, so
     # it gets its own opt-out rather than reusing/overloading another flag.
     public_watch_optout = db.Column(db.Boolean, default=False, nullable=False)
+    # Internet Mail opt-in: `<email_local_part>@<MailConfig.domain>` lands
+    # in this user's InternetMail inbox. Gated separately by
+    # MailConfig.enabled (whole feature on/off) and MailConfig.min_access_level
+    # (this user's access_level must meet it to self-enable, same numeric
+    # min-access convention BbsMenuItem.min_access already uses) -- this
+    # column alone doesn't imply the feature is reachable.
+    email_enabled = db.Column(db.Boolean, default=False, index=True)
+    # Explicit mailbox local-part override; falls back to a slugified
+    # username when blank (see anetbbs/mail/_slug_local_part()). Must be
+    # unique among email_enabled=True rows -- enforced at save time, not
+    # by a DB-level unique constraint, since it's only meaningful while
+    # email_enabled is True (two disabled users having the same blank/old
+    # value is harmless).
+    email_local_part = db.Column(db.String(64), index=True)
 
     # Relationships
     posts = db.relationship('Post', backref='author', lazy='dynamic', cascade='all, delete-orphan')
@@ -618,6 +632,66 @@ class PrivateMessage(db.Model):
 
     def __repr__(self):
         return f'<PrivateMessage {self.subject}>'
+
+
+class InternetMail(db.Model):
+    """Real internet email (RFC 5322) sent/received as
+    `<local_part>@<MailConfig.domain>`. One row per recipient user --
+    a message with 3 local recipients fans out to 3 rows, same shape as
+    inbound delivery to any BBS user's own mailbox. ANetBBS binds its own
+    SMTP listener directly (anetbbs/mail/smtp_server.py, port 25) rather
+    than sitting behind an external MTA -- see docs/19-email.md.
+
+    The `raw` column keeps the full RFC 822 source so a future reader
+    can render bit-for-bit what hit the wire; the other columns are
+    extracted at receive/send time so the inbox can render without
+    re-parsing on every page load.
+    """
+    __tablename__ = 'internet_mail'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    direction = db.Column(db.String(10), default='inbound', index=True)
+    # 'inbound' / 'outbound' / 'quarantine' (reserved for a future
+    # self-hosted SPF/DKIM-verification phase -- not populated in v1)
+    status = db.Column(db.String(20), default='received', index=True)
+    # inbound: received / read -- outbound: sent / failed -- any: quarantine
+    from_addr = db.Column(db.String(255), index=True)
+    from_name = db.Column(db.String(255))
+    to_addr = db.Column(db.String(255), index=True)
+    to_name = db.Column(db.String(255))
+    cc = db.Column(db.Text)        # comma-joined; not the canonical addr list
+    subject = db.Column(db.String(998))   # RFC 5322 line-length limit
+    body = db.Column(db.Text)      # extracted plain-text part
+    has_html = db.Column(db.Boolean, default=False)
+    has_attachments = db.Column(db.Boolean, default=False)
+    raw = db.Column(db.LargeBinary)        # full RFC 5322 source
+    raw_size = db.Column(db.Integer, default=0)
+    # Bytes this row charges against the owner's mailbox quota:
+    # len(raw) + UTF-8 len(body), written once at delivery. NULL on rows
+    # from before the quota existed -- the usage query computes the same
+    # value from the columns for those (anetbbs/mail/limits.py).
+    stored_bytes = db.Column(db.BigInteger, nullable=True)
+    message_id = db.Column(db.String(255), index=True)
+    in_reply_to = db.Column(db.String(255), index=True)
+    refs = db.Column(db.Text)              # space-joined Message-IDs
+    # Anti-spam / provenance -- left NULL in v1 (no fronting MTA to
+    # source these from; self-verification is a flagged future phase).
+    spf_result = db.Column(db.String(20))
+    dkim_result = db.Column(db.String(20))
+    received_via = db.Column(db.String(40), default='smtp')
+    # smtp (inbound) / web / ansi / petscii (outbound compose surface)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True, nullable=False)
+    read_at = db.Column(db.DateTime)
+    sent_at = db.Column(db.DateTime)        # outbound only
+
+    user = db.relationship('User',
+                           backref=db.backref('internet_mail', lazy='dynamic',
+                                              cascade='all, delete-orphan'))
+
+    def __repr__(self):
+        return f'<InternetMail {self.id} {self.direction} {self.from_addr!r} -> {self.to_addr!r}>'
 
 
 class FileUpload(db.Model):
@@ -1410,6 +1484,79 @@ class SmtpConfig(db.Model):
     from_name = db.Column(db.String(255), default='')
     use_tls = db.Column(db.Boolean, default=True, nullable=False)
     use_ssl = db.Column(db.Boolean, default=False, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    @classmethod
+    def get(cls):
+        """Return the singleton config row, creating it (disabled) if absent."""
+        row = cls.query.first()
+        if row is None:
+            row = cls()
+            db.session.add(row)
+            db.session.commit()
+        return row
+
+
+# Internet Mail storage/attachment defaults (sysop-adjustable at
+# Admin -> Internet Mail). Rationale for each is in docs/19-email.md:
+#   quota 100 MiB  -- holds at least one maximum-size (25 MiB default)
+#       message even counting its decoded text copy, thousands of normal
+#       messages, and bounds worst-case SQLite growth to 100 MiB per
+#       opted-in user.
+#   20 attachments / 10 MiB decoded each -- covers ordinary documents and
+#       photos; a 25 MiB message can carry at most ~18.7 MiB decoded
+#       base64 anyway, so 10 MiB per part mainly stops a single oversized
+#       part from dominating a mailbox.
+MAILBOX_QUOTA_DEFAULT_BYTES = 100 * 1024 * 1024
+MAILBOX_QUOTA_MAX_BYTES = 1024 ** 4          # admin-input sanity ceiling (1 TiB)
+MAX_ATTACHMENTS_DEFAULT = 20
+MAX_ATTACHMENTS_CEILING = 1000
+MAX_ATTACHMENT_BYTES_DEFAULT = 10 * 1024 * 1024
+
+
+class MailConfig(db.Model):
+    """Single-row sysop policy config for Internet Mail (username@domain
+    send/receive). Separate from SmtpConfig: SmtpConfig is the outbound
+    relay connection itself (reused as-is for sending internet mail);
+    this row is the feature's own on/off switch and access policy.
+
+    Bind-topology settings (listen host/port, max connections, DNSBL
+    zones) are NOT here -- those are read once at process start, same
+    category as FINGER_LISTEN_HOST/PORT, and stay as env vars in
+    config.py since a restart is already expected for that class of
+    setting.
+    """
+    __tablename__ = 'mail_config'
+
+    id = db.Column(db.Integer, primary_key=True)
+    enabled = db.Column(db.Boolean, default=False, nullable=False)
+    domain = db.Column(db.String(255), default='')
+    # Minimum User.access_level required to self-enable email_enabled --
+    # same numeric min-access convention BbsMenuItem.min_access already
+    # uses, rather than a separate sysop-only/all-users enum. Default
+    # 100 matches access_level's own "admin gets 100+" tier, i.e.
+    # sysop-only until a sysop deliberately lowers it.
+    min_access_level = db.Column(db.Integer, default=100, nullable=False)
+    max_message_size = db.Column(db.Integer, default=25 * 1024 * 1024, nullable=False)
+    # Abuse limits (audit F-05 release acceptance). Inbound unique
+    # recipients per SMTP transaction (also capped by the hard ceiling
+    # smtp_server.MAX_RECIPIENTS_PER_TRANSACTION); per-user outbound sends
+    # through the shared sysop relay per rolling hour / day (0 = none).
+    max_recipients = db.Column(db.Integer, default=5, nullable=False)
+    outbound_per_hour = db.Column(db.Integer, default=10, nullable=False)
+    outbound_per_day = db.Column(db.Integer, default=50, nullable=False)
+    # Per-user inbound mailbox storage quota, in bytes (see
+    # anetbbs/mail/limits.py for exactly what is counted). Always finite.
+    # Plain-int defaults on purpose: update.sh's schema step copies
+    # col.default.arg into the ALTER TABLE ... DEFAULT clause.
+    mailbox_quota_bytes = db.Column(db.BigInteger, default=MAILBOX_QUOTA_DEFAULT_BYTES,
+                                    nullable=False)
+    # Per-message attachment limits for inbound mail: how many attachment
+    # parts, and the largest decoded size of any one of them.
+    max_attachments = db.Column(db.Integer, default=MAX_ATTACHMENTS_DEFAULT, nullable=False)
+    max_attachment_bytes = db.Column(db.BigInteger, default=MAX_ATTACHMENT_BYTES_DEFAULT,
+                                     nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow,
                            onupdate=datetime.utcnow)
 

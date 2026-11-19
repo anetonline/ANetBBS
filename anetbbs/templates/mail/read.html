@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ message.subject }} - {{ config.BBS_NAME }}{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-envelope-open"></i> Internet Mail</h1>
+</div>
+<div class="card mb-3">
+    <div class="card-header">
+        <strong>{{ message.subject }}</strong>
+    </div>
+    <div class="card-body">
+        {% if sender_warning %}
+        <div class="alert alert-danger" role="alert"><i class="bi bi-exclamation-triangle"></i> {{ sender_warning }}</div>
+        {% endif %}
+        {% if message.direction == 'inbound' %}
+        <p><strong>From:</strong> {{ message.from_name ~ ' ' if message.from_name }}&lt;{{ message.from_addr }}&gt;</p>
+        {% else %}
+        <p><strong>To:</strong> {{ message.to_addr }}</p>
+        <p><strong>Status:</strong>
+            {% if message.status == 'sent' %}<span class="badge bg-success">Accepted by relay</span>
+            {% elif message.status == 'failed' %}<span class="badge bg-danger">Failed</span>
+            {% else %}<span class="badge bg-secondary">{{ message.status }}</span>{% endif %}
+        </p>
+        {% endif %}
+        <p><strong>Date:</strong> {{ message.created_at|eastern('%Y-%m-%d %H:%M') }}</p>
+        <hr style="border-color: var(--theme-primary, #00ff00);">
+        <pre class="internet-mail-body">{{ body_html }}</pre>
+        <style>
+            .internet-mail-body { white-space: pre-wrap; overflow-wrap: anywhere;
+                font-family: inherit; margin: 0; }
+            .internet-mail-body .mail-quoted { color: var(--theme-muted, #9aa8b8);
+                background: color-mix(in srgb, var(--theme-surface, #101820) 70%, transparent);
+                border-left: 2px solid var(--theme-primary, #00c9a7);
+                padding-left: .55rem; }
+        </style>
+    </div>
+</div>
+<div class="d-flex gap-2">
+    {% if message.direction == 'inbound' %}
+    <a href="{{ url_for('mail.compose', to=message.from_addr, subject='Re: ' ~ (message.subject or '')) }}" class="btn btn-primary"><i class="bi bi-reply"></i> Reply</a>
+    <a href="{{ url_for('mail.compose', to=message.from_addr, subject='Re: ' ~ (message.subject or ''), quote=message.id) }}" class="btn btn-outline-secondary"><i class="bi bi-quote"></i> Quote Reply</a>
+    <a href="{{ url_for('mail.inbox') }}" class="btn btn-secondary">Back to Inbox</a>
+    {% else %}
+    <a href="{{ url_for('mail.sent') }}" class="btn btn-secondary">Back to Sent</a>
+    {% endif %}
+    <form method="post" action="{{ url_for('mail.delete', message_id=message.id) }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-danger"><i class="bi bi-trash"></i> Delete</button>
+    </form>
+</div>
+{% endblock %}

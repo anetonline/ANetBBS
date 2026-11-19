@@ -54,11 +54,32 @@ _INJECTED_ANSI_RE = re.compile(
 _CONTROL_RE = re.compile(r'[\x00-\x1f\x7f]')
 
 
+# 8-bit C1 forms (audit F-21): CSI 0x9B with params+final, OSC 0x9D and
+# DCS/SOS/PM/APC 0x90/0x98/0x9E/0x9F up to ST 0x9C or BEL, then any lone
+# C1 code point. For DECODED Unicode text only -- see
+# _strip_untrusted_raw_cp437() for latin-1-wrapped raw CP437 fields.
+_C1_SEQ_RE = re.compile(r'\x9b[0-?]*[ -/]*[@-~]?|[\x90\x98\x9d\x9e\x9f][^\x9c\x07]*[\x9c\x07]?')
+_C1_RE = re.compile(r'[\x80-\x9f]')
+
+
 def _strip_untrusted(s):
-    """Strip well-formed CSI/OSC escape sequences, then the whole C0
-    control range (+ DEL) as a safety net for anything malformed that
-    doesn't match the tidy pattern. Safe to call on already-clean
+    """Strip well-formed CSI/OSC escape sequences (7-bit and 8-bit C1
+    forms), then the whole C0 range (+ DEL) and C1 range as a safety net
+    for anything malformed. For decoded Unicode text (Internet Mail,
+    PMs, posts, IMs): printable CP437 glyphs are ordinary code points
+    >= U+00A0 there and are untouched. Safe to call on already-clean
     locally-typed text -- it's a no-op there."""
+    if not s:
+        return ''
+    s = _CONTROL_RE.sub('', _INJECTED_ANSI_RE.sub('', s))
+    return _C1_RE.sub('', _C1_SEQ_RE.sub('', s))
+
+
+def _strip_untrusted_raw_cp437(s):
+    """The pre-F-21 sanitizer, for fields stored as latin-1-wrapped RAW
+    CP437 bytes (echomail subject/from, echomail/binkp.py:753). There,
+    U+0080-U+009F are printable CP437 letters (Ç ü é ... ¢ £ ¥), not C1
+    controls, so they must not be stripped; ESC sequences and C0 are."""
     if not s:
         return ''
     return _CONTROL_RE.sub('', _INJECTED_ANSI_RE.sub('', s))
@@ -447,9 +468,9 @@ class BBSMenuUI:
                     # render path for the same untrusted data.
                     results.append({
                         'kind': 'echo',
-                        'subject': _strip_untrusted(m.subject) or '(no subject)',
+                        'subject': _strip_untrusted_raw_cp437(m.subject) or '(no subject)',
                         'source': echo_tags[m.area_id],
-                        'who': _strip_untrusted(m.from_name) or '?',
+                        'who': _strip_untrusted_raw_cp437(m.from_name) or '?',
                         'when': m.created_at,
                         'msg_id': m.id, 'area_id': m.area_id,
                         'area_tag': echo_tags[m.area_id],
@@ -900,6 +921,152 @@ class BBSMenuUI:
                     await self.session.read_line("Press Enter...")
             elif view_result == 'new':
                 await self.send_pm()
+
+    # ------------------------------------------------------------------
+    # Internet Mail (username@domain, real RFC 5322 email)
+    # ------------------------------------------------------------------
+
+    async def list_mail_inbox(self):
+        """Scrollable lightbar Internet Mail inbox -- same _rss_lightbar
+        widget as the PM/InterBBS-IM inboxes above. Internet Mail's
+        From/body come from an arbitrary internet sender, not another
+        BBS account -- same untrusted-origin treatment as
+        list_imsg_inbox() (InterBBS instant messages, also from a
+        remote, unauthenticated-to-us system): sanitize once when
+        building rows, and view through the plain _wrap_text/
+        _page_lines pager, NOT launch_aneview()'s ANSI-art-expecting
+        pager -- that one's reserved for PM/echomail bodies, which are
+        BBS-authored and decades-old BBS-precedent to legitimately
+        carry ANSI art (see this file's own _strip_untrusted()
+        docstring on that distinction). A stranger emailing this BBS
+        has no such precedent or reason to send control codes."""
+        from anetbbs.models import db, InternetMail
+        from anetbbs.mail.policy import (mark_inbound_read,
+                                         mark_inbound_notification_read,
+                                         sender_warning)
+        from anetbbs.mail.presentation import display_lines
+        from .ansi_ui import banner, ui_width, FG, RESET, BOLD
+        my_id = self.session.user['id']
+        sel = 0
+
+        while True:
+            with _app().app_context():
+                inbox = (InternetMail.query
+                         .filter_by(user_id=my_id, direction='inbound')
+                         .order_by(InternetMail.created_at.desc())
+                         .limit(50).all())
+                i_list = [(m.id, _strip_untrusted(m.subject or ''),
+                           _strip_untrusted(m.from_addr or '?'),
+                           m.created_at, m.read_at is not None,
+                           '\n'.join(_strip_untrusted(ln)
+                                    for ln in (m.body or '').split('\n')),
+                           sender_warning(m))
+                          for m in inbox]
+
+            _w = ui_width(self.session)
+            _subj_w = max(24, _w - 56)
+
+            if not i_list:
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write(banner('Internet Mail Inbox', _w))
+                await self.session.write(
+                    f"  {FG['gry']}Your inbox is empty.{RESET}\r\n")
+                await self.session.read_line("\r\nPress Enter...")
+                return
+
+            async def render_header():
+                await self.session.write(banner('Internet Mail Inbox', _w))
+                await self.session.write(
+                    f"  {FG['cyan']}{BOLD}{'':2}{'Subject':<{_subj_w}}  "
+                    f"{'From':<24}  {'When':<12}{RESET}\r\n"
+                    f"  {FG['gry']}{'─' * max(72, _w - 4)}{RESET}\r\n")
+
+            def render_row(idx, m, selected):
+                _, subj, who, when, was_read, _, warn = m
+                ts = fmt_eastern(when, '%m-%d %H:%M', '?')
+                if warn:
+                    who = '!' + who
+                if selected:
+                    mark = '*' if not was_read else ' '
+                    text = (f"{mark} {subj[:_subj_w]:<{_subj_w}}  "
+                            f"{who[:24]:<24}  {ts}")
+                    return f"\x1b[0m{FG['yel']}> {text}{RESET}"
+                mark = ' ' if was_read else f"{FG['yel']}*{RESET}"
+                return (f"  {mark} "
+                        f"{FG['wht']}{subj[:_subj_w]:<{_subj_w}}{RESET}  "
+                        f"{FG['grn']}{who[:24]:<24}{RESET}  "
+                        f"{FG['gry']}{ts}{RESET}")
+
+            def render_hint(s, tot):
+                return (f"  {FG['cyan']}{s+1}/{tot}{RESET} "
+                        f"{FG['cyan']}Up/Dn{RESET}=Move  {FG['cyan']}Enter{RESET}=Read  "
+                        f"{FG['cyan']}R{RESET}=Reply  {FG['cyan']}D{RESET}=Delete  "
+                        f"{FG['cyan']}Q{RESET}=Back")
+
+            result = await self._rss_lightbar(
+                i_list, render_header, render_row, render_hint,
+                initial_sel=min(sel, len(i_list) - 1))
+
+            if result[0] == 'quit':
+                return
+            elif result[0] == 'enter':
+                cmd, sel = 'V', result[1]
+            else:
+                key, sel = result[1], result[2]
+                cmd = key if key in ('R', 'D') else None
+                if cmd is None:
+                    continue
+
+            mail_id, subj, who, when, _, body, warn = i_list[sel]
+
+            if cmd == 'V':
+                await self.session.write('\x1b[2J\x1b[H')
+                await self.session.write("\r\n" + "═" * _w + "\r\n")
+                ts = fmt_eastern(when, '%Y-%m-%d %H:%M', '?')
+                if warn:
+                    for wl in self._wrap_text(warn, _w - 2):
+                        await self.session.write(f"  {FG['red']}{BOLD}{wl}{RESET}\r\n")
+                await self.session.write(
+                    f"  From: {who}\r\n  Subject: {subj or '(no subject)'}\r\n"
+                    f"  Date: {ts}\r\n")
+                await self.session.write("─" * _w + "\r\n")
+                display = []
+                for raw_line, quoted in display_lines(body or ''):
+                    safe_line = _strip_untrusted(raw_line)
+                    prefix = '  │ ' if quoted and safe_line else ''
+                    line_width = max(12, _w - len(prefix))
+                    wrapped = self._wrap_text(safe_line, line_width) or ['']
+                    for wrapped_line in wrapped:
+                        shown = self._linkify_url_line(wrapped_line)
+                        if quoted and shown:
+                            shown = f"{FG['gry']}{prefix}{shown}{RESET}"
+                            prefix = '  │ '  # keep a quote rail on wrapped continuations
+                        display.append(shown)
+                await self._page_lines(display)
+                with _app().app_context():
+                    m = InternetMail.query.get(mail_id)
+                    if m and mark_inbound_read(m, datetime.utcnow()):
+                        db.session.commit()
+                        i_list[sel] = (mail_id, subj, who, when, True, body, warn)
+
+            elif cmd == 'D':
+                with _app().app_context():
+                    m = InternetMail.query.get(mail_id)
+                    if m:
+                        mark_inbound_notification_read(m)
+                        db.session.delete(m)
+                        db.session.commit()
+                i_list.pop(sel)
+                await self.session.write("\r\nDeleted.\r\n")
+                if not i_list:
+                    return
+                sel = min(sel, len(i_list) - 1)
+
+            elif cmd == 'R':
+                reply_subj = subj if subj and subj.lower().startswith('re:') \
+                    else ('Re: ' + subj if subj else 'Re: (no subject)')
+                await self.send_internet_mail(to_address=who, subject=reply_subj,
+                                              quote_body=body or '')
 
     # ------------------------------------------------------------------
     # Inter-BBS Instant Messages (RFC 1312 / MSP)
@@ -2053,8 +2220,8 @@ class BBSMenuUI:
             # an inbound message's subject/from_name) -- strip before
             # they land in this lightbar row. See _strip_untrusted()'s
             # module-level docstring for the finding.
-            safe_subj = _strip_untrusted(subj or '(no subject)')
-            safe_who = _strip_untrusted(who or '?')
+            safe_subj = _strip_untrusted_raw_cp437(subj or '(no subject)')
+            safe_who = _strip_untrusted_raw_cp437(who or '?')
             return (f"  {FG['yel']}{idx+1:>3}{RESET}  "
                     f"{s_col}{safe_subj[:COL_SUBJ]:<{COL_SUBJ}}{RESET} "
                     f"{FG['grn']}{safe_who[:COL_FROM]:<{COL_FROM}}{RESET} "
@@ -4914,6 +5081,52 @@ async def _send_pm(self):
 BBSMenuUI.send_pm = _send_pm
 
 
+async def _send_internet_mail(self, to_address=None, subject=None, quote_body=None):
+    """Compose + send Internet Mail. `to_address`/`subject`/
+    `quote_body` are pre-filled by list_mail_inbox()'s Reply ('R')
+    action; left None for a fresh Compose from the menu, same shape as
+    _send_pm() above but to a free-text external address instead of a
+    BBS username lookup."""
+    from anetbbs.models import User
+    from anetbbs.mail.outbound import send_internet_mail as _send
+    from anetbbs.mail.policy import is_plausible_email
+    from .ansi_ui import banner, FG, RESET, BOLD, ui_width
+    _w = ui_width(self.session)
+    await self.session.write('\x1b[2J\x1b[H')
+    await self.session.write(banner('Send Internet Mail', _w))
+    if not to_address:
+        to_address = (await self.session.read_line(
+            f"  {FG['cyan']}To (email address):{RESET} ") or '').strip()
+    if not to_address or not is_plausible_email(to_address):
+        await self.session.write(f"\r\nInvalid address '{to_address}'.\r\n")
+        await self.session.read_line("Press Enter...")
+        return
+    if not subject:
+        subject = (await self.session.read_line(f"  {FG['cyan']}Subject:{RESET} ") or '').strip()
+    if not subject:
+        return
+    from .anedit import launch_anedit
+    username = self.session.user.get('username', 'guest')
+    body = await launch_anedit(self.session, quote=quote_body or '', subject=subject,
+                               username=username,
+                               tagline_picker=lambda: _maybe_prompt_tagline(self))
+    if body is None:
+        await self.session.write(f"\r\n  {FG['gry']}Aborted.{RESET}\r\n")
+        await self.session.read_line("  Press Enter...")
+        return
+    with _app().app_context():
+        user = User.query.get(self.session.user['id'])
+        ok, err = _send(user, to_address, subject[:200], body, received_via='ansi')
+    if ok:
+        # Recipient only, no subject (audit F-20).
+        self.session._log_activity('internet_mail_sent', f'To {to_address}')
+        await self.session.write(f"\r\n  {FG['grn']}{BOLD}[OK]{RESET} Accepted by relay for {to_address}.\r\n")
+    else:
+        await self.session.write(f"\r\n  {FG['red']}Send failed: {err}{RESET}\r\n")
+    await self.session.read_line("  Press Enter...")
+BBSMenuUI.send_internet_mail = _send_internet_mail
+
+
 async def _compose_echomail(self):
     """Compose an echomail — network-first, then area, then message."""
     from anetbbs.models import (db, EchoArea, EchomailMessage,
@@ -5229,6 +5442,29 @@ async def _edit_profile_field(self, kind, attr, label):
                 setattr(u, attr, value)
                 db.session.commit()
 
+    elif kind == 'mail':
+        from anetbbs.mail.policy import set_mail_optin
+        with _app().app_context():
+            u = User.query.get(self.session.user['id'])
+            current_local = u.email_local_part or ''
+        picked, value = await self._pick_choice(
+            'Internet Mail', [('Enable', True), ('Disable', False)])
+        if not picked:
+            return
+        new_local = current_local
+        if value:
+            new_local = (await self.session.read_line(
+                f"\r\nMailbox name (blank = username) [{current_local}]: ")
+                or '').strip() or current_local
+        with _app().app_context():
+            u = User.query.get(self.session.user['id'])
+            ok, err = set_mail_optin(u, value, new_local)
+            if ok:
+                db.session.commit()
+        if not ok:
+            await self.session.write(f"\r\n{FG['red']}{err}{RESET}\r\n")
+            await self.session.read_line("Press Enter...")
+
     elif kind == 'date':
         new = (await self.session.read_line(
             f"\r\n{label} (YYYY-MM-DD, blank = clear): ") or '').strip()
@@ -5351,6 +5587,13 @@ async def _edit_profile(self):
                     for attr, label, _maxlen in _PROFILE_TEXT_FIELDS]
             rows.append(('bool', 'show_email', 'Show email publicly',
                         'Yes' if u.show_email else 'No'))
+            from anetbbs.mail.policy import can_enable_mail, mail_local_part
+            from anetbbs.models import MailConfig
+            mail_cfg = MailConfig.get()
+            if mail_cfg.enabled and (u.email_enabled or can_enable_mail(u)):
+                mail_status = (f'Enabled ({mail_local_part(u)}@{mail_cfg.domain})'
+                              if u.email_enabled else 'Disabled')
+                rows.append(('mail', 'email_enabled', 'Internet Mail', mail_status))
             rows.append(('date', 'date_of_birth', 'Date of birth',
                         u.date_of_birth.isoformat() if u.date_of_birth else '(not set)'))
             rows.append(('theme', 'theme_id', 'Theme', theme_name))

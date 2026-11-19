@@ -21,6 +21,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -108,6 +109,20 @@ class MsgScanPreferenceTests(unittest.TestCase):
             db.session.commit()
             db.session.add(PrivateMessage(sender_id=sender.id, recipient_id=self.user_id,
                                           subject='hi', body='hello'))
+            db.session.commit()
+
+    def _add_unread_internet_mail(self):
+        from anetbbs.models import db, InternetMail, MailConfig, User
+        with self.app.app_context():
+            user = User.query.get(self.user_id)
+            user.email_enabled = True
+            cfg = MailConfig.get()
+            cfg.enabled = True
+            cfg.domain = 'bbs.example.test'
+            db.session.add(InternetMail(
+                user_id=self.user_id, direction='inbound', status='received',
+                from_addr='friend@example.net',
+                to_addr='rowan@bbs.example.test', subject='Hello', body='Hi'))
             db.session.commit()
 
     def _run(self, session):
@@ -234,6 +249,19 @@ class MsgScanPreferenceTests(unittest.TestCase):
         joined = session.transcript()
         self.assertIn('PM INBOX', joined,
                       'answering P must actually launch the PM reader')
+
+    def test_unread_internet_mail_is_reported_and_m_jumps_to_mailbox(self):
+        self._add_unread_internet_mail()
+        session = _FakeSession(self.user_id, ['', 'M'], msg_scan_pref='auto')
+        with mock.patch('anetbbs.features.bbs_ui.BBSMenuUI.list_mail_inbox',
+                        new_callable=mock.AsyncMock) as mail_reader:
+            with self.app.app_context():
+                self._run(session)
+        import re
+        joined = re.sub(r'\x1b\[[0-9;]*m', '', session.transcript())
+        self.assertIn('new Internet Mail message', joined)
+        self.assertIn('[M]ail', joined)
+        mail_reader.assert_awaited_once()
 
     def test_petscii_session_gets_no_jump_in_offer(self):
         self._add_unread_pm()

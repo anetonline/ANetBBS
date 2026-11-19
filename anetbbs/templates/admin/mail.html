@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Internet Mail Settings{% endblock %}
+{% block content %}
+<div class="bbs-header">
+    <h1><i class="bi bi-envelope-at"></i> Internet Mail Settings</h1>
+    <p class="small text-muted">Users get a real email address at <code>&lt;name&gt;@&lt;your domain&gt;</code>. ANetBBS binds its own SMTP listener on port 25 to receive mail directly -- no external mail server needed. <strong>Disabled by default.</strong></p>
+</div>
+
+<div class="row">
+<div class="col-lg-7">
+
+<form method="post" class="card mb-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="card-header"><i class="bi bi-gear"></i> Configuration</div>
+    <div class="card-body">
+
+        <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" name="enabled" id="enabled"
+                   {% if cfg.enabled %}checked{% endif %}>
+            <label class="form-check-label fw-bold" for="enabled">Enable Internet Mail</label>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label small">Mail Domain</label>
+            <input name="domain" class="form-control" placeholder="bbs.a-net.fyi" value="{{ cfg.domain or '' }}">
+            <div class="form-text">Needs an MX DNS record pointing at this server's public IP. See docs/19-email.md.</div>
+        </div>
+
+        <div class="row g-2 mb-3">
+            <div class="col-md-6">
+                <label class="form-label small">Minimum access level to self-enable</label>
+                <input name="min_access_level" type="number" class="form-control" value="{{ cfg.min_access_level }}" min="0" max="255">
+                <div class="form-text">Administrator/Sysop accounts are always eligible. This threshold controls other users; 100+ is commonly sysop-tier.</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small">Max message size (MB)</label>
+                <input name="max_message_size_mb" type="number" step="0.1" class="form-control"
+                       value="{{ '%.1f'|format(cfg.max_message_size / 1024 / 1024) }}" min="0.1">
+            </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+            <div class="col-md-4">
+                <label class="form-label small">Max recipients per inbound message</label>
+                <input name="max_recipients" type="number" class="form-control" value="{{ cfg.max_recipients }}" min="1" max="100">
+                <div class="form-text">Unique local recipients per SMTP transaction (default 5).</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Outbound messages per user per hour</label>
+                <input name="outbound_per_hour" type="number" class="form-control" value="{{ cfg.outbound_per_hour }}" min="0">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Outbound messages per user per day</label>
+                <input name="outbound_per_day" type="number" class="form-control" value="{{ cfg.outbound_per_day }}" min="0">
+                <div class="form-text">Sent through your relay. 0 blocks outbound mail.</div>
+            </div>
+        </div>
+
+        <div class="row g-2 mb-3">
+            <div class="col-md-4">
+                <label class="form-label small" for="mailbox_quota_bytes">Mailbox quota per user (bytes)</label>
+                <input name="mailbox_quota_bytes" id="mailbox_quota_bytes" type="number" class="form-control"
+                       value="{{ cfg.mailbox_quota_bytes }}" min="1" max="{{ quota_max }}">
+                <div class="form-text">All of the user's stored Internet Mail: received message source + decoded text, plus sent copies.
+                    Default {{ quota_default }} ({{ '%.0f'|format(quota_default / 1024 / 1024) }} MiB).
+                    Full mailboxes get SMTP 452 (sender retries later).</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small" for="max_attachments">Max attachments per message</label>
+                <input name="max_attachments" id="max_attachments" type="number" class="form-control"
+                       value="{{ cfg.max_attachments }}" min="0" max="{{ attachments_ceiling }}">
+                <div class="form-text">0 refuses any message with an attachment (default {{ attachments_default }}).</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small" for="max_attachment_bytes">Max decoded size per attachment (bytes)</label>
+                <input name="max_attachment_bytes" id="max_attachment_bytes" type="number" class="form-control"
+                       value="{{ cfg.max_attachment_bytes }}" min="1">
+                <div class="form-text">Default {{ attachment_bytes_default }} ({{ '%.0f'|format(attachment_bytes_default / 1024 / 1024) }} MiB).
+                    Over-limit mail is refused with SMTP 552.</div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary"><i class="bi bi-save"></i> Save Settings</button>
+    </div>
+</form>
+
+</div>
+<div class="col-lg-5">
+
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-info-circle"></i> Setup Checklist</div>
+    <div class="card-body small">
+        <ol class="mb-0">
+            <li>Point an MX record for the mail domain above at this server's public IP.</li>
+            <li>Confirm inbound port 25 isn't blocked by your hosting provider -- common on cloud VPS and some ISPs.</li>
+            <li>Configure the outbound relay at <a href="{{ url_for('admin.smtp_settings') }}">SMTP Relay Settings</a> -- Internet Mail sends through that same relay, it does not need its own.</li>
+            <li>Add an SPF TXT record authorizing whatever host that relay actually sends from (not this server's own IP).</li>
+            <li>Enable the feature above once the systemd unit (<code>anetbbs-mail</code>) is installed and running.</li>
+        </ol>
+    </div>
+</div>
+
+{% if cfg.enabled and not relay_configured %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    Internet Mail is enabled, but no outbound relay is configured at
+    <a href="{{ url_for('admin.smtp_settings') }}">SMTP Relay Settings</a> -- users can receive mail but
+    won't be able to send any.
+</div>
+{% elif cfg.enabled %}
+<div class="alert alert-success">
+    <i class="bi bi-check-circle"></i>
+    Internet Mail is <strong>enabled</strong> for <code>{{ cfg.domain or '(no domain set)' }}</code>.
+</div>
+{% else %}
+<div class="alert alert-secondary">
+    <i class="bi bi-dash-circle"></i>
+    Internet Mail is <strong>disabled</strong>.
+</div>
+{% endif %}
+
+</div>
+</div>
+{% endblock %}

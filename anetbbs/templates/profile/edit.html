@@ -126,6 +126,33 @@
             </div>
             {% endif %}
 
+            {% if mail_feature_enabled %}
+            <!-- Internet Mail -->
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-envelope-at"></i> Internet Mail</div>
+                <div class="card-body">
+                    {% if can_toggle_mail %}
+                    <div class="mb-3 form-check">
+                        {{ form.email_enabled(class="form-check-input") }}
+                        {{ form.email_enabled.label(class="form-check-label") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.email_local_part.label(class="form-label") }}
+                        {{ form.email_local_part(class="form-control") }}
+                        <div class="form-text">{{ form.email_local_part.description }}</div>
+                    </div>
+                    {% if current_user.email_enabled %}
+                    <p class="text-muted small mb-0">
+                        <a href="{{ url_for('mail.inbox') }}">Go to your Internet Mail inbox</a>
+                    </p>
+                    {% endif %}
+                    {% else %}
+                    <p class="text-muted small mb-0">Internet Mail isn't available for your account yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
             <!-- Security -->
             <div class="card mb-3">
                 <div class="card-header"><i class="bi bi-shield-lock"></i> {{ t('profile.account_security', 'Account Security') }}</div>

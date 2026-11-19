@@ -111,7 +111,7 @@ fi
 # logic near the end of this script for the actual fix.
 SERVICES_PREVIOUSLY_ACTIVE=()
 SERVICES_PREVIOUSLY_EXISTED=()
-for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
+for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp anetbbs-mail; do
     if [[ -f "/etc/systemd/system/${svc}.service" ]]; then
         SERVICES_PREVIOUSLY_EXISTED+=("$svc")
         if systemctl is-active --quiet "$svc" 2>/dev/null; then
@@ -380,7 +380,7 @@ fi
 
 DB_FILE="$INSTALL_DIR/data/anetbbs.db"  # kept for the failure-rollback block at end-of-script
 
-for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
+for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp anetbbs-mail; do
     [[ -f "/etc/systemd/system/${svc}.service" ]] && \
         cp "/etc/systemd/system/${svc}.service" "$BACKUP_DIR/${svc}.service.bak"
 done
@@ -476,7 +476,7 @@ step "Step 3/8: Stopping services"
 # that point, so there's nothing to restore -- just services to bring
 # back up against the untouched old code).
 STOPPED_SERVICES=()
-for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
+for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp anetbbs-mail; do
     if [[ ! -f "/etc/systemd/system/${svc}.service" ]]; then
         continue
     fi
@@ -1722,6 +1722,59 @@ SVCEOF
     ok "anetbbs-finger.service installed"
 fi
 
+# Same self-heal shape as Finger immediately above, for an existing
+# install upgrading from a version that predates Internet Mail. The
+# unit file is created here regardless of whether Mail was ever
+# enabled (dormant until started) -- same reasoning as Finger/BinkP:
+# whether it actually gets started is decided later by this script's
+# enabled-flag-driven restart logic, reading MAIL_ENABLED from .env.
+if [[ ! -f /etc/systemd/system/anetbbs-mail.service ]]; then
+    info "Installing anetbbs-mail.service ..."
+    cat > /etc/systemd/system/anetbbs-mail.service << SVCEOF
+[Unit]
+Description=ANetBBS Internet Mail (SMTP receiver, RFC 5321)
+After=network.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$ENV_FILE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=$PROTECTHOME_MODE
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+SystemCallArchitectures=native
+# Pure network daemon, no subprocess spawning -- safe for the full
+# strict baseline, same reasoning as anetbbs-finger.service above.
+ProtectSystem=strict
+ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs
+ProtectClock=yes
+ProtectHostname=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ExecStart=$VENV_DIR/bin/python -m anetbbs.mail.smtp_server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+    ok "anetbbs-mail.service installed"
+fi
+
 # Retrofit systemd sandboxing directives onto units that predate them.
 # Real gap found during v1.1.54 Pi staging: every unit-creation block
 # above only runs "if the unit file doesn't exist yet" -- so an install
@@ -1786,7 +1839,7 @@ _retrofit_hardening anetbbs \
     "ProtectClock=yes" "ProtectHostname=yes" \
     "ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs"
 
-for _strict_svc in anetbbs-mrc-bridge anetbbs-binkp anetbbs-finger; do
+for _strict_svc in anetbbs-mrc-bridge anetbbs-binkp anetbbs-finger anetbbs-mail; do
     _retrofit_hardening "$_strict_svc" \
         "NoNewPrivileges=yes" "PrivateTmp=yes" "ProtectHome=$PROTECTHOME_MODE" \
         "ProtectKernelTunables=yes" "ProtectKernelModules=yes" "ProtectKernelLogs=yes" \
@@ -1798,6 +1851,58 @@ for _strict_svc in anetbbs-mrc-bridge anetbbs-binkp anetbbs-finger; do
         "SystemCallFilter=@system-service" "SystemCallErrorNumber=EPERM"
 done
 unset _strict_svc
+
+# Directives added to a unit AFTER it first shipped never reach existing
+# installs through _retrofit_hardening above: its gate skips any unit
+# that already has ProtectHome=, i.e. every anetbbs-mail.service an
+# earlier release generated. This adds each listed directive in its own
+# managed drop-in, but ONLY for keys that neither the main unit nor any
+# other drop-in already sets -- a sysop's own value (e.g. an extra
+# address family in override.conf, or a deliberate empty reset) always
+# wins and is never rewritten, and the main unit file is never touched.
+# Idempotent: the managed drop-in is rewritten each run with whatever is
+# still missing, and removed once nothing is.
+_retrofit_unit_directives() {
+    local unit_dir="$1" svc="$2" dropin_name="$3"
+    shift 3
+    local unit_file="$unit_dir/${svc}.service"
+    [[ -f "$unit_file" ]] || return 0
+    local dropin_dir="${unit_file}.d"
+    local managed="$dropin_dir/$dropin_name"
+    local wanted=() directive key f found
+    for directive in "$@"; do
+        key="${directive%%=*}"
+        found=false
+        for f in "$unit_file" "$dropin_dir"/*.conf; do
+            [[ -f "$f" && "$f" != "$managed" ]] || continue
+            if grep -Eq "^[[:space:]]*${key}[[:space:]]*=" "$f"; then
+                found=true
+                break
+            fi
+        done
+        $found || wanted+=("$directive")
+    done
+    if (( ${#wanted[@]} == 0 )); then
+        rm -f "$managed"
+        return 0
+    fi
+    mkdir -p "$dropin_dir"
+    {
+        echo "# Managed by ANetBBS update.sh: hardening added after this unit"
+        echo "# was first installed. Set any of these keys yourself (main unit"
+        echo "# or another drop-in) and update.sh stops managing that key."
+        echo "[Service]"
+        printf '%s\n' "${wanted[@]}"
+    } > "$managed"
+    ok "${svc}.service: added ${#wanted[@]} hardening directive(s) via ${dropin_name} (main unit left untouched)"
+}
+
+# Internet Mail (port 25): audit F-24 address-family restriction and an
+# explicit capability bounding set, matching the fresh-install unit.
+_retrofit_unit_directives /etc/systemd/system anetbbs-mail 20-anetbbs-hardening-v2.conf \
+    "CapabilityBoundingSet=CAP_NET_BIND_SERVICE" \
+    "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX"
+# (end of systemd hardening retrofit)
 
 # A prior fix for the 2026-10-27 outage (shipped as v1.1.56/v1.1.57)
 # wrote a separate 20-nonewprivileges-override.conf drop-in here,
@@ -2382,7 +2487,7 @@ SERVICES_TO_START=()
 for svc in anetbbs-web anetbbs; do
     [[ -f "/etc/systemd/system/${svc}.service" ]] && SERVICES_TO_START+=("$svc")
 done
-for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
+for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp anetbbs-mail; do
     [[ -f "/etc/systemd/system/${svc}.service" ]] || continue
 
     if printf '%s\n' "${SERVICES_PREVIOUSLY_ACTIVE[@]}" | grep -qx "$svc" 2>/dev/null; then
@@ -2400,6 +2505,7 @@ for svc in anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
         anetbbs-mrc-bridge) _enabled_flag="MRC_BRIDGE_ENABLED" ;;
         anetbbs-finger)     _enabled_flag="FINGER_ENABLED" ;;
         anetbbs-binkp)      _enabled_flag="BINKP_ENABLED" ;;
+        anetbbs-mail)       _enabled_flag="MAIL_ENABLED" ;;
     esac
     if [[ "${EXISTING_ENV[$_enabled_flag]:-}" == "true" ]]; then
         info "$svc was just created and $_enabled_flag=true in .env — enabling and starting it now"
@@ -2628,7 +2734,7 @@ if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
         else
             warn "No code snapshot in $BACKUP_DIR (backup predates this safety feature) — code NOT rolled back"
         fi
-        for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
+        for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp anetbbs-mail; do
             [[ -f "$BACKUP_DIR/${svc}.service.bak" ]] && \
                 cp "$BACKUP_DIR/${svc}.service.bak" "/etc/systemd/system/${svc}.service"
         done

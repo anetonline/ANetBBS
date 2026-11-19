@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: stable** (`v1.1.68`, November 2026)
+**Status: private test candidate** (`v1.1.69`, November 2026)
 
 A modern multi-node BBS for the classic FidoNet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -29,8 +29,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:8080`).
 
 ```
-tar xzf ANetBBS-v1.1.68.tar.gz
-cd ANetBBS-v1.1.68
+tar xzf ANetBBS-v1.1.69.tar.gz
+cd ANetBBS-v1.1.69
 sudo bash install.sh
 ```
 
@@ -50,8 +50,8 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.1.68.tar.gz
-cd ANetBBS-v1.1.68
+tar xzf ANetBBS-v1.1.69.tar.gz
+cd ANetBBS-v1.1.69
 sudo bash update.sh
 ```
 
@@ -84,7 +84,7 @@ docker compose -f docker/compose/docker-compose.yml up -d
 ```
 
 `.env` already points at `ghcr.io/anetonline/anetbbs:latest` by
-default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.68`
+default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.69`
 (or whatever release you want). Testing a local change instead of a
 published image? `docker build -f docker/Dockerfile -t anetbbs:local .`,
 then set `ANETBBS_IMAGE=anetbbs` / `ANETBBS_IMAGE_TAG=local` in `.env`.
@@ -293,6 +293,8 @@ what each command actually does, and troubleshooting).
 
 ## Documentation
 
+- [`docs/DEVELOPMENT-WORKFLOW.md`](docs/DEVELOPMENT-WORKFLOW.md) — canonical checkout, private builds, and GitHub sync workflow
+- [`docs/19-email.md`](docs/19-email.md) — Internet Mail setup, DNS/authentication, and troubleshooting
 - [`docs/00-overview.md`](docs/00-overview.md) — architecture + table of contents
 - [`docs/INSTALL.md`](docs/INSTALL.md) — full install
 - [`docs/INSTALL-PI.md`](docs/INSTALL-PI.md) — Raspberry Pi install guide (hardware, DDNS, SSD, troubleshooting)

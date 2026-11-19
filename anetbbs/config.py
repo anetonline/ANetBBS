@@ -148,6 +148,22 @@ class Config:
     FINGER_LISTEN_HOST = os.environ.get('FINGER_LISTEN_HOST', '0.0.0.0')
     FINGER_LISTEN_PORT = int(os.environ.get('FINGER_LISTEN_PORT', '79'))
 
+    # Internet Mail (SMTP, RFC 5321) inbound receiver — same "own
+    # standalone service, no enable flag" shape as Finger above.
+    # ANetBBS binds this port itself (no external MTA in front of it,
+    # see docs/19-email.md) so smtp_server.py reads these two env vars
+    # directly; also exposed here for health checks/preflight validation.
+    # Whether the feature is actually turned ON is MailConfig.enabled
+    # (a DB-row sysop toggle, live-editable without a restart) — these
+    # two are just bind topology, read once at process start.
+    SMTP_LISTEN_HOST = os.environ.get('SMTP_LISTEN_HOST', '0.0.0.0')
+    SMTP_LISTEN_PORT = int(os.environ.get('SMTP_LISTEN_PORT', '25'))
+    SMTP_MAX_CONNECTIONS = int(os.environ.get('SMTP_MAX_CONNECTIONS', '50'))
+    # DNSBL zones queried on inbound connect, comma-separated (Synchronet's
+    # mailsrvr.cpp dns_blacklisted() precedent) — fail-open on lookup
+    # errors/timeouts, never block legitimate mail over a flaky DNSBL.
+    SMTP_DNSBL_ZONES = os.environ.get('SMTP_DNSBL_ZONES', 'zen.spamhaus.org')
+
     # Optional TLS — reuses the same cert nginx is using. Set both paths to
     # enable FTPS (AUTH TLS) on the same port. Without these, only plain
     # FTP works.

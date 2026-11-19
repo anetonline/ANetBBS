@@ -1,11 +1,45 @@
 # ANetBBS Changelog
 
-Current release: **`v1.1.68`** (November 2026). This file covers `v1.0.0`
+Current private test candidate: **`v1.1.69`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.69 — Internet Mail delivery and notification completion (private test candidate, November 2026)
+
+Internet Mail is now discoverable in the WebUI and configurable from both
+sysop tools. Eligible signed-in users get a **Messaging → Set up Internet
+Mail** link until they opt in, then **Messaging → Internet Mail** opens the
+mailbox and shows an unread count. Sysops can open Internet Mail directly
+from **Admin (gear) → Settings → Internet Mail**. `anetbbs-cfg` now edits
+the same database-backed feature policy, limits, and domain; its system
+settings section continues to manage the separate `.env` listener
+configuration. See [`19-email.md`](19-email.md) for detailed setup, user
+flows, DNS/relay requirements, limits, security boundaries, and
+troubleshooting.
+
+Outbound messages now carry an RFC 5322 Message-ID required by major
+receiving providers. The success status now says the outbound relay
+accepted the message, since a remote server may still defer or bounce
+it later. Newly received Internet Mail creates a per-user notification
+in the WebUI notification bell, with a direct terminal login-scan
+count and an M-key shortcut to the Internet Mail inbox. Reading or
+deleting a message clears its matching notification.
+
+The WebUI and ANSI terminal mail readers now normalize excessive blank
+lines and visually distinguish quoted reply text. This affects display
+only; stored bodies and reply quoting remain unchanged. Both views strip
+untrusted terminal control sequences from displayed mail.
+
+Users can now send and receive real internet email through the BBS itself, at an address of `<username>@<the BBS's mail domain>`. ANetBBS binds its own SMTP listener and handles inbound mail directly — no external mail server (Postfix, Exim, etc.) needs to be installed or configured in front of it, the same approach real BBS software like Synchronet uses. Outbound mail reuses the existing SMTP relay configuration (the same one that already sends account-verification and password-reset emails) rather than needing a second, separate relay setup.
+
+The feature is off by default at two levels: a sysop must turn it on and set a mail domain at **Admin → Settings → Internet Mail**, and each user then opts in individually from their own profile page (web, or the equivalent screen in the ANSI/PETSCII terminal UI), picking an optional custom mailbox name. A minimum account access level, configurable by the sysop, controls who's allowed to opt in — defaulting to sysop-only until explicitly opened up.
+
+Once enabled, mail is readable and composable from the web (`/mail`), the ANSI terminal menu, and the PETSCII terminal menu, each with its own inbox/compose screens. Inbound mail's sender address and body are treated as untrusted external content on the terminal side, rendered through the same plain-text-and-sanitize path already used for inter-BBS instant messages, rather than the richer ANSI-art-capable renderer used for mail composed by other BBS users.
+
+Enabling this on a live install additionally requires sysop-side DNS/network setup (an MX record, confirming the hosting provider allows inbound port 25, and an SPF record for the outbound relay) — see `docs/19-email.md` for the full setup checklist.
 
 ## v1.1.68 — Password-change session revocation, consistent backups, Spanish localization (November 2026)
 

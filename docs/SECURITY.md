@@ -8,7 +8,9 @@ Read this whole file before exposing the BBS to the internet.
 
 - **Random initial admin password.** First start generates a 16-byte
   URL-safe token, hashes it for the `admin` user, writes it plaintext to
-  `data/admin_password.txt` (mode `0600`), and prints it once at startup.
+  `data/admin_password.txt` (created mode `0600`). The startup log only
+  says the account was created and names that file; the password is
+  never written to any log.
   No more `admin/admin123`. **Change it on first login.**
 - **CSRF on all WTForms POSTs.** Every `FlaskForm`-backed route gets a
   CSRF token automatically. AJAX endpoints (`/api/vote`, `/imsg/*`)

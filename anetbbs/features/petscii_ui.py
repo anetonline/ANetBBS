@@ -336,7 +336,7 @@ async def _run_default_petscii_menu(session):
     _items = [
         ('1', 'Message Boards'), ('2', 'Echomail'), ('3', 'Private Messages'),
         ('4', 'File Areas'), ('5', "Who's Online"), ('6', 'Your Profile'),
-        ('7', 'Games'), ('8', 'MRC Chat'), ('Q', 'Logoff'),
+        ('7', 'Games'), ('8', 'MRC Chat'), ('9', 'Internet Mail'), ('Q', 'Logoff'),
     ]
     while True:
         await _header(session, 'ANetBBS Main Menu')
@@ -359,6 +359,8 @@ async def _run_default_petscii_menu(session):
             await _games_menu(session)
         elif choice == '8':
             await _mrc_chat(session)
+        elif choice == '9':
+            await _mail_menu(session)
         elif choice == 'Q':
             await session.write('\r\nGoodbye!\r\n')
             return
@@ -380,6 +382,7 @@ def _register_custom_menu_actions():
         'boards': _boards_menu,
         'echo': _echomail_menu,
         'pm': _pm_menu,
+        'mail': _mail_menu,
         'files': _files_menu,
         'who': _whos_online,
         'profile': _profile,
@@ -899,6 +902,115 @@ async def _pm_compose(session, reply_to_username=None, reply_subject=None):
     await session.read_line('Press ENTER...')
 
 
+async def _mail_menu(session):
+    """Internet Mail (real username@domain email) -- mirrors _pm_menu()
+    above. Note the From field here is an arbitrary internet address,
+    not a BBS username lookup -- but no extra sanitization is needed
+    beyond the usual _safe_field()/_wrap_body() every other listing in
+    this module already applies to cross-user/remote-origin text, since
+    those already strip anything with no PETSCII representation
+    regardless of where it came from."""
+    my_id = _user_id(session)
+    while True:
+        with _app_ctx():
+            from ..models import InternetMail
+            msgs = (InternetMail.query
+                   .filter_by(user_id=my_id, direction='inbound')
+                   .order_by(InternetMail.created_at.desc()).limit(50).all())
+            rows = [(m.id, m.subject,
+                     ('!' if m.status == 'quarantine' else '') + (m.from_addr or ''),
+                     m.read_at is None) for m in msgs]
+
+        w = _width(session)
+        from_w = min(max((len(s or '') for _, _, s, _ in rows), default=4),
+                    max(4, w - 9 - 10))
+        subj_w = max(10, w - 9 - from_w)
+
+        def _render(i, row):
+            _mid, subj, who, unread = row
+            mark = '*' if unread else ' '
+            return (f'{mark}{i:>3}. {_truncate_words(_safe_field(subj), subj_w):<{subj_w}} '
+                    f'{_safe_field(who)[:from_w]}')
+
+        pick = await _paginated_pick(session, 'Internet Mail', rows,
+                                     _render, 'read, N=new')
+        if pick == 'Q':
+            return
+        if pick == 'N':
+            await _mail_compose(session)
+            continue
+        if isinstance(pick, int):
+            await _mail_read(session, rows[pick - 1][0])
+
+
+async def _mail_read(session, mail_id):
+    with _app_ctx():
+        from ..models import db, InternetMail
+        msg = InternetMail.query.get(mail_id)
+        if msg is None:
+            return
+        my_id = _user_id(session)
+        if msg.user_id != my_id:
+            return
+        from ..mail.policy import mark_inbound_read, sender_warning
+        from_addr, subject, direction = msg.from_addr, msg.subject, msg.direction
+        warning = sender_warning(msg)
+        lines = ([*_wrap_body(warning, _width(session)), ''] if warning else []) + [
+                f'From: {_safe_field(from_addr)}',
+                f'Subject: {_safe_field(subject)}', '']
+        lines.extend(_wrap_body(msg.body, _width(session)))
+        if mark_inbound_read(msg, datetime.utcnow()):
+            db.session.commit()
+
+    if not await _paginate(session, lines, 'Internet Mail'):
+        return
+    if direction == 'inbound':
+        choice = (await session.read_line('\r\nR=reply, Q=back: ') or '').strip().upper()
+        if choice == 'R':
+            reply_subj = subject if subject and subject.lower().startswith('re:') \
+                else (f'Re: {subject}' if subject else 'Re: (no subject)')
+            await _mail_compose(session, reply_to_address=from_addr,
+                               reply_subject=reply_subj)
+
+
+async def _mail_compose(session, reply_to_address=None, reply_subject=None):
+    from ..mail.policy import is_plausible_email
+    await _header(session, 'New Internet Mail')
+    prompt = f'To{f" [{reply_to_address}]" if reply_to_address else ""}: '
+    to_address = (await session.read_line(prompt) or '').strip() or (reply_to_address or '')
+    if not to_address or not is_plausible_email(to_address):
+        await session.write(f'\r\nInvalid address: {to_address}\r\n')
+        await session.read_line('Press ENTER...')
+        return
+    default_subj = reply_subject or ''
+    subj_prompt = f'Subject{f" [{default_subj}]" if default_subj else ""}: '
+    subject = (await session.read_line(subj_prompt) or '').strip() or default_subj
+    if not subject:
+        await session.write('No subject -- cancelled.\r\n')
+        await session.read_line('Press ENTER...')
+        return
+    body = await _compose_body(session)
+    if body is None:
+        await session.write('Cancelled.\r\n')
+        await session.read_line('Press ENTER...')
+        return
+
+    my_id = _user_id(session)
+    with _app_ctx():
+        from ..models import User
+        from ..mail.outbound import send_internet_mail as _send
+        user = User.query.get(my_id)
+        ok, err = _send(user, to_address, subject[:200], body, received_via='petscii')
+        if ok:
+            # Recipient only, no subject (audit F-20).
+            session._log_activity('internet_mail_sent', f'To {to_address}')
+    if ok:
+        await session.write('\r\nAccepted by outbound relay.\r\n')
+    else:
+        await session.write(f'\r\nSend failed: {err}\r\n')
+    await session.read_line('Press ENTER...')
+
+
 # ─── File areas (browse only, Phase 1) ──────────────────────────────────
 
 async def _files_menu(session):
@@ -1189,22 +1301,34 @@ async def _profile_edit(session):
     my_id = _user_id(session)
     while True:
         with _app_ctx():
-            from ..models import User
+            from ..models import User, MailConfig
+            from ..mail.policy import can_enable_mail, mail_local_part
             u = User.query.get(my_id)
             if u is None:
                 return
             current = {k: (getattr(u, attr, '') or '-')
                       for k, (attr, _label, _maxlen) in _PROFILE_EDIT_FIELDS.items()}
+            mail_cfg = MailConfig.get()
+            show_mail_row = mail_cfg.enabled and (u.email_enabled or can_enable_mail(u))
+            mail_status = ((f'Enabled ({mail_local_part(u)}@{mail_cfg.domain})'
+                           if u.email_enabled else 'Disabled')
+                          if show_mail_row else '')
 
         await _header(session, 'Edit Profile')
         w = _width(session)
         for k, (_attr, label, _maxlen) in _PROFILE_EDIT_FIELDS.items():
             val_w = max(4, w - len(label) - 6)
             await session.write(f'  {k}. {label}: {current[k][:val_w]}\r\n')
+        if show_mail_row:
+            val_w = max(4, w - len('Internet Mail') - 6)
+            await session.write(f'  M. Internet Mail: {mail_status[:val_w]}\r\n')
         await session.write('  Q. Done\r\n')
         choice = (await session.read_line('\r\nChoice: ') or '').strip().upper()
         if choice == 'Q' or not choice:
             return
+        if choice == 'M' and show_mail_row:
+            await _profile_edit_mail(session)
+            continue
         field = _PROFILE_EDIT_FIELDS.get(choice)
         if field is None:
             continue
@@ -1218,6 +1342,33 @@ async def _profile_edit(session):
             setattr(u2, attr, new_val[:maxlen] or None)
             db.session.commit()
         await session.write('Saved.\r\n')
+
+
+async def _profile_edit_mail(session):
+    my_id = _user_id(session)
+    with _app_ctx():
+        from ..models import User
+        u = User.query.get(my_id)
+        current_local = u.email_local_part or ''
+    choice = (await session.read_line('E=enable, D=disable, Q=cancel: ') or '').strip().upper()
+    if choice not in ('E', 'D'):
+        return
+    enabled = choice == 'E'
+    new_local = current_local
+    if enabled:
+        new_local = (await session.read_line(
+            f'Mailbox name (blank = username) [{current_local}]: ')
+            or '').strip() or current_local
+    with _app_ctx():
+        from ..models import db, User
+        from ..mail.policy import set_mail_optin
+        u2 = User.query.get(my_id)
+        if u2 is None:
+            return
+        ok, err = set_mail_optin(u2, enabled, new_local)
+        if ok:
+            db.session.commit()
+    await session.write('Saved.\r\n' if ok else f'{err}\r\n')
 
 
 # ─── Games ───────────────────────────────────────────────────────────────

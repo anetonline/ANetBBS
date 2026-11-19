@@ -437,6 +437,12 @@
                                 {% set unread = current_user.received_messages | selectattr('read_at', 'none') | selectattr('is_deleted_recipient', 'equalto', False) | list | length %}
                                 {% if unread > 0 %} <span class="badge bg-danger">{{ unread }}</span>{% endif %}
                             </a></li>
+                            {% if internet_mail_nav_enabled %}
+                            <li><a class="dropdown-item" href="{{ url_for('mail.inbox') if internet_mail_nav_opted_in else url_for('profile.edit') }}" style="color:var(--theme-primary);">
+                                <i class="bi bi-envelope-at"></i> {{ t("nav.internet_mail", "Internet Mail") if internet_mail_nav_opted_in else t("nav.setup_internet_mail", "Set up Internet Mail") }}
+                                {% if internet_mail_unread_count > 0 %}<span class="badge bg-danger">{{ internet_mail_unread_count }}</span>{% endif %}
+                            </a></li>
+                            {% endif %}
                             <li><a class="dropdown-item" href="{{ url_for('netmail.inbox') }}" style="color:var(--theme-primary);"><i class="bi bi-envelope-paper"></i> {{ t("nav.netmail_fidonet", "Netmail (FidoNet)") }}</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('imsg.inbox') }}" style="color:var(--theme-primary);"><i class="bi bi-chat-dots-fill"></i> {{ t("nav.inter_bbs_im_msp", "Inter-BBS IM (MSP)") }}</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('qwk_user.index') }}" style="color:var(--theme-primary);"><i class="bi bi-mailbox"></i> {{ t("nav.qwk_offline_reader", "QWK Offline Reader") }}</a></li>

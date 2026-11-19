@@ -94,6 +94,12 @@ GROUPS = [
         {"key": "MSP_ENABLED", "label": "MSP Enabled (needs CAP_NET_BIND_SERVICE for port 18)", "kind": "bool"},
         {"key": "MSP_PORT", "label": "MSP Port", "kind": "int"},
     ]},
+    {"key": "mail", "label": "Internet Mail (SMTP receiver)", "fields": [
+        {"key": "SMTP_LISTEN_HOST", "label": "Listen Host", "kind": "text"},
+        {"key": "SMTP_LISTEN_PORT", "label": "Listen Port (needs CAP_NET_BIND_SERVICE for port 25)", "kind": "int"},
+        {"key": "SMTP_MAX_CONNECTIONS", "label": "Max Concurrent Connections", "kind": "int"},
+        {"key": "SMTP_DNSBL_ZONES", "label": "DNSBL Zones (comma-separated, blank=off)", "kind": "text"},
+    ]},
     {"key": "mrc", "label": "MRC Bridge (Inter-BBS Chat)", "fields": [
         {"key": "MRC_BRIDGE_HOST", "label": "MRC Bridge Host", "kind": "text"},
         {"key": "MRC_BRIDGE_PORT", "label": "MRC Bridge Port", "kind": "int"},

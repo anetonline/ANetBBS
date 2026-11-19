@@ -19,7 +19,9 @@ from .validators import PermissiveEmail as Email
 from ..features.i18n import translate as _t, FormTranslations
 from ..models import (db, User, Post, Theme, UserSession, UserSecurityAnswer,
                       SecurityQuestion, PasswordRecoverySettings, UserField,
-                      UserFieldValue, get_builtin_field_config, UserSSHKey)
+                      UserFieldValue, get_builtin_field_config, UserSSHKey,
+                      MailConfig)
+from ..mail.policy import can_enable_mail, set_mail_optin
 
 
 def _active_security_question_texts():
@@ -103,6 +105,11 @@ class UpdateProfileForm(FlaskForm):
         "available to you. Optional otherwise."))
     date_of_birth = DateField('Date of Birth', validators=[Optional()])
     show_email = BooleanField('Show Email Publicly')
+    email_enabled = BooleanField('Enable Internet Mail')
+    email_local_part = StringField(
+        'Mailbox name (optional)', validators=[Optional(), Length(max=64)],
+        description="Your address will be <name>@<the BBS's mail domain>. "
+                    "Leave blank to use your username.")
     public_watch_optout = BooleanField('Hide me from the public "Watch It Live" page',
                           description=(
         "That page (if the sysop has enabled it) shows a live list of who's "
@@ -386,6 +393,19 @@ def edit():
         current_user.show_email = form.show_email.data
         current_user.public_watch_optout = form.public_watch_optout.data
 
+        # Internet Mail opt-in -- shared gate/uniqueness logic lives in
+        # anetbbs/mail/policy.py's set_mail_optin() so every UI surface
+        # (this, the ANSI/PETSCII terminal edit screens) goes through
+        # the same check rather than duplicating it.
+        mail_ok, mail_err = set_mail_optin(
+            current_user, form.email_enabled.data, form.email_local_part.data)
+        if not mail_ok and form.email_enabled.data:
+            # Only worth a flash when the user was actively trying to
+            # turn it ON -- a no-op/ineligible attempt to turn it off
+            # (field wasn't even shown to them) shouldn't surface an
+            # error they never asked for.
+            flash(mail_err, 'danger')
+
         # Handle theme selection
         theme_id = form.theme_id.data
         current_user.theme_id = theme_id if theme_id and theme_id != 0 else None
@@ -449,6 +469,8 @@ def edit():
         form.date_of_birth.data = current_user.date_of_birth
         form.show_email.data = current_user.show_email
         form.public_watch_optout.data = current_user.public_watch_optout
+        form.email_enabled.data = current_user.email_enabled
+        form.email_local_part.data = current_user.email_local_part
         form.avatar_url.data = current_user.avatar_url
         form.theme_id.data = current_user.theme_id or 0
         form.nav_position.data = current_user.nav_position or 'left'
@@ -463,9 +485,13 @@ def edit():
     custom_fields_list = UserField.query.order_by(UserField.sort_order, UserField.id).all()
     custom_values = {ufv.field_id: ufv.value
                      for ufv in UserFieldValue.query.filter_by(user_id=current_user.id).all()}
+    mail_cfg = MailConfig.get()
+    can_toggle_mail = mail_cfg.enabled and (current_user.email_enabled or can_enable_mail(current_user))
     return render_template('profile/edit.html', form=form, themes=themes, avatar=avatar,
                            custom_fields_list=custom_fields_list, custom_values=custom_values,
-                           field_config=get_builtin_field_config())
+                           field_config=get_builtin_field_config(),
+                           mail_feature_enabled=mail_cfg.enabled,
+                           can_toggle_mail=can_toggle_mail)
 
 
 @profile_bp.route('/avatar/remove', methods=['POST'])

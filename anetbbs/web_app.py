@@ -470,6 +470,40 @@ def create_app(config_name=None):
         except Exception:
             return {'network_join_enabled': False}
 
+    @app.context_processor
+    def _inject_internet_mail_nav():
+        """Show the user-facing Internet Mail link only where usable.
+
+        The feature has a global sysop switch and a per-user opt-in.
+        Users who are already opted in retain access if the sysop later
+        raises the self-enable access bar; newly eligible users see the
+        link so they can reach /mail, which directs them to Profile → Edit
+        to opt in. Keep DB failures fail-closed for navigation rendering.
+        """
+        from flask_login import current_user
+        if not current_user.is_authenticated:
+            return {'internet_mail_nav_enabled': False,
+                    'internet_mail_nav_opted_in': False,
+                    'internet_mail_unread_count': 0}
+        try:
+            from .models import MailConfig, InternetMail
+            from .mail.policy import can_enable_mail
+            cfg = MailConfig.get()
+            visible = bool(cfg.enabled and
+                           (current_user.email_enabled or can_enable_mail(current_user)))
+            unread = 0
+            if visible and current_user.email_enabled:
+                unread = InternetMail.query.filter_by(
+                    user_id=current_user.id, direction='inbound', read_at=None
+                ).count()
+            return {'internet_mail_nav_enabled': visible,
+                    'internet_mail_nav_opted_in': bool(current_user.email_enabled),
+                    'internet_mail_unread_count': unread}
+        except Exception:
+            return {'internet_mail_nav_enabled': False,
+                    'internet_mail_nav_opted_in': False,
+                    'internet_mail_unread_count': 0}
+
     @app.template_filter('from_json')
     def from_json_filter(value):
         try:
@@ -583,6 +617,7 @@ def create_app(config_name=None):
     from .web.mrc_web import mrc_bp
     from .web.admin import admin_bp
     from .web.pm import pm_bp
+    from .web.mail import mail_bp
     from .web.files import files_bp
     from .web.echomail import echomail_bp
     from .web.echomail_admin import echomail_admin_bp
@@ -665,6 +700,7 @@ def create_app(config_name=None):
     app.register_blueprint(mrc_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(pm_bp)
+    app.register_blueprint(mail_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(echomail_bp)
     app.register_blueprint(votes_bp)
@@ -1280,6 +1316,31 @@ def _lightweight_migrate(app):
     _ensure_column('users', 'is_locked', 'BOOLEAN NOT NULL DEFAULT 0')
     # Users: opt out of the public /watch live-activity page.
     _ensure_column('users', 'public_watch_optout', 'BOOLEAN NOT NULL DEFAULT 0')
+    # Users: Internet Mail (username@domain) opt-in. Both columns are
+    # index=True on the model -- create_all() only adds indexes when
+    # creating a table fresh, so an upgrading install needs the matching
+    # _ensure_index() calls too, same as every other indexed column added
+    # here (see _ensure_index()'s own docstring for the real gap this
+    # pattern exists to avoid).
+    _ensure_column('users', 'email_enabled', 'BOOLEAN NOT NULL DEFAULT 0')
+    _ensure_column('users', 'email_local_part', 'VARCHAR(64)')
+    _ensure_column('mail_config', 'max_recipients', 'INTEGER NOT NULL DEFAULT 5')
+    _ensure_column('mail_config', 'outbound_per_hour', 'INTEGER NOT NULL DEFAULT 10')
+    _ensure_column('mail_config', 'outbound_per_day', 'INTEGER NOT NULL DEFAULT 50')
+    # Mailbox quota + attachment limits (finite defaults, see models.py).
+    from .models import (MAILBOX_QUOTA_DEFAULT_BYTES, MAX_ATTACHMENTS_DEFAULT,
+                         MAX_ATTACHMENT_BYTES_DEFAULT)
+    _ensure_column('mail_config', 'mailbox_quota_bytes',
+                   f'BIGINT NOT NULL DEFAULT {int(MAILBOX_QUOTA_DEFAULT_BYTES)}')
+    _ensure_column('mail_config', 'max_attachments',
+                   f'INTEGER NOT NULL DEFAULT {int(MAX_ATTACHMENTS_DEFAULT)}')
+    _ensure_column('mail_config', 'max_attachment_bytes',
+                   f'BIGINT NOT NULL DEFAULT {int(MAX_ATTACHMENT_BYTES_DEFAULT)}')
+    # Legacy rows keep NULL; the quota usage query computes their size
+    # from raw/body instead (anetbbs/mail/limits.py).
+    _ensure_column('internet_mail', 'stored_bytes', 'BIGINT')
+    _ensure_index('users', 'ix_users_email_enabled', 'email_enabled')
+    _ensure_index('users', 'ix_users_email_local_part', 'email_local_part')
     # Games: no-login guest play, off by default.
     _ensure_column('games', 'guest_playable', 'BOOLEAN NOT NULL DEFAULT 0')
     # User profile fields (added across releases; many old DBs missing them)
@@ -1732,31 +1793,45 @@ def _create_default_data():
         # entire function — even on code paths that don't execute it.)
         from flask import current_app as _ca
         gen_pw = secrets.token_urlsafe(12)
-        admin = User(
-            username='admin',
-            email='admin@anetbbs.local',
-            is_admin=True
-        )
-        admin.set_password(gen_pw)
-        db.session.add(admin)
+        # The password goes ONLY to an owner-only file, never to a log
+        # record: logs/anetbbs.log is group/world-readable (install.sh
+        # chmods it 664), lands in journald/docker logs, and gets pasted
+        # into bug reports. The file is created 0600 atomically (no
+        # umask-readable window before a chmod).
+        data_dir = _ca.config.get('DATA_DIR') or '.'
+        pw_file = os.path.join(data_dir, 'admin_password.txt')
         try:
-            data_dir = _ca.config.get('DATA_DIR') or '.'
             os.makedirs(data_dir, exist_ok=True)
-            pw_file = os.path.join(data_dir, 'admin_password.txt')
-            with open(pw_file, 'w') as f:
+            fd = os.open(pw_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
                 f.write(gen_pw + '\n')
-            os.chmod(pw_file, 0o600)
+            os.chmod(pw_file, 0o600)      # pre-existing file kept its old mode
+        except Exception as exc:
+            # No safe place to hand the password over: don't create an
+            # admin nobody can log in to, and don't fall back to logging
+            # the secret. The next start retries once the path is writable.
+            _ca.logger.error(
+                'Could not write the initial admin password file %s (%s); '
+                'no fallback admin account was created. Fix the data '
+                'directory permissions and restart, or create a sysop '
+                'account with install.sh.', pw_file, type(exc).__name__)
+        else:
+            admin = User(
+                username='admin',
+                email='admin@anetbbs.local',
+                is_admin=True
+            )
+            admin.set_password(gen_pw)
+            db.session.add(admin)
             _ca.logger.warning(
                 '=' * 60 + '\n'
                 'INITIAL ADMIN ACCOUNT CREATED\n'
-                f'  username: admin\n'
-                f'  password: {gen_pw}\n'
-                f'  also written to: {pw_file}\n'
+                '  username: admin\n'
+                f'  password: written to {pw_file} (owner-only, not logged)\n'
                 'CHANGE THIS PASSWORD on first login!\n'
                 + '=' * 60)
-        except Exception:
-            _ca.logger.warning(
-                'Initial admin password (CHANGE IT): %s', gen_pw)
+        finally:
+            del gen_pw
 
     # Create default themes
     # Themes — each defines bg, primary (accent), text (body), text-muted, card.

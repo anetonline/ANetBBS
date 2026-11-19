@@ -182,18 +182,11 @@ Not obvious from a container, so worth calling out explicitly: nothing
 above created an admin account for you interactively. The first time
 `web` boots against an empty database, ANetBBS bootstraps a fallback
 account (`username: admin`, a random password) exactly like a bare
-`install.sh` install does when nothing else has created one first — it
-gets logged as a `WARNING` on that very first boot, and the password is
-also written to `admin_password.txt` inside the `data/` volume.
-
-Find it either way:
-
-```bash
-docker logs anetbbs 2>&1 | grep -A3 "INITIAL ADMIN ACCOUNT CREATED"
-```
-
-or, if you missed that first-boot log line (it only prints once, the
-moment the account is created):
+`install.sh` install does when nothing else has created one first. Its
+creation is logged as a `WARNING` on that very first boot (the log line
+names the file but never contains the password itself), and the
+password is written, owner-only, to `admin_password.txt` inside the
+`data/` volume:
 
 ```bash
 docker exec anetbbs cat /app/data/admin_password.txt

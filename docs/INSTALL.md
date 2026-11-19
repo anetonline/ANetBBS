@@ -94,10 +94,13 @@ Watch the log for:
 ```
 INITIAL ADMIN ACCOUNT CREATED
   username: admin
-  password: <random>
-  also written to: /opt/anetbbs/data/admin_password.txt
+  password: written to /opt/anetbbs/data/admin_password.txt (owner-only, not logged)
 CHANGE THIS PASSWORD on first login!
 ```
+
+The password itself is never written to the log; read it from that file
+(`sudo cat /opt/anetbbs/data/admin_password.txt`) and delete the file
+after you have changed the password.
 
 Browse to `http://<host>:5000/`, log in as `admin`, change the password
 under your profile, then configure echomail / file areas / doors.

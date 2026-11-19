@@ -1,9 +1,20 @@
-# ANetBBS v1.1.68 — Password-change session revocation, consistent backups, Spanish localization (November 2026)
+# ANetBBS v1.1.69 — Internet Mail delivery and notifications
 
-A password change now revokes every other active session for that account at once, across every front-end: web (including Socket.IO), terminal (telnet/SSH/rlogin), FTP, and the MRC bridge's shared cookie-based authentication. Previously a session that had logged in under the old password could stay connected after the password changed. Revocation now also reaps an orphaned door-game subprocess still attached to a revoked session on every transport, not only the common ones. Password-recovery links preserve the canonical request origin, including IDN and IPv6 hosts, and a login renewal can no longer race a concurrent password reset.
+Private test candidate for Jerry's live ANetBBS test. This package is not
+approved for GitHub push or public publication.
 
-Web database backups now take a consistent snapshot through SQLite's own online backup API and verify it before streaming, instead of potentially reading pages that are mid-write, and backup retries under contention are now bounded instead of retrying indefinitely.
+Outbound Internet Mail and system mail now include an RFC 5322 `Message-ID`,
+so Gmail and other receiving systems can accept the message. The UI reports
+relay acceptance distinctly from final recipient delivery, which can be delayed
+or bounced asynchronously. Incoming Internet Mail creates a user-scoped WebUI
+notification and appears in terminal login scanning, with a direct shortcut to
+the inbox. Notification read state follows message read/delete actions.
 
-Added Spanish localization for the core web and terminal flows — navigation, login/registration/recovery, boards, private messages, profile, the built-in terminal menus, and the Admin translations editor — selectable from the navigation language selector or a signed-in account's profile. The web IRC client's layout was improved for mobile screens and gained its own Spanish translations.
+The WebUI and ANSI terminal reader use matching display formatting for
+quoted replies and repeated blank lines. The display is normalized without
+changing stored messages or the content included in replies.
 
-A CI-only timing race in the MRC bridge's test suite was fixed by waiting deterministically for the join sequence's final packet before measuring sent packets; this is test/CI hardening only, with no runtime behavior change.
+The release includes detailed Internet Mail setup, relay, DNS, notification,
+troubleshooting, and rollback guidance in `docs/19-email.md`. The sysop can
+configure the same database-backed Internet Mail policy through the WebUI or
+`anetbbs-cfg`; SMTP listener settings remain separately configured in `.env`.

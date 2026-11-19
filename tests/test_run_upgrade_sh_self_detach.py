@@ -49,6 +49,9 @@ def _extract_detach_block():
     return '\n'.join(lines[start:end])
 
 
+_REQUIRE_SYSTEMD_USER_TESTS = os.environ.get('ANET_REQUIRE_SYSTEMD_USER_TESTS') == '1'
+
+
 def _systemd_user_available():
     try:
         r = subprocess.run(['systemctl', '--user', 'is-system-running'],
@@ -74,11 +77,13 @@ exit __EXITCODE__
 """
 
 
-@unittest.skipUnless(_systemd_user_available(),
+@unittest.skipUnless(_systemd_user_available() or _REQUIRE_SYSTEMD_USER_TESTS,
                      'no working systemd --user instance in this environment')
 class RunUpgradeShSelfDetachTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if _REQUIRE_SYSTEMD_USER_TESTS and not _systemd_user_available():
+            raise AssertionError('release validation requires a working systemd --user instance')
         cls.detach_block = _extract_detach_block()
         # Structural sanity before trusting it in a real exec below --
         # a clear assertion failure here beats a confusing runtime one.

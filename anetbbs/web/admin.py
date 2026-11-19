@@ -357,6 +357,7 @@ ADMIN_HUB_SECTIONS = {
         'tools': [
             ('admin.settings', 'Settings', 'bi-gear', 'Core BBS configuration'),
             ('admin.smtp_settings', 'SMTP / Email', 'bi-envelope-at', 'Outgoing mail server'),
+            ('admin.mail_settings', 'Internet Mail', 'bi-envelope-at', 'Internet Mail feature, domain, access policy and quotas'),
             ('admin.webhooks_admin', 'Webhooks', 'bi-link-45deg', 'Outbound event webhooks'),
             ('admin.translations', 'Translations', 'bi-translate', 'Menu/web-UI text overrides by language'),
         ],
@@ -1259,6 +1260,10 @@ EDITABLE_SETTINGS = [
     ('MRC_BRIDGE_WS_PATH', 'MRC Bridge WS Path', 'text', False),
     ('MSP_ENABLED', 'MSP Enabled — inter-BBS instant messages (true/false)', 'text', True),
     ('MSP_PORT', 'MSP Port (default 18, needs CAP_NET_BIND_SERVICE)', 'text', True),
+    ('SMTP_LISTEN_HOST', 'Internet Mail listen host (its own systemd unit, no enable flag here — see Internet Mail Settings)', 'text', True),
+    ('SMTP_LISTEN_PORT', 'Internet Mail listen port (default 25, needs CAP_NET_BIND_SERVICE)', 'text', True),
+    ('SMTP_MAX_CONNECTIONS', 'Internet Mail max concurrent inbound connections', 'text', True),
+    ('SMTP_DNSBL_ZONES', 'Internet Mail DNSBL zones, comma-separated (blank = no DNSBL check)', 'text', True),
     ('TERMINAL_MATRIX_ENABLED', 'Terminal pre-login Matrix splash — connection-options banner before login (true/false)', 'text', True),
     ('WEB_MATRIX_ENABLED', 'Web pre-login Matrix landing page — connection-options page before the home page, logged-out visitors only (true/false)', 'text', False),
     ('BLOCKED_COUNTRIES', 'Blocked countries — comma-separated ISO codes (e.g. CN,RU,KP), blank = disabled (uses ip-api.com, no registration)', 'text', False),
@@ -4284,3 +4289,75 @@ def smtp_settings():
         return redirect(url_for('admin.smtp_settings'))
 
     return render_template('admin/smtp.html', cfg=cfg)
+
+
+# ---------------------------------------------------------------------------
+# Internet Mail (username@domain) config
+# ---------------------------------------------------------------------------
+
+@admin_bp.route('/mail', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def mail_settings():
+    """Configure Internet Mail: the feature's own on/off switch,
+    mail domain, minimum access level required to self-enable, and
+    max message size. Outbound delivery reuses the relay configured
+    at admin.smtp_settings -- this page doesn't duplicate that.
+
+    No terminal-cfg-TUI editor for this -- matches SmtpConfig's own
+    "web-admin-only is an accepted known gap" precedent (see
+    cfg/sections/users.py's docstring), not an oversight.
+    """
+    from ..models import (MailConfig, MAILBOX_QUOTA_DEFAULT_BYTES, MAILBOX_QUOTA_MAX_BYTES,
+                          MAX_ATTACHMENTS_DEFAULT, MAX_ATTACHMENTS_CEILING,
+                          MAX_ATTACHMENT_BYTES_DEFAULT)
+    cfg = MailConfig.get()
+
+    if request.method == 'POST':
+        cfg.enabled = bool(request.form.get('enabled'))
+        cfg.domain = request.form.get('domain', '').strip()
+        try:
+            cfg.min_access_level = int(request.form.get('min_access_level', 100))
+        except ValueError:
+            cfg.min_access_level = 100
+        try:
+            mb = float(request.form.get('max_message_size_mb', 25))
+            cfg.max_message_size = max(1, int(mb * 1024 * 1024))
+        except ValueError:
+            cfg.max_message_size = 25 * 1024 * 1024
+        # Abuse limits (F-05): recipients >= 1; outbound limits >= 0
+        # (0 = no outbound). Unparseable input falls back to the default.
+        for field, default, floor in (('max_recipients', 5, 1),
+                                      ('outbound_per_hour', 10, 0),
+                                      ('outbound_per_day', 50, 0)):
+            try:
+                setattr(cfg, field, max(floor, int(request.form.get(field, default))))
+            except ValueError:
+                setattr(cfg, field, default)
+        # Storage limits: always finite. Out-of-range input is clamped;
+        # unparseable input keeps the current value (never "unlimited").
+        for field, floor, ceiling in (
+                ('mailbox_quota_bytes', 1, MAILBOX_QUOTA_MAX_BYTES),
+                ('max_attachments', 0, MAX_ATTACHMENTS_CEILING),
+                ('max_attachment_bytes', 1, MAILBOX_QUOTA_MAX_BYTES)):
+            raw_value = (request.form.get(field) or '').strip()
+            if not raw_value:
+                continue
+            try:
+                setattr(cfg, field, min(ceiling, max(floor, int(raw_value))))
+            except ValueError:
+                flash(f'Ignored invalid value for {field.replace("_", " ")}.', 'warning')
+        db.session.commit()
+        if cfg.mailbox_quota_bytes < cfg.max_message_size:
+            flash('Note: the mailbox quota is smaller than the maximum message size, '
+                  'so the largest allowed messages can never be delivered.', 'warning')
+        flash('Internet Mail settings saved.', 'success')
+        return redirect(url_for('admin.mail_settings'))
+
+    from ..mailer import smtp_enabled
+    return render_template('admin/mail.html', cfg=cfg, relay_configured=smtp_enabled(),
+                           quota_default=MAILBOX_QUOTA_DEFAULT_BYTES,
+                           quota_max=MAILBOX_QUOTA_MAX_BYTES,
+                           attachments_default=MAX_ATTACHMENTS_DEFAULT,
+                           attachments_ceiling=MAX_ATTACHMENTS_CEILING,
+                           attachment_bytes_default=MAX_ATTACHMENT_BYTES_DEFAULT)

@@ -128,7 +128,7 @@ DOC_CATEGORIES = [
         '12-upgrading', '31-social-posting', '32-node-monitor',
     ]),
     ('Networks & Mail', 'bi-envelope', [
-        '06-echomail', '07-file-areas',
+        '06-echomail', '07-file-areas', '19-email',
     ]),
     ('Look & Feel', 'bi-palette', [
         '04-ansi-screens', '08-themes',

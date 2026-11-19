@@ -134,6 +134,8 @@ _CLR = '\x1b[2J\x1b[H'
 async def _act_boards(ui, args):  await ui.session.write(_CLR); await ui.list_boards();      return None
 async def _act_pm(ui, args):      await ui.session.write(_CLR); await ui.list_pm_inbox();    return None
 async def _act_pm_send(ui, args): await ui.session.write(_CLR); await ui.send_pm();          return None
+async def _act_mail(ui, args):      await ui.session.write(_CLR); await ui.list_mail_inbox();    return None
+async def _act_mail_send(ui, args): await ui.session.write(_CLR); await ui.send_internet_mail(); return None
 async def _act_imsg(ui, args):    await ui.session.write(_CLR); await ui.list_imsg_inbox();  return None
 async def _act_imsg_send(ui, args): await ui.session.write(_CLR); await ui.send_imsg();      return None
 async def _act_bbs_directory(ui, args): await ui.session.write(_CLR); await ui.browse_bbs_directory(); return None
@@ -743,6 +745,8 @@ _ACTIONS = {
     'boards': _act_boards,
     'pm': _act_pm,
     'pm_send': _act_pm_send,
+    'mail': _act_mail,
+    'mail_send': _act_mail_send,
     'imsg': _act_imsg,
     'imsg_send': _act_imsg_send,
     'bbs_directory': _act_bbs_directory,
@@ -1320,6 +1324,8 @@ DEFAULT_MENUS = [
             {'hotkey': 'X', 'label': 'Edit Profile', 'action_type': 'edit_prof', 'sort_order': 95},
             {'hotkey': 'W', 'label': 'Change Password', 'action_type': 'passwd', 'sort_order': 100},
             {'hotkey': 'S', 'label': 'Sysop Tools', 'action_type': 'sysop', 'sort_order': 200, 'min_access': 100},
+            {'hotkey': 'Z', 'label': 'Internet Mail', 'action_type': 'mail', 'sort_order': 997},
+            {'hotkey': 'O', 'label': 'Send Internet Mail', 'action_type': 'mail_send', 'sort_order': 998},
             {'hotkey': 'Q', 'label': 'Logoff', 'action_type': 'logoff', 'sort_order': 999},
         ],
     },
@@ -1576,6 +1582,8 @@ ACTION_TYPE_CHOICES = [
     ('boards', 'Open message boards'),
     ('pm', 'PM inbox'),
     ('pm_send', 'Compose new PM'),
+    ('mail', 'Internet Mail inbox'),
+    ('mail_send', 'Compose new Internet Mail'),
     ('imsg', 'InterBBS IM inbox (MSP)'),
     ('imsg_send', 'Send InterBBS IM (MSP)'),
     ('bbs_directory', 'Browse the BBS directory (scrollable lightbar list)'),

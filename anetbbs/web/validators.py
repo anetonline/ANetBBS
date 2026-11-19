@@ -20,6 +20,15 @@ _EMAIL_RE = re.compile(
 )
 
 
+def is_plausible_email(value):
+    """Regex-only address check, same shape PermissiveEmail enforces on
+    forms. Used directly (not through WTForms) by anetbbs/mail/policy.py
+    for Internet Mail's free-text To-address fields across web/ANSI/
+    PETSCII, so there's one definition of "looks like an email address"
+    rather than this regex and a second one drifting apart."""
+    return bool(_EMAIL_RE.match((value or '').strip()))
+
+
 class PermissiveEmail:
     """Regex-only email validator. Accepts any RFC-shaped address,
     including ``.local`` and other special-use TLDs."""
@@ -31,5 +40,5 @@ class PermissiveEmail:
         value = (field.data or '').strip()
         if not value:
             return
-        if not _EMAIL_RE.match(value):
+        if not is_plausible_email(value):
             raise ValidationError(self.message)

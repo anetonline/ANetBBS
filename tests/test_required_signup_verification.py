@@ -1,3 +1,4 @@
+import re
 import ssl
 from unittest.mock import Mock
 from urllib.parse import urlsplit
@@ -122,3 +123,18 @@ def test_strict_signup_validates_smtp_relay_certificate(
     context = start_tls.call_args.kwargs['context']
     assert context.check_hostname
     assert context.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_outbound_smtp_message_has_rfc5322_message_id(
+        localized_app, signup, monkeypatch):
+    smtp_factory = Mock()
+    monkeypatch.setattr(mailer.smtplib, 'SMTP', smtp_factory)
+    with localized_app.app_context():
+        smtp = SmtpConfig.query.first()
+        smtp.use_ssl = False
+        smtp.use_tls = True
+        db.session.commit()
+        assert mailer.send_email(signup['email'], 'Message-ID check', 'Test') == (True, '')
+
+    raw_message = smtp_factory.return_value.sendmail.call_args.args[2]
+    assert re.search(r'(?m)^Message-ID: <[^<>\s@]+@[^<>\s@]+>$', raw_message)

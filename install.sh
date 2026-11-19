@@ -150,7 +150,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     fi
 
     info "Stopping and removing services..."
-    for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
+    for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp anetbbs-mail; do
         systemctl stop    "$svc" 2>/dev/null || true
         systemctl disable "$svc" 2>/dev/null || true
         rm -f "/etc/systemd/system/${svc}.service"
@@ -435,6 +435,7 @@ case "$INSTALL_MODE" in
         DEF_ENABLE_MSP="n"
         DEF_ENABLE_FINGER="n"
         DEF_ENABLE_BINKP="n"
+        DEF_ENABLE_MAIL="n"
         DEF_WEB_PORT=8080
         WEB_BIND="127.0.0.1"   # localhost-only, invisible to LAN
         ;;
@@ -447,6 +448,7 @@ case "$INSTALL_MODE" in
         DEF_ENABLE_MSP="n"
         DEF_ENABLE_FINGER="n"
         DEF_ENABLE_BINKP="y"
+        DEF_ENABLE_MAIL="n"
         DEF_WEB_PORT=8080
         WEB_BIND="0.0.0.0"     # reachable so sysop's other nginx can proxy in
         ;;
@@ -456,6 +458,12 @@ case "$INSTALL_MODE" in
         DEF_ENABLE_MSP="y"
         DEF_ENABLE_FINGER="y"
         DEF_ENABLE_BINKP="y"
+        # Deliberately "n" even in production, unlike the other
+        # privileged-port services above -- port 25 is a dramatically
+        # hotter, directly-internet-facing target than Finger/MSP, and
+        # needs an MX record + a confirmed-unblocked port before it's
+        # worth turning on. The sysop opts in explicitly.
+        DEF_ENABLE_MAIL="n"
         DEF_WEB_PORT=5000
         WEB_BIND="0.0.0.0"
         ;;
@@ -527,6 +535,7 @@ fi
 ask_yn ENABLE_MSP    "Enable inter-BBS Instant Messaging (MSP/SYSTAT, privileged ports 18/11)? (y/n)" "$DEF_ENABLE_MSP"
 ask_yn ENABLE_FINGER "Enable Finger service (RFC 1288, privileged port 79)? (y/n)" "$DEF_ENABLE_FINGER"
 ask_yn ENABLE_BINKP  "Enable BinkP listener for FidoNet inbound mail (port 24554)? (y/n)" "$DEF_ENABLE_BINKP"
+ask_yn ENABLE_MAIL   "Enable Internet Mail (SMTP receiver, PRIVILEGED PORT 25)? This is a dramatically hotter, directly internet-facing target than Finger/MSP above, and many cloud VPS providers block port 25 by default (inbound and/or outbound) -- confirm with your host AND set up an MX record before saying yes here. (y/n)" "$DEF_ENABLE_MAIL"
 
 ENABLE_SSL="n"
 if [[ "$DOMAIN" != "localhost" ]] && [[ "$ENABLE_NGINX" == "y" ]]; then
@@ -595,6 +604,7 @@ echo -e "  SSL:             ${BOLD}$([ "$ENABLE_SSL" = "y" ] && echo "Enabled" |
 echo -e "  Inter-BBS IM:    ${BOLD}$([ "$ENABLE_MSP" = "y" ] && echo "Enabled (MSP/18, SYSTAT/11)" || echo "Disabled")${NC}"
 echo -e "  Finger:          ${BOLD}$([ "$ENABLE_FINGER" = "y" ] && echo "Enabled (port 79)" || echo "Disabled")${NC}"
 echo -e "  BinkP:           ${BOLD}$([ "$ENABLE_BINKP" = "y" ] && echo "Enabled (port 24554)" || echo "Disabled")${NC}"
+echo -e "  Internet Mail:   ${BOLD}$([ "$ENABLE_MAIL" = "y" ] && echo "Enabled (port 25)" || echo "Disabled")${NC}"
 echo -e "  Mystic .mps:     ${BOLD}$([ "$INSTALL_MYSTIC" = "y" ] && echo "Will download" || echo "Skipped")${NC}"
 echo -e "  OS:              ${BOLD}$OS_PRETTY${NC}"
 echo ""
@@ -1521,6 +1531,7 @@ MRC_BRIDGE_WS_PATH=/mrcws
 # freshly-created unit should actually be started (see update.sh).
 BINKP_ENABLED=$([[ "$ENABLE_BINKP" == "y" ]] && echo true || echo false)
 FINGER_ENABLED=$([[ "$ENABLE_FINGER" == "y" ]] && echo true || echo false)
+MAIL_ENABLED=$([[ "$ENABLE_MAIL" == "y" ]] && echo true || echo false)
 MRC_BRIDGE_ENABLED=$([[ "$ENABLE_MRC" == "y" ]] && echo true || echo false)
 ENVEOF
 )
@@ -1951,7 +1962,7 @@ info "Cleaning up stale service files..."
 # a single anetbbs.service that reads .env and starts whichever of
 # telnet/ssh/rlogin are enabled. Stop+disable+remove the legacy units
 # on every install so the migration is clean.
-for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp; do
+for svc in anetbbs-web anetbbs anetbbs-telnet anetbbs-ssh anetbbs-mrc-bridge anetbbs-finger anetbbs-binkp anetbbs-mail; do
     systemctl stop "$svc" 2>/dev/null || true
     systemctl disable "$svc" 2>/dev/null || true
     rm -f "/etc/systemd/system/${svc}.service"
@@ -2314,6 +2325,58 @@ SVCEOF
 ok "anetbbs-finger.service"
 fi
 
+# ─── Internet Mail (SMTP receiver) service ─────────────────────────────────────
+# Port 25, directly internet-facing and actively scanned -- a much
+# hotter target than Finger's port 79. See docs/19-email.md before
+# enabling this for real: needs an MX record and a confirmed-unblocked
+# port 25 (many cloud VPS providers block it by default), neither of
+# which this installer can check for you.
+if [[ "$ENABLE_MAIL" == "y" ]]; then
+cat > /etc/systemd/system/anetbbs-mail.service << SVCEOF
+[Unit]
+Description=ANetBBS Internet Mail (SMTP receiver, RFC 5321)
+After=network.target
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+WorkingDirectory=$INSTALL_DIR
+EnvironmentFile=$INSTALL_DIR/.env
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=$PROTECTHOME_MODE
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+SystemCallArchitectures=native
+# Pure network daemon, no subprocess spawning -- safe for the full
+# strict baseline, same reasoning as anetbbs-finger.service above.
+ProtectSystem=strict
+ReadWritePaths=$INSTALL_DIR/data $INSTALL_DIR/logs
+ProtectClock=yes
+ProtectHostname=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ExecStart=$VENV_DIR/bin/python -m anetbbs.mail.smtp_server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+ok "anetbbs-mail.service"
+fi
+
 # ─── BinkP inbound listener service ────────────────────────────────────────────
 # FidoNet-style inbound mail (port 24554). Was asked about by the wizard,
 # shown as "Enabled" in the install summary, and had its firewall port
@@ -2385,6 +2448,7 @@ SERVICES_TO_START=(anetbbs-web)
 [[ "$ENABLE_MRC" == "y" ]]    && SERVICES_TO_START+=(anetbbs-mrc-bridge)
 [[ "$ENABLE_FINGER" == "y" ]] && SERVICES_TO_START+=(anetbbs-finger)
 [[ "$ENABLE_BINKP" == "y" ]]  && SERVICES_TO_START+=(anetbbs-binkp)
+[[ "$ENABLE_MAIL" == "y" ]]   && SERVICES_TO_START+=(anetbbs-mail)
 
 for svc in "${SERVICES_TO_START[@]}"; do
     systemctl enable "$svc" 2>/dev/null || true
@@ -2429,6 +2493,7 @@ if [[ "$CONFIGURE_UFW" == "y" ]]; then
         fi
         [[ "$ENABLE_FINGER" == "y" ]] && ufw allow 79/tcp >/dev/null 2>&1 && ok "  79/tcp (Finger)"
         [[ "$ENABLE_BINKP" == "y" ]]  && ufw allow 24554/tcp >/dev/null 2>&1 && ok "  24554/tcp (BinkP / FidoNet)"
+        [[ "$ENABLE_MAIL" == "y" ]]   && ufw allow 25/tcp >/dev/null 2>&1 && ok "  25/tcp (Internet Mail / SMTP)"
         if ufw status | grep -q "Status: active"; then
             ufw reload >/dev/null 2>&1 && ok "  UFW reloaded"
         else
@@ -2453,6 +2518,7 @@ if [[ "$CONFIGURE_UFW" == "y" ]]; then
         [[ "$ENABLE_MSP" == "y" ]]    && warn "  sudo firewall-cmd --permanent --add-port=18/tcp --add-port=11/udp"
         [[ "$ENABLE_FINGER" == "y" ]] && warn "  sudo firewall-cmd --permanent --add-port=79/tcp"
         [[ "$ENABLE_BINKP" == "y" ]]  && warn "  sudo firewall-cmd --permanent --add-port=24554/tcp"
+        [[ "$ENABLE_MAIL" == "y" ]]   && warn "  sudo firewall-cmd --permanent --add-port=25/tcp"
         warn "  sudo firewall-cmd --reload"
     else
         warn "UFW is not installed — skipping firewall config."
@@ -2942,6 +3008,7 @@ if [[ "$ENABLE_TELNET" == "y" || "$ENABLE_SSH" == "y" ]]; then
     show_status "anetbbs"        "Terminal protocols (${proto_label% })"
 fi
 [[ "$ENABLE_FINGER" == "y" ]] && show_status "anetbbs-finger" "Finger server"
+[[ "$ENABLE_MAIL" == "y" ]]   && show_status "anetbbs-mail" "Internet Mail (SMTP receiver)"
 [[ "$INSTALL_SIXEL" == "y" ]] && show_status "terminal_images" "Terminal image viewer (chafa/img2sixel)"
 show_status "anetbbs-mrc-bridge" "MRC bridge service"
 [[ "$ENABLE_NGINX" == "y" ]]  && show_status "nginx"          "nginx reverse proxy"

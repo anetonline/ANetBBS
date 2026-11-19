@@ -205,7 +205,7 @@ class LeastPrivilegePerUnitTests(unittest.TestCase):
 
     def test_only_web_unit_uses_the_broad_rwpaths_variable(self):
         non_web_units = ('anetbbs', 'anetbbs-mrc-bridge',
-                         'anetbbs-binkp', 'anetbbs-finger')
+                         'anetbbs-binkp', 'anetbbs-finger', 'anetbbs-mail')
         for script, name in ((self.install_sh, 'install.sh'),
                              (self.update_sh, 'update.sh')):
             web_body = _extract_heredoc(script, 'anetbbs-web')
@@ -219,9 +219,13 @@ class LeastPrivilegePerUnitTests(unittest.TestCase):
                     '$RWPATHS (full read-write over the whole tree) -- '
                     'it never writes to its own code, only data/logs')
 
-    def test_all_five_units_use_the_protecthome_mode_variable(self):
+    def test_all_six_units_use_the_protecthome_mode_variable(self):
+        # anetbbs-mail joined this list when Internet Mail shipped --
+        # same narrow-RW, standalone-service shape as anetbbs-finger,
+        # same real ProtectHome=yes-on-/home outage risk this whole
+        # class of test exists to catch.
         units = ('anetbbs-web', 'anetbbs', 'anetbbs-mrc-bridge',
-                 'anetbbs-binkp', 'anetbbs-finger')
+                 'anetbbs-binkp', 'anetbbs-finger', 'anetbbs-mail')
         for script, name in ((self.install_sh, 'install.sh'),
                              (self.update_sh, 'update.sh')):
             for unit in units:
@@ -233,9 +237,9 @@ class LeastPrivilegePerUnitTests(unittest.TestCase):
                     "literal, so a home-rooted install gets read-only "
                     "mode instead of the broken yes+carve-out approach")
 
-    def test_the_four_non_upgrading_units_keep_their_narrow_rw(self):
+    def test_the_five_non_upgrading_units_keep_their_narrow_rw(self):
         units = ('anetbbs', 'anetbbs-mrc-bridge', 'anetbbs-binkp',
-                 'anetbbs-finger')
+                 'anetbbs-finger', 'anetbbs-mail')
         for script, name in ((self.install_sh, 'install.sh'),
                              (self.update_sh, 'update.sh')):
             for unit in units:
@@ -251,7 +255,7 @@ class LeastPrivilegePerUnitTests(unittest.TestCase):
         need is now unnecessary -- it must be gone from every unit,
         not just left as harmless-but-redundant leftover text."""
         units = ('anetbbs-web', 'anetbbs', 'anetbbs-mrc-bridge',
-                 'anetbbs-binkp', 'anetbbs-finger')
+                 'anetbbs-binkp', 'anetbbs-finger', 'anetbbs-mail')
         for script, name in ((self.install_sh, 'install.sh'),
                              (self.update_sh, 'update.sh')):
             for unit in units:
@@ -267,7 +271,7 @@ class LeastPrivilegePerUnitTests(unittest.TestCase):
         should still contain a bare ReadWritePaths=$RWPATHS left over
         from the first draft of this fix."""
         units = ('anetbbs', 'anetbbs-mrc-bridge', 'anetbbs-binkp',
-                 'anetbbs-finger')
+                 'anetbbs-finger', 'anetbbs-mail')
         for script in (self.install_sh, self.update_sh):
             for unit in units:
                 body = _extract_heredoc(script, unit)
@@ -331,7 +335,7 @@ class RenderedUnitFileContentTests(unittest.TestCase):
         for script in (self.install_sh, self.update_sh):
             rw, mode = _resolve_vars(script, '/opt/anetbbs')
             for unit in ('anetbbs-mrc-bridge', 'anetbbs-binkp',
-                        'anetbbs-finger', 'anetbbs-web'):
+                        'anetbbs-finger', 'anetbbs-mail', 'anetbbs-web'):
                 rendered = _render_heredoc(
                     script, unit, '/opt/anetbbs', '/opt/anetbbs/venv',
                     rw, mode)

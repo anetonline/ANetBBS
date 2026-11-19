@@ -119,6 +119,8 @@
         <p><strong>Email Verification Flow</strong></p>
         <p>When <em>Require email verification</em> is on, newly registered users get a verification email. Their account is inactive until they click the link. The link expires in <strong>24 hours</strong>.</p>
         <p>Password reset emails are sent automatically when SMTP is enabled (no separate toggle).</p>
+        <hr>
+        <p>This relay is also used for outbound <a href="{{ url_for('admin.mail_settings') }}">Internet Mail</a> (username@domain) -- no separate relay config needed there.</p>
     </div>
 </div>
 
