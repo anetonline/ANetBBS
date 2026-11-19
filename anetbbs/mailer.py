@@ -200,26 +200,6 @@ def send_email(to_address, subject, body_text, body_html=None):
                           subject, body_text, body_html)
 
 
-def send_email(to_address, subject, body_text, body_html=None):
-    """Send one email via the configured SMTP relay, From the sysop's
-    own configured SmtpConfig.from_address/from_name.
-
-    Args:
-        to_address:  Recipient email address string.
-        subject:     Subject line.
-        body_text:   Plain-text body (always sent).
-        body_html:   Optional HTML alternative body.
-
-    Returns:
-        (True, '') on success or (False, error_message) on failure.
-    """
-    cfg = _get_config()
-    if not cfg:
-        return False, 'SMTP relay not configured or disabled'
-    return send_email_as(cfg.from_address, cfg.from_name, to_address,
-                          subject, body_text, body_html)
-
-
 def send_verification_email(user, verify_url):
     """Send an email verification link to a newly registered user."""
     bbs_name = current_app.config.get('BBS_NAME', 'This BBS')

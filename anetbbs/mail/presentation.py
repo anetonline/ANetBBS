@@ -46,10 +46,11 @@ def display_lines(body):
 
 def render_body_html(body):
     """Render a safe plain-text body with visually distinct quoted lines."""
+    # Markup.format()/join() escape every non-Markup argument, so each
+    # line is escaped by markupsafe itself; only the constant span wrapper
+    # is trusted HTML.
+    quoted_tpl = Markup('<span class="mail-quoted">{}</span>')
     rendered = []
     for line, quoted in display_lines(body):
-        safe_line = str(escape(line))
-        if quoted:
-            safe_line = f'<span class="mail-quoted">{safe_line}</span>'
-        rendered.append(safe_line)
-    return Markup('\n'.join(rendered))
+        rendered.append(quoted_tpl.format(line) if quoted else escape(line))
+    return Markup('\n').join(rendered)

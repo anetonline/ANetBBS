@@ -1,11 +1,23 @@
 # ANetBBS Changelog
 
-Current private test candidate: **`v1.1.69`** (November 2026). This file covers `v1.0.0`
+Current private test candidate: **`v1.1.70`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.70 — Code-scan fix for Internet Mail body rendering (private test candidate, November 2026)
+
+The Internet Mail body renderer now builds its HTML entirely through
+markupsafe's own escaping (`Markup.format()` / `Markup.join()`) instead of
+escaping each line by hand and wrapping the joined result in `Markup()`.
+Rendered output is unchanged; the change clears a bandit B704 finding that
+failed the `code-scan` CI workflow on v1.1.69.
+
+A duplicated, identical copy of `send_email()` in `anetbbs/mailer.py` was
+removed, clearing the pyflakes redefinition error that failed the same
+workflow. No behavior changes.
 
 ## v1.1.69 — Internet Mail delivery and notification completion (private test candidate, November 2026)
 
