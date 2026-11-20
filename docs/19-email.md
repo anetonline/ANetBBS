@@ -197,11 +197,16 @@ single-transaction bound.
 Treat inbound sender names, addresses, subjects, message bodies, and
 attachments as untrusted external content. The WebUI escapes message text;
 terminal clients render inbound text through the sanitized plain-text path.
-At terminal login, the **Scan for new messages?** prompt includes the unread
-Internet Mail count. Answer yes and choose **M** to open the Internet Mail
-inbox. The scan is separate from the notification bell preference, so opting
-out of the bell notification does not hide unread mail from an explicitly
-requested login scan.
+At terminal login over telnet, SSH, or rlogin, the **Scan for new messages?**
+prompt checks unread private messages and instant messages, new posts in boards
+since the user's last visit, unread messages in accessible subscribed
+echomail areas, and unread Internet Mail. Answer yes to see the counts and
+choose **P**, **I**, **B**, **E**, or **M** to open the matching reader. The scan is
+separate from the notification-bell preference, so opting out of the Internet
+Mail bell notification does not hide unread mail from an explicitly requested
+login scan. If the scan reports no new messages while mail is expected, check
+that the global Internet Mail setting and the user's mailbox opt-in are both
+enabled, and confirm the message is still unread in that user's inbox.
 
 The WebUI and ANSI terminal reader show the same received message text.
 Quoted reply lines (the conventional `>` prefix and its “wrote:” introduction)

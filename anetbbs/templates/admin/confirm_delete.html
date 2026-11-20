@@ -18,10 +18,48 @@
                 {% endif %}
                 <p class="text-danger"><strong>This action cannot be undone.</strong></p>
 
+                {% if item_type == 'user' and inspect_error %}
+                    <div class="alert alert-warning">{{ inspect_error }}</div>
+                {% endif %}
+
+                {% if item_type == 'user' and related_rows %}
+                    <div class="alert alert-danger">
+                        <strong>Related account data was found.</strong>
+                        The ordinary delete below keeps that data and may be
+                        blocked. The permanent purge removes the account and
+                        the linked rows listed here. Posts, messages, game
+                        records, and other history may be permanently lost.
+                    </div>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm">
+                            <thead><tr><th>Table</th><th>Account field</th><th>Rows</th></tr></thead>
+                            <tbody>
+                                {% for table_name, column_name, row_count in related_rows %}
+                                    <tr><td>{{ table_name }}</td><td>{{ column_name }}</td><td>{{ row_count }}</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <form method="post" class="border border-danger rounded p-3 mb-3">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="delete_mode" value="purge">
+                        <label for="confirm-username" class="form-label">
+                            Type <strong>{{ item_name }}</strong> to permanently delete the account and listed history.
+                        </label>
+                        <input id="confirm-username" name="confirm_username" class="form-control mb-3"
+                               autocomplete="off" required>
+                        <button type="submit" class="btn btn-danger">
+                            <i class="bi bi-exclamation-triangle"></i> Permanently Delete Account and History
+                        </button>
+                    </form>
+                {% endif %}
+
                 <form method="post">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-danger"><i class="bi bi-trash"></i> Yes, Delete</button>
+                        <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash"></i>
+                            {% if item_type == 'user' and related_rows %}Delete Account (preserve related data){% else %}Yes, Delete{% endif %}
+                        </button>
                         <a href="{{ url_for('admin.' + item_type + 's') }}" class="btn btn-secondary">Cancel</a>
                     </div>
                 </form>

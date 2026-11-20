@@ -177,9 +177,14 @@ admin-UI buttons, run from the install directory:
   hardcoded table list, so it stays correct as new tables get added).
   For when you genuinely want an account and all its data gone (a
   test/duplicate account, say) rather than just banned or deactivated
-  — the admin panel's own delete-user button intentionally refuses
-  this for an account with real activity and points you here instead.
-  Defaults to a dry run; add `--apply` to actually delete.
+  — the Admin → Users confirmation now previews the directly linked row
+  counts and offers a separately confirmed purge after you type the exact
+  username. The purge is transactional and rolls back if an unhandled
+  database reference prevents deletion. Bulk, Pending Users, and Inactive
+  Users delete actions show this dry-run command when dependent history
+  blocks an ordinary deletion.
+  Defaults to a dry run; review the listed tables and counts, then add
+  `--apply` only when you intend to permanently erase those records too.
 - **`bash tools/download_jsdos.sh`** — downloads the js-dos/DOSBox-in-
   WebAssembly runtime files into `anetbbs/static/js-dos/`. Not stored
   in git (one file alone is several MB); run this once per install

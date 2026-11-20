@@ -5671,15 +5671,26 @@ async def _list_threads_v2(self, board_id, board_name):
     selection at Jerry's request, 2026-09-29 -- matches the file-area
     browser conversion, same _rss_lightbar widget the BBS directory and
     file pickers already use)."""
-    from anetbbs.models import Post, User
+    from anetbbs.models import Post, User, BoardLastRead, db
     from .ansi_ui import banner, FG, RESET, BOLD, ui_width
     sel = 0
     while True:
         with _app().app_context():
+            user_id = (self.session.user or {}).get('id')
+            if user_id:
+                last_read = BoardLastRead.query.filter_by(
+                    user_id=user_id, board_id=board_id).first()
+                if last_read is None:
+                    last_read = BoardLastRead(
+                        user_id=user_id, board_id=board_id)
+                    db.session.add(last_read)
+                last_read.last_read_at = datetime.utcnow()
             threads = (Post.query
                        .filter_by(board_id=board_id, parent_id=None)
                        .order_by(Post.created_at.desc())
                        .limit(50).all())
+            if user_id:
+                db.session.commit()
             t_list = []
             for t in threads:
                 author = User.query.get(t.author_id)

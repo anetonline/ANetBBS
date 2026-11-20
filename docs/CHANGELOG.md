@@ -1,11 +1,29 @@
 # ANetBBS Changelog
 
-Current private test candidate: **`v1.1.71`** (November 2026). This file covers `v1.0.0`
+Current private test candidate: **`v1.1.72`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.72 — Terminal message scan and user-delete guidance (private test candidate, November 2026)
+
+Fixed the terminal **Scan for new messages?** path for telnet, SSH, and
+rlogin. Terminal sessions run outside a Flask request, so their database scan
+now creates the required Flask application context. The scan also counts unread
+message-board posts and accessible subscribed echomail, in addition to private
+messages, instant messages, notifications, and Internet Mail, and provides
+shortcuts to the corresponding readers. Previously the missing application
+context was hidden by broad error handling and appeared as an empty scan.
+
+The Admin → Users confirmation now previews related row counts and offers a
+separate permanent-purge action only after the operator types the exact
+username. The purge runs in one transaction and rolls back on any database
+reference it cannot safely remove. Bulk, Pending Users, and Inactive Users
+deletion paths show the schema-aware dry-run command when account history
+blocks an ordinary delete. No account history is removed by the ordinary
+delete action.
 
 ## v1.1.71 — Spanish admin-hub label for Internet Mail (private test candidate, November 2026)
 

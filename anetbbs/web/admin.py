@@ -4,6 +4,7 @@ Admin panel blueprint
 import sys
 import os
 import json
+import shlex
 from datetime import datetime, timedelta
 from time import monotonic
 from flask import Blueprint, render_template, redirect, url_for, flash, request, abort, current_app
@@ -12,6 +13,7 @@ from wtforms import StringField, TextAreaField, SubmitField, BooleanField, Passw
 from wtforms.validators import (DataRequired, Length, Optional, ValidationError,
                                 NumberRange, Regexp)
 from flask_wtf import FlaskForm
+import sqlalchemy as sa
 
 from sqlalchemy.exc import IntegrityError
 
@@ -28,6 +30,87 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 # access_control.py) -- this used to flash + redirect to the dashboard
 # instead, the one outlier among 21 near-identical local implementations.
 from .access_control import require_admin as admin_required
+
+
+def _user_delete_blocked_message(username):
+    """Explain the safe hard-delete path when history prevents ORM deletion."""
+    username_arg = shlex.quote(username)
+    return (f'Could not delete {username}: related account history must be '
+            'removed explicitly. From the ANetBBS install directory, first '
+            f'preview it with `python -m tools.delete_user_and_related_data {username_arg}`. '
+            'Review the rows carefully; add `--apply` only if you intend to '
+            'permanently remove that account and its related records. '
+            'Ban/Deactivate keeps the history and disables the account.')
+
+
+def _try_delete_user(user):
+    """Delete only accounts with no dependent history; never leak an SQL 500."""
+    try:
+        db.session.delete(user)
+        db.session.commit()
+        return True
+    except IntegrityError:
+        db.session.rollback()
+        return False
+
+
+def _user_fk_columns(conn):
+    """Find every schema column with an FK to users.id."""
+    inspector = sa.inspect(conn)
+    refs = []
+    for table_name in inspector.get_table_names():
+        if table_name == 'users':
+            continue
+        for fk in inspector.get_foreign_keys(table_name):
+            if fk.get('referred_table') != 'users':
+                continue
+            for local_col, remote_col in zip(
+                    fk.get('constrained_columns') or [],
+                    fk.get('referred_columns') or []):
+                if remote_col == 'id':
+                    refs.append((table_name, local_col))
+    return sorted(set(refs))
+
+
+def _user_related_row_counts(user_id):
+    """Return a schema-derived preview of rows directly owned by a user."""
+    conn = db.session.connection()
+    refs = _user_fk_columns(conn)
+    metadata = sa.MetaData()
+    rows = []
+    for table_name, column_name in refs:
+        table = sa.Table(table_name, metadata, autoload_with=conn)
+        count = conn.execute(
+            sa.select(sa.func.count()).select_from(table).where(
+                table.c[column_name] == user_id)).scalar_one()
+        if count:
+            rows.append((table_name, column_name, int(count)))
+    return rows
+
+
+def _purge_user_and_related_rows(user_id):
+    """Delete a user's FK-linked rows and account in one DB transaction.
+
+    The caller requires an exact-username confirmation first. If another
+    table depends on these records without a direct user FK, the database
+    rejects the operation and the transaction rolls back atomically.
+    """
+    conn = db.session.connection()
+    refs = _user_fk_columns(conn)
+    metadata = sa.MetaData()
+    deleted = 0
+    try:
+        for table_name, column_name in refs:
+            table = sa.Table(table_name, metadata, autoload_with=conn)
+            result = conn.execute(sa.delete(table).where(
+                table.c[column_name] == user_id))
+            deleted += max(0, result.rowcount or 0)
+        conn.execute(sa.delete(User.__table__).where(User.id == user_id))
+        db.session.commit()
+        return deleted
+    except Exception:
+        db.session.rollback()
+        raise
 
 
 # ---- Forms ----
@@ -545,6 +628,25 @@ def delete_user(user_id):
 
     if request.method == 'POST':
         username = user.username
+        if request.form.get('delete_mode') == 'purge':
+            if request.form.get('confirm_username', '').strip() != username:
+                flash('The confirmation username did not match; nothing was deleted.',
+                      'danger')
+                return redirect(url_for('admin.delete_user', user_id=user.id))
+            try:
+                row_count = _purge_user_and_related_rows(user.id)
+                flash(f'Permanently deleted {username} and {row_count} related '
+                      'record(s).', 'success')
+            except Exception:
+                current_app.logger.exception(
+                    'Account purge failed for user id %s; transaction rolled back',
+                    user.id)
+                db.session.rollback()
+                flash(f'Could not purge {username}; the database rejected the '
+                      'operation and rolled it back. No partial deletion was '
+                      'committed. Use the documented command-line dry run to '
+                      'inspect remaining references.', 'danger')
+            return redirect(url_for('admin.users'))
         # Real live bug reported by Jerry (2026-09-01): "Internal Server
         # Error... I just tried to delete a user and got this." Root
         # cause: User has 50+ NOT NULL foreign keys pointing at it
@@ -564,23 +666,26 @@ def delete_user(user_id):
         # the crash itself: catch the failure, roll back cleanly, and
         # point the sysop at the existing, already-working alternative
         # (ban/deactivate) instead of a raw error page.
-        try:
-            db.session.delete(user)
-            db.session.commit()
+        if _try_delete_user(user):
             flash(f'User {username} deleted.', 'success')
-        except IntegrityError:
-            db.session.rollback()
-            flash(f'Could not delete {username} — they have related '
-                 f'records (games played, messages, posts, etc.) that '
-                 f'block deletion. Use Ban/Deactivate instead, which '
-                 f'disables the account without needing to remove its '
-                 f'history.', 'danger')
+        else:
+            flash(_user_delete_blocked_message(username), 'danger')
         return redirect(url_for('admin.users'))
 
+    related_rows = None
+    inspect_error = None
+    try:
+        related_rows = _user_related_row_counts(user.id)
+    except Exception:
+        db.session.rollback()
+        inspect_error = ('Related records could not be counted. The ordinary '
+                         'delete will preserve the account if history blocks it.')
     return render_template('admin/confirm_delete.html',
                            item=user,
                            item_type='user',
-                           item_name=user.username)
+                           item_name=user.username,
+                           related_rows=related_rows,
+                           inspect_error=inspect_error)
 
 
 @admin_bp.route('/users/<int:user_id>/toggle-ban', methods=['POST'])
@@ -635,11 +740,8 @@ def bulk_users():
                 blocked.append(user.username)
         if deleted:
             flash(f'Deleted {deleted} user(s).', 'success')
-        if blocked:
-            flash(f'Could not delete {len(blocked)} user(s) with related '
-                 f'records (games played, messages, etc.): '
-                 f'{", ".join(blocked)}. Use Ban/Deactivate instead.',
-                 'danger')
+        for username in blocked:
+            flash(_user_delete_blocked_message(username), 'danger')
     elif action == 'ban':
         for user in users:
             user.is_active = False
@@ -2734,8 +2836,13 @@ def pending_user_action(user_id, action):
         db.session.commit()
         flash(f'Rejected {user.username}.', 'warning')
     elif action == 'delete':
-        db.session.delete(user); db.session.commit()
-        flash(f'Deleted {user.username}.', 'info')
+        username = user.username
+        if user.id == current_user.id:
+            flash('You cannot delete your own account.', 'danger')
+        elif _try_delete_user(user):
+            flash(f'Deleted {username}.', 'info')
+        else:
+            flash(_user_delete_blocked_message(username), 'danger')
     return redirect(url_for('admin.pending_users'))
 
 
@@ -2784,12 +2891,19 @@ def inactive_users():
             db.session.commit()
             flash(f'Deactivated {n} user(s).', 'warning')
         elif action == 'delete':
+            blocked = []
             for uid in ids:
                 u = User.query.get(uid)
                 if u and not u.is_admin:
-                    db.session.delete(u); n += 1
-            db.session.commit()
-            flash(f'Deleted {n} user(s).', 'info')
+                    username = u.username
+                    if _try_delete_user(u):
+                        n += 1
+                    else:
+                        blocked.append(username)
+            if n:
+                flash(f'Deleted {n} user(s).', 'info')
+            for username in blocked:
+                flash(_user_delete_blocked_message(username), 'danger')
         return redirect(url_for('admin.inactive_users', days=days))
 
     return render_template('admin/inactive_users.html', rows=rows, days=days)

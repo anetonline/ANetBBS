@@ -3504,10 +3504,28 @@ class BBSSession:
         await self.write("\x1b[2J\x1b[H\x1b[0m")
 
     async def _show_notification_summary(self):
+        """Run terminal message queries inside Flask's app context.
+
+        Telnet, SSH, and rlogin sessions run on asyncio tasks outside a
+        Flask request. Flask-SQLAlchemy therefore has no scoped session
+        unless this code supplies an application context. Without one,
+        the old broad exception handler turned the context error into a
+        misleading "No new messages" response on every terminal login.
+        """
+        try:
+            from ..features.bbs_ui import _app
+            with _app().app_context():
+                return await self._show_notification_summary_in_app_context()
+        except Exception:
+            logger.exception('Could not establish context for terminal message scan')
+            return None
+
+    async def _show_notification_summary_in_app_context(self):
         """Blocking pop-up shown once at login when anything is waiting:
         lists every unread Notification by name/detail (echomail/QWK
         replies, netmail, @mentions, etc. -- whatever notify() created,
-        see anetbbs/features/notify.py) plus PM/IM counts, and requires
+        see anetbbs/features/notify.py) plus unread private/instant mail,
+        Internet Mail, message-board posts, and accessible echomail, and requires
         the user to press Enter before continuing into the menu loop.
 
         Previously this only printed a passive one-line count ("*** You
@@ -3516,7 +3534,8 @@ class BBSSession:
         with limited scrollback, and it didn't say who or where. Silent
         (no pop-up, no pause) if nothing is waiting.
 
-        Returns (pm_n, unread_notifs) when something was actually shown,
+        Returns (pm_n, im_n, mail_n, board_n, echo_n, unread_notifs) when
+        something was actually shown,
         or None when there was nothing pending (or no user) -- callers
         that want to offer a "jump straight into the relevant reader"
         follow-up (see _maybe_scan_new_messages()) use the return value
@@ -3527,7 +3546,12 @@ class BBSSession:
             if not uid:
                 return None
             from ..models import (PrivateMessage, InstantMessage,
-                                  Notification, InternetMail, MailConfig, User)
+                                  Notification, InternetMail, MailConfig, User,
+                                  Board, BoardLastRead, Post, EchoArea,
+                                  EchomailNetwork, EchomailMessage,
+                                  EchomailReadStatus, db)
+            from sqlalchemy import and_, func, or_
+            from ..features.access_control import evaluate_access
             pm_n = (PrivateMessage.query
                     .filter_by(recipient_id=uid, read_at=None,
                                is_deleted_recipient=False).count())
@@ -3541,13 +3565,76 @@ class BBSSession:
                         user_id=uid, direction='inbound', read_at=None).count()
             except Exception:
                 mail_n = 0
+            board_n = 0
+            echo_n = 0
+            try:
+                scan_user = User.query.get(uid)
+                if scan_user is not None:
+                    scan_identity = {
+                        'id': uid,
+                        'is_admin': bool(scan_user.is_admin),
+                        'access_level': scan_user.access_level,
+                    }
+                    boards = [b for b in Board.query.filter_by(is_active=True).all()
+                              if evaluate_access(scan_identity, b.min_access_level)]
+                    last_read_by_board = {
+                        row.board_id: row.last_read_at
+                        for row in BoardLastRead.query.filter_by(user_id=uid).all()
+                    }
+                    board_conditions = []
+                    for board in boards:
+                        cond = [Post.board_id == board.id, Post.author_id != uid]
+                        last_read = last_read_by_board.get(board.id)
+                        if last_read is not None:
+                            cond.append(Post.created_at > last_read)
+                        board_conditions.append(and_(*cond))
+                    if board_conditions:
+                        board_n = (db.session.query(func.count(Post.id))
+                                   .filter(or_(*board_conditions)).scalar() or 0)
+
+                    active_network_ids = {
+                        network.id for network in
+                        EchomailNetwork.query.filter_by(is_active=True).all()
+                    }
+                    areas = [area for area in EchoArea.query.filter_by(
+                                is_active=True, is_subscribed=True).all()
+                             if area.network_id in active_network_ids
+                             and (area.tag or '').upper() != 'NETMAIL'
+                             and evaluate_access(
+                                 scan_identity, area.min_access_level,
+                                 is_sysop_only=bool(area.is_sysop_only))]
+                    area_ids = [area.id for area in areas]
+                    if area_ids:
+                        echo_n = (db.session.query(func.count(EchomailMessage.id))
+                                  .outerjoin(EchomailReadStatus, and_(
+                                      EchomailReadStatus.message_id == EchomailMessage.id,
+                                      EchomailReadStatus.user_id == uid))
+                                  .filter(EchomailMessage.area_id.in_(area_ids),
+                                          EchomailReadStatus.id.is_(None))
+                                  .scalar() or 0)
+            except Exception:
+                # Message scanning is best-effort; a broken optional board
+                # or echomail schema must not keep an otherwise valid login
+                # from reaching the BBS menu.
+                db.session.rollback()
+                board_n = 0
+                echo_n = 0
             try:
                 unread_notifs = (Notification.query
                                   .filter_by(user_id=uid, is_read=False)
                                   .order_by(Notification.id).all())
             except Exception:
                 unread_notifs = []
-            if not (pm_n or im_n or mail_n or unread_notifs):
+            # Detach plain notification data and release the scoped DB
+            # session before pausing on terminal I/O. The user may take a
+            # long time to read the summary; do not hold a DB connection or
+            # transaction open for the duration of that pause.
+            unread_notifs = [
+                {'kind': n.kind, 'title': n.title or '', 'body': n.body or ''}
+                for n in unread_notifs
+            ]
+            db.session.remove()
+            if not (pm_n or im_n or mail_n or board_n or echo_n or unread_notifs):
                 return None
 
             await self.write(
@@ -3568,6 +3655,14 @@ class BBSSession:
                 await self.write(
                     f'  \x1b[1;36m{mail_n}\x1b[0m new Internet Mail message'
                     + ('s' if mail_n != 1 else '') + '\r\n')
+            if board_n:
+                await self.write(
+                    f'  \x1b[1;36m{board_n}\x1b[0m new message-board post'
+                    + ('s' if board_n != 1 else '') + '\r\n')
+            if echo_n:
+                await self.write(
+                    f'  \x1b[1;36m{echo_n}\x1b[0m new echomail message'
+                    + ('s' if echo_n != 1 else '') + '\r\n')
             # Each Notification's own title/body already carries the
             # "who, and in what area/context" detail (see notify() call
             # sites -- e.g. anetbbs/echomail/notify_reply.py's "Jane
@@ -3587,20 +3682,21 @@ class BBSSession:
                 # Internet Mail is listed above from its authoritative
                 # mailbox unread state to keep terminal scanning working
                 # even when the user disabled this notification kind.
-                if n.kind == 'internet_mail':
+                if n['kind'] == 'internet_mail':
                     continue
-                title = strip_untrusted_escapes(n.title)
+                title = strip_untrusted_escapes(n['title'])
                 line = f'  \x1b[33m-\x1b[0m {title}'
-                if n.body:
-                    line += f' \x1b[36m({strip_untrusted_escapes(n.body)})\x1b[0m'
+                if n['body']:
+                    line += f' \x1b[36m({strip_untrusted_escapes(n["body"])})\x1b[0m'
                 await self.write(line + '\r\n')
             await self.write('\r\n\x1b[1mPress ENTER to continue...\x1b[0m')
             try:
                 await self.read_line('')
             except Exception:
                 pass
-            return (pm_n, mail_n, unread_notifs)
+            return (pm_n, im_n, mail_n, board_n, echo_n, unread_notifs)
         except Exception:
+            logger.exception('Terminal login message scan failed')
             return None
 
     async def _maybe_scan_new_messages(self):
@@ -3613,9 +3709,9 @@ class BBSSession:
 
         When the summary actually showed something, also offers a one-key
         shortcut straight into whichever reader(s) have something new --
-        Private Messages, Message Boards (reply/mention notifications), or
-        Echomail (echomail_reply notifications) -- rather than dropping the
-        user back at the notification list with no way to act on it. ANSI/
+        Private Messages, Internet Mail, Message Boards, or Echomail --
+        rather than dropping the user back at the notification list with no
+        way to act on it. ANSI/
         ASCII only: PETSCII has its own dedicated menu loop
         (features/petscii_ui.py) that these ANSI-native reader methods
         aren't built for, so PETSCII sessions just get the summary itself.
@@ -3656,13 +3752,17 @@ class BBSSession:
                 return
             if self.term_mode == 'petscii':
                 return
-            pm_n, mail_n, unread_notifs = result
-            has_board = any(n.kind in ('reply', 'mention') for n in unread_notifs)
-            has_echo = any(n.kind == 'echomail_reply' for n in unread_notifs)
+            pm_n, im_n, mail_n, board_n, echo_n, unread_notifs = result
+            has_board = board_n > 0 or any(
+                n['kind'] in ('reply', 'mention') for n in unread_notifs)
+            has_echo = echo_n > 0 or any(
+                n['kind'] == 'echomail_reply' for n in unread_notifs)
 
             opts = []
             if pm_n:
                 opts.append(('P', 'rivate Messages'))
+            if im_n:
+                opts.append(('I', 'nstant Messages'))
             if mail_n:
                 opts.append(('M', 'ail'))
             if has_board:
@@ -3681,6 +3781,8 @@ class BBSSession:
             ui = BBSMenuUI(self)
             if resp == 'P' and pm_n:
                 await ui.list_pm_inbox()
+            elif resp == 'I' and im_n:
+                await ui.list_imsg_inbox()
             elif resp == 'M' and mail_n:
                 await ui.list_mail_inbox()
             elif resp == 'B' and has_board:
@@ -3688,6 +3790,7 @@ class BBSSession:
             elif resp == 'E' and has_echo:
                 await ui.list_echo_areas()
         except Exception:
+            logger.exception('Terminal login message scan flow failed')
             pass
 
     async def _show_pending_broadcasts(self):
