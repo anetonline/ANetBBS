@@ -8,7 +8,7 @@
 # On every push/PR: build (amd64 only, for speed) + run tests inside
 # the built image. Never pushes anywhere.
 #
-# On a version tag push (v1.0b2.30 etc): ALSO builds multi-arch
+# On a version tag push (1.1.72 or v1.1.72): ALSO builds multi-arch
 # (amd64+arm64) and pushes to ghcr.io/anetonline/anetbbs using the
 # repo's automatic GITHUB_TOKEN -- no manual secrets needed, but the
 # repo's Settings -> Actions -> General -> Workflow permissions must
@@ -21,7 +21,9 @@ name: Docker build
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    # The repo's sync_to_github.sh creates bare version tags (1.1.72).
+    # Keep accepting the conventional v-prefixed form too.
+    tags: ['v*', '*.*.*']
   pull_request:
     branches: [main]
 
@@ -82,7 +84,7 @@ jobs:
             '
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag'
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:

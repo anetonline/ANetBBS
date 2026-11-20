@@ -80,6 +80,14 @@ class _FakeSession:
         from anetbbs.core.session import BBSSession
         return await BBSSession._show_notification_summary(self)
 
+    async def _show_notification_summary_in_app_context(self):
+        # The production wrapper creates an app context before delegating
+        # here. Keep the fake session compatible with both layers so these
+        # tests exercise the actual scan queries instead of tripping over a
+        # missing helper on the test double.
+        from anetbbs.core.session import BBSSession
+        return await BBSSession._show_notification_summary_in_app_context(self)
+
     def transcript(self):
         return ''.join(self.written)
 
