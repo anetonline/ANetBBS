@@ -48,6 +48,13 @@ class _FakeSession:
             await self.write(prompt)
         return ''
 
+    async def _show_notification_summary_in_app_context(self):
+        # The production wrapper supplies the Flask app context, then calls
+        # this helper. Delegate to the same implementation so the fake
+        # session exercises the real notification query and rendering path.
+        from anetbbs.core.session import BBSSession
+        return await BBSSession._show_notification_summary_in_app_context(self)
+
 
 class NotificationLoginPopupTests(unittest.TestCase):
     def setUp(self):
