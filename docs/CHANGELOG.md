@@ -1,11 +1,17 @@
 # ANetBBS Changelog
 
-Current private test candidate: **`v1.1.72`** (November 2026). This file covers `v1.0.0`
+Current private test candidate: **`v1.1.73`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.73 — Security maintenance release (November 2026)
+
+Security maintenance release: strengthened message access controls, account
+authorization, and privacy protections. All sysops are encouraged to update
+promptly.
 
 ## v1.1.72 — Terminal message scan and user-delete guidance (private test candidate, November 2026)
 

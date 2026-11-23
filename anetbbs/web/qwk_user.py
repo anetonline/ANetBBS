@@ -124,11 +124,16 @@ def _build_qwk_blob(user):
     msgs = bytearray()
     msgs.extend(b' ' * 128)        # First 128 byte header is reserved
     msg_index = 1
+    # Conference numbering above covers every accessible area (it must
+    # match upload()); private rows are filtered per user here.
+    from ..messaging.access import echomail_privacy_clause
+    privacy = echomail_privacy_clause(user.id, getattr(user, 'is_admin', False))
     for area in areas:
         conf_num = conf_lookup[area.id]
         cutoff = last_read.get(area.id, 0)
         rows = (EchomailMessage.query.filter_by(area_id=area.id)
                 .filter(EchomailMessage.id > cutoff)
+                .filter(privacy)
                 .order_by(EchomailMessage.created_at).all())
         for m in rows:
             body = (m.body or '').replace('\n', '\xe3')
@@ -328,6 +333,7 @@ def upload():
                     area_id=area.id,
                     network_id=area.network_id,
                     from_name=current_user.username,
+                    from_user_id=current_user.id,
                     to_name=to_name or 'All',
                     subject=subject or '(no subject)',
                     body=body_text,

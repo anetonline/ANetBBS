@@ -67,8 +67,11 @@ _RUNTIME = os.environ.get('ANETBBS_RUNTIME', 'systemd')
 # stable/full release, added for the v1.0.0 milestone -- Major.Minor +
 # either ('a'/'b' + Phase + '.' + Point) for a beta/alpha build, or a
 # plain '.' + Patch for a stable release).
+# The leading "v" is optional: VERSION files have been written both ways
+# (v1.1.72 shipped "1.1.72"), and an install that can't parse its own
+# version can never be offered an update.
 _VERSION_RE = re.compile(
-    r'^v(?P<major>\d+)\.(?P<minor>\d+)(?:'
+    r'^v?(?P<major>\d+)\.(?P<minor>\d+)(?:'
     r'(?P<phase>[ab])(?P<phase_num>\d+)\.(?P<point>\d+)'
     r'|'
     r'\.(?P<patch>\d+)'
@@ -99,6 +102,38 @@ def _parse_version(s: str):
         return (major, minor, phase_order,
                 int(m.group('phase_num')), int(m.group('point')))
     return (major, minor, 2, int(m.group('patch')), 0)
+
+
+def _same_version(a: str, b: str) -> bool:
+    """True iff both parse and are the same release ("1.1.73" == "v1.1.73")."""
+    pa, pb = _parse_version(a), _parse_version(b)
+    return bool(pa and pb and pa == pb)
+
+
+_SHA256_RE = re.compile(r'[0-9a-fA-F]{64}')
+
+
+def _valid_sha256(value) -> bool:
+    return isinstance(value, str) and bool(_SHA256_RE.fullmatch(value))
+
+
+def _release_metadata_problem(data) -> Optional[str]:
+    """Why an upstream /api/releases/latest body can't be offered for
+    install, or None if it can. A release is only ever shown or installed
+    with a parseable version, a 64-hex sha256 and an http(s) .tar.gz URL."""
+    if not isinstance(data, dict):
+        return 'not a JSON object'
+    if not _parse_version(str(data.get('version') or '')):
+        return 'missing or invalid version'
+    if not _valid_sha256(data.get('sha256')):
+        return 'missing or invalid sha256'
+    url = data.get('url')
+    if not (isinstance(url, str) and url.startswith(('http://', 'https://'))
+            and url.endswith('.tar.gz')):
+        return 'missing or invalid download url'
+    if not isinstance(data.get('size'), int) or data['size'] <= 0:
+        return 'missing or invalid size'
+    return None
 
 
 def _version_newer(remote: str, local: str) -> bool:
@@ -188,10 +223,18 @@ def _latest_payload(req) -> Optional[dict]:
     """Build the public JSON body for the newest tarball."""
     cfg = current_app.config
     rows = _scan_releases(cfg)
-    if not rows:
+    # Newest tarball with a computable sha256. A release is never
+    # advertised without one: peers refuse to install it anyway, and an
+    # unverifiable newest entry would otherwise hide a valid older one.
+    top = sha = None
+    for row in rows:
+        sha = _sha256_of(row['path'])
+        if _valid_sha256(sha):
+            top = row
+            break
+        logger.warning('upgrades: not advertising %s: no valid sha256', row['name'])
+    if top is None:
         return None
-    top = rows[0]
-    sha = _sha256_of(top['path'])
     # Build absolute URL pointing at our existing /downloads/ route so
     # peers can pull the tarball without needing direct fs access.
     url = (req.host_url.rstrip('/')
@@ -269,6 +312,9 @@ def _fetch_upstream(cfg, force: bool = False):
             data, err = None, f'upstream returned {resp.status_code}'
         else:
             data, err = resp.json(), None
+            problem = _release_metadata_problem(data)
+            if problem:
+                data, err = None, f'upstream release metadata rejected: {problem}'
     except requests.RequestException as exc:
         data, err = None, f'upstream unreachable: {exc.__class__.__name__}'
     except ValueError as exc:
@@ -294,8 +340,9 @@ def _local_releases(cfg):
     template doesn't need a custom Jinja filter."""
     rows = _scan_releases(cfg)
     cur = _parse_version(VERSION)
-    if cur:
-        rows = [r for r in rows if r['parsed'] < cur]
+    if not cur:
+        return []
+    rows = [r for r in rows if r['parsed'] < cur]
     from ..core.tz import fmt_eastern
     for r in rows:
         r['mtime_str'] = fmt_eastern(
@@ -311,8 +358,10 @@ def index():
     upstream, err = _fetch_upstream(cfg, force=False)
     newer = bool(upstream
                  and _version_newer(upstream.get('version', ''), VERSION))
+    same = bool(upstream and _same_version(upstream.get('version', ''), VERSION))
     return render_template('admin/upgrades.html',
                            current=VERSION,
+                           same=same,
                            upstream=upstream,
                            upstream_url=_upstream_url(cfg),
                            upstream_error=err,
@@ -698,12 +747,16 @@ def rollback():
 
     # Rollback is intentionally a downgrade — guard against accidentally
     # picking a NEWER one, which the caller would use /install for.
-    if _version_newer(target, VERSION):
+    cur = _parse_version(VERSION)
+    if not cur:
         return jsonify({'ok': False,
-                        'error': 'rollback target must be older than current'}), 409
-    if target == VERSION:
+                        'error': 'current version is unknown; rollback disabled'}), 409
+    if _parse_version(target) == cur:
         return jsonify({'ok': False,
                         'error': 'already on that version'}), 409
+    if _parse_version(target) > cur:
+        return jsonify({'ok': False,
+                        'error': 'rollback target must be older than current'}), 409
 
     sha = _sha256_of(match['path']) or ''
     if not re.fullmatch(r'[0-9a-fA-F]{64}', sha):

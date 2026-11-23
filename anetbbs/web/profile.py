@@ -201,6 +201,23 @@ class UpdateProfileForm(FlaskForm):
                            theme=site_default.display_name if site_default else 'Classic Green')
         self.theme_id.choices = [(0, default_label)] + [(t.id, t.display_name) for t in themes]
 
+    def _check_identity_name(self, field, attr):
+        """Display and real names deliver network mail, so a new value
+        can't be another account's name or a generic role name. Same
+        check as the ANSI and PETSCII editors (messaging/recipients.py)."""
+        from flask_login import current_user
+        from ..messaging.recipients import identity_name_error
+        if identity_name_error(current_user, attr, field.data):
+            raise ValidationError(_t(
+                'profile.name_in_use',
+                'That name is already in use or reserved. Please choose another.'))
+
+    def validate_display_name(self, field):
+        self._check_identity_name(field, 'display_name')
+
+    def validate_real_name(self, field):
+        self._check_identity_name(field, 'real_name')
+
     def validate_email(self, field):
         """Check if email is already taken by another user"""
         if field.data != self.original_email:

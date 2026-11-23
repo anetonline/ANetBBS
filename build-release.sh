@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build a release tarball for ANetBBS.
-# Output: /tmp/ANetBBS-<version>.tar.gz
+# Output: /tmp/ANetBBS-v<version>.tar.gz
 #
 # The tarball wraps everything inside a single top-level directory
-# ANetBBS-<version>/ — required by run_upgrade.sh which looks for
+# ANetBBS-v<version>/ — required by run_upgrade.sh which looks for
 # a single subdirectory after extraction to find update.sh.
 #
 # Naming matches the auto-update regex: ANetBBS-(v\d+\.\d+(?:[ab]\d+\.\d+|\.\d+))\.tar\.gz
@@ -35,8 +35,10 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION="$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')"
-OUT="/tmp/ANetBBS-${VERSION}.tar.gz"
-TOPDIR="ANetBBS-${VERSION}"
+VERSION="${VERSION#v}"
+PACKAGE_VERSION="v${VERSION}"
+OUT="/tmp/ANetBBS-${PACKAGE_VERSION}.tar.gz"
+TOPDIR="ANetBBS-${PACKAGE_VERSION}"
 
 echo "Building $OUT (top-level dir: $TOPDIR) ..."
 

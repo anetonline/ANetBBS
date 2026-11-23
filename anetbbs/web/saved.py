@@ -66,7 +66,8 @@ def _can_view(kind, target):
                                is_sysop_only=echo_area.is_sysop_only,
                                bypass_admin=True):
             return False
-        if echo_area.tag == 'NETMAIL':
+        from ..messaging.recipients import is_private_area
+        if is_private_area(echo_area):
             return _owns_netmail_echomail(target, current_user)
         return True
     if kind == 'netmail':

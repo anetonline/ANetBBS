@@ -1610,6 +1610,26 @@ def _lightweight_migrate(app):
     # backfilled) and AFTER the auto-sweep above (adds binkp_nodes.network_id).
     _backfill_binkp_node_network_id(app, engine, _sa)
 
+    # Private (NETMAIL-area) EchomailMessage rows: local party ids. The
+    # auto-sweep above adds the columns; indexes and the one-time
+    # assignment for rows stored before this upgrade happen here. Rows
+    # that can't be assigned stay visible to admins only.
+    _ensure_index('echomail_messages', 'ix_echomail_messages_from_user_id',
+                  'from_user_id')
+    _ensure_index('echomail_messages', 'ix_echomail_messages_to_user_id',
+                  'to_user_id')
+    try:
+        from .messaging.recipients import backfill_private_parties
+        _st = backfill_private_parties()
+        if _st['rows']:
+            app.logger.info(
+                'Private message ownership: %d older rows checked, %d linked, '
+                '%d queued for sysop review (Admin -> Echomail -> Private '
+                'message ownership)', _st['rows'], _st['assigned'], _st['review'])
+    except Exception as exc:
+        db.session.rollback()
+        app.logger.warning('Could not assign private message parties: %s', exc)
+
 
 def _seed_default_hub_identity(app, engine, _sa):
     """Idempotent one-time seed for multi-hub-identity support.

@@ -37,6 +37,8 @@ def main():
 
     from anetbbs.web_app import create_app
     from anetbbs.models import db, User
+    from anetbbs.messaging.recipients import (PRESERVED_USER_REFS,
+                                              detach_user_from_messages)
     import sqlalchemy as sa
 
     app = create_app()
@@ -59,7 +61,8 @@ def main():
                     continue
                 for local_col, remote_col in zip(
                         fk['constrained_columns'], fk['referred_columns']):
-                    if remote_col == 'id':
+                    if remote_col == 'id' and \
+                            (table_name, local_col) not in PRESERVED_USER_REFS:
                         to_clean.append((table_name, local_col))
 
         total = 0
@@ -87,11 +90,24 @@ def main():
             for table_name, col, count in found:
                 print(f'  {table_name}.{col}: {count} row(s)')
 
+        kept = 0
+        for table_name, col in sorted(PRESERVED_USER_REFS):
+            try:
+                kept += db.session.execute(
+                    sa.text(f'SELECT COUNT(*) FROM "{table_name}" WHERE "{col}" = :uid'),  # nosec B608
+                    {'uid': uid}).scalar() or 0
+            except Exception:
+                db.session.rollback()
+        if kept:
+            print(f'Message links that will be removed (messages kept, '
+                  f'admin-only, queued for review): {kept}')
+
         if not args.apply:
             print(f'\nDry-run only. Re-run with --apply to permanently delete '
                  f'{args.username!r} and all {total} related row(s) above.')
             return 0
 
+        detach_user_from_messages(db.session.connection(), uid)
         for table_name, col, _count in found:
             # Same schema-derived-identifier reasoning as the SELECT
             # above -- table_name/col are never user input.

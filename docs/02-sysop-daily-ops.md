@@ -185,6 +185,37 @@ admin-UI buttons, run from the install directory:
   blocks an ordinary deletion.
   Defaults to a dry run; review the listed tables and counts, then add
   `--apply` only when you intend to permanently erase those records too.
+
+  Private messages (netmail and QWK netmail) are **kept** when an account
+  is deleted, by any of these methods: they're unlinked from the account,
+  become visible to admins only, and are listed under Admin → Echomail →
+  Private Message Ownership. If you're deleting an account because its
+  owner asked for their data to be erased, also remove those retained
+  messages yourself:
+  - **QWK netmail:** open the message from that page and use its admin
+    **Delete** button, which removes it permanently.
+  - **FTN netmail:** the netmail **Delete** button only hides a message
+    from your own view. To erase one permanently, note its number on the
+    Private Message Ownership page and take a backup. Then run this from
+    the install directory, with `DB` set to the database file named by
+    `DATABASE_URL` in your `.env` (`data/anetbbs.db` by default) and `N`
+    set to the message number. It uses the install's own Python, so the
+    `sqlite3` command-line tool isn't needed, and it also removes the
+    message's bookmarks, votes, permalinks and review entry:
+
+    ```
+    venv/bin/python - <<'EOF'
+    import sqlite3
+    DB, N = 'data/anetbbs.db', 0
+    c = sqlite3.connect(DB)
+    c.execute("DELETE FROM netmail_messages WHERE id = ?", (N,))
+    c.execute("DELETE FROM saved_messages WHERE kind = 'netmail' AND target_id = ?", (N,))
+    c.execute("DELETE FROM message_votes WHERE message_type = 'netmail' AND message_id = ?", (N,))
+    c.execute("DELETE FROM message_slugs WHERE kind = 'netmail' AND target_id = ?", (N,))
+    c.execute("DELETE FROM private_ownership_reviews WHERE message_kind = 'netmail' AND message_id = ?", (N,))
+    c.commit()
+    EOF
+    ```
 - **`bash tools/download_jsdos.sh`** — downloads the js-dos/DOSBox-in-
   WebAssembly runtime files into `anetbbs/static/js-dos/`. Not stored
   in git (one file alone is several MB); run this once per install

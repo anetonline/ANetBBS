@@ -56,6 +56,11 @@ def _width(session):
     return getattr(session, 'petscii_width', 40)
 
 
+def _is_admin_session(session):
+    u = getattr(session, 'user', None)
+    return bool(u.get('is_admin')) if isinstance(u, dict) else False
+
+
 def _username(session):
     u = session.user
     return u.get('username', '?') if isinstance(u, dict) else '?'
@@ -661,7 +666,10 @@ async def _echo_messages(session, area_id, area_name):
     while True:
         with _app_ctx():
             from ..models import EchomailMessage
+            from ..messaging.access import echomail_privacy_clause
             msgs = (EchomailMessage.query.filter_by(area_id=area_id)
+                   .filter(echomail_privacy_clause(_user_id(session),
+                                                   _is_admin_session(session)))
                    .order_by(EchomailMessage.created_at.desc()).limit(50).all())
             rows = [(m.id, m.from_name, m.subject) for m in msgs]
 
@@ -695,8 +703,10 @@ async def _echo_messages(session, area_id, area_name):
 async def _echo_message_read(session, msg_id, area_id, area_name):
     with _app_ctx():
         from ..models import EchomailMessage
-        msg = EchomailMessage.query.get(msg_id)
-        if msg is None:
+        from ..messaging.access import echomail_private_visible
+        msg = EchomailMessage.query.filter_by(id=msg_id, area_id=area_id).first()
+        if msg is None or not echomail_private_visible(
+                _user_id(session), _is_admin_session(session), msg):
             return
         # from_name/to_name/subject: same untrusted-remote-data reasoning
         # as _echo_messages()'s listing render above.
@@ -761,6 +771,7 @@ async def _echo_compose(session, area_id, area_name, reply_to_name=None, reply_s
             area_id=area_id,
             network_id=area.network_id if area else None,
             from_name=post_name[:100],
+            from_user_id=_user_id(session),
             to_name=to_name[:100],
             subject=maybe_tag_ansi_subject(subject, body)[:200],
             body=body,
@@ -1334,14 +1345,18 @@ async def _profile_edit(session):
             continue
         attr, label, maxlen = field
         new_val = (await session.read_line(f'{label} (blank to clear): ') or '').strip()
+        from ..messaging.recipients import identity_name_error
         with _app_ctx():
             from ..models import db, User
             u2 = User.query.get(my_id)
             if u2 is None:
                 return
-            setattr(u2, attr, new_val[:maxlen] or None)
-            db.session.commit()
-        await session.write('Saved.\r\n')
+            value = new_val[:maxlen] or None
+            error = identity_name_error(u2, attr, value)
+            if error is None:
+                setattr(u2, attr, value)
+                db.session.commit()
+        await session.write((error or 'Saved.') + '\r\n')
 
 
 async def _profile_edit_mail(session):

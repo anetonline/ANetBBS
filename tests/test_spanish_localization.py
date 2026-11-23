@@ -565,14 +565,14 @@ def test_profile_language_change_updates_account_session_and_cookie(localized_ap
     assert {o['value'] for o in page.select('#language option')} == {'en', 'es', 'de', 'pt'}
     result = _soup(_post(client, '/profile/edit', {
         'email': email, 'language': target, 'theme_id': '0',
-        'display_name': 'Untranslated <b>name</b>', 'bio': 'User bio <script>example</script>',
+        'display_name': f'Untranslated <b>name</b> {target}', 'bio': 'User bio <script>example</script>',
     }, token_path='/profile/edit', follow_redirects=True))
     assert result.html['lang'] == target
     assert '<b>name</b>' not in str(result)
     with localized_app.app_context():
         user = db.session.get(User, user_id)
         assert user.language == target
-        assert user.display_name == 'Untranslated <b>name</b>'
+        assert user.display_name == f'Untranslated <b>name</b> {target}'
         assert user.bio == 'User bio <script>example</script>'
     with client.session_transaction() as session:
         assert session['language'] == target

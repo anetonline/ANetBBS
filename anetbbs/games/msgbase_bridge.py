@@ -52,8 +52,16 @@ def _app():
 
 
 def _find_area(tag):
+    from sqlalchemy import func
     from anetbbs.models import EchoArea
-    return EchoArea.query.filter(EchoArea.tag.ilike(tag)).first()
+    from anetbbs.messaging.recipients import is_private_area
+    # Exact (case-insensitive) tag match; private mail areas are never
+    # exposed to door scripts.
+    area = EchoArea.query.filter(
+        func.upper(EchoArea.tag) == (tag or '').strip().upper()).first()
+    if is_private_area(area):
+        return None
+    return area
 
 
 def op_open(area_tag, _args):

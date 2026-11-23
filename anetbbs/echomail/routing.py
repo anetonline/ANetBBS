@@ -162,8 +162,8 @@ def find_aka_for_network(user, network):
 
 def resolve_user_by_name_or_address(to_name, to_address):
     """Match a to_name/to_address pair to a local User account by
-    UserAka.address exact match, then username, then display_name
-    (case-insensitive). Returns None if nothing matches. No network-level
+    UserAka.address, then username, then an unambiguous display or real
+    name (case-insensitive, exact). Returns None if nothing matches. No network-level
     default-recipient fallback here -- that's netmail-specific (a public
     echomail/QWK message with an unmatched TO name just isn't for anyone
     local; there's no "catch-all sysop" convention for those the way
@@ -174,23 +174,12 @@ def resolve_user_by_name_or_address(to_name, to_address):
     anetbbs.echomail.notify_reply.maybe_notify_recipient (echomail/QWK
     reply-to-a-real-user notifications).
     """
-    to_name = (to_name or '').strip()
-    to_address = (to_address or '').strip()
-
-    user = None
-    if to_address:
-        aka = UserAka.query.filter_by(address=to_address).first()
-        if aka:
-            user = User.query.get(aka.user_id)
-    if user is None and to_name:
-        user = (User.query
-                .filter(func.lower(User.username) == to_name.lower())
-                .first())
-        if user is None:
-            user = (User.query
-                    .filter(func.lower(User.display_name) == to_name.lower())
-                    .first())
-    return user
+    # Matching rules live in anetbbs/messaging/recipients.py, shared with
+    # private QWK mail import: an AKA held by exactly one user, then an
+    # exact username, then a display/real name only when exactly one
+    # account uses it and it isn't a generic role name.
+    from ..messaging.recipients import resolve_local_user
+    return resolve_local_user(to_name, to_address)
 
 
 def resolve_netmail_recipient(to_name, to_address, network):

@@ -12,6 +12,8 @@ from sqlalchemy.exc import OperationalError
 from ..models import (db, EchoArea, EchomailMessage, EchomailReadStatus,
                        EchomailNetwork, EchomailLastRead, BinkPHoldQueue,
                        QWKNodeLastSent, maybe_tag_ansi_subject)
+from ..messaging.access import echomail_privacy_clause, qwk_netmail_visible
+from ..messaging.recipients import is_private_area
 from ..features.access_control import evaluate_access
 
 echomail_bp = Blueprint('echomail', __name__, url_prefix='/echomail')
@@ -40,22 +42,15 @@ def _owns_netmail_echomail(msg, user):
     users."""
     if getattr(user, 'is_admin', False):
         return True
-    # Match only against a non-empty candidate name -- an empty
-    # msg.to_name/from_name must never match an empty uname/dname (a
-    # user with no display_name set), which would otherwise falsely
-    # "own" every netmail with a blank recipient/sender field.
-    names = {n for n in ((user.username or '').lower(),
-                        (getattr(user, 'display_name', None) or '').lower())
-            if n}
-    if names and (msg.to_name or '').lower() in names:
-        return True
-    if names and (msg.from_name or '').lower() in names:
-        return True
-    from ..models import UserAka
-    addrs = {a.address for a in UserAka.query.filter_by(user_id=user.id).all()}
-    if addrs and (msg.to_address in addrs or msg.from_address in addrs):
-        return True
-    return False
+    # Linked account ids only; see anetbbs/messaging/access.py.
+    return qwk_netmail_visible(user, msg)
+
+
+def _privacy():
+    """SQL filter hiding other users' private rows from any
+    EchomailMessage query in this module."""
+    return echomail_privacy_clause(getattr(current_user, 'id', None),
+                                   getattr(current_user, 'is_admin', False))
 
 
 class ComposeForm(FlaskForm):
@@ -128,7 +123,8 @@ def _unread_counts(area_ids):
             )
         ).filter(
             EchomailMessage.area_id.in_(area_ids),
-            EchomailReadStatus.id.is_(None)
+            EchomailReadStatus.id.is_(None),
+            _privacy(),
         ).group_by(EchomailMessage.area_id).all()
     )
 
@@ -215,6 +211,7 @@ def area(area_id):
     per_page = 25
 
     pagination = EchomailMessage.query.filter_by(area_id=area_id)\
+        .filter(_privacy())\
         .order_by(EchomailMessage.created_at.desc())\
         .paginate(page=page, per_page=per_page, error_out=False)
 
@@ -252,7 +249,7 @@ def thread(area_id, message_id):
     # body get rendered regardless of which area it actually belongs to.
     seed = EchomailMessage.query.filter_by(
         id=message_id, area_id=area_id).first_or_404()
-    if echo_area.tag == 'NETMAIL' and not _owns_netmail_echomail(seed, current_user):
+    if is_private_area(echo_area) and not _owns_netmail_echomail(seed, current_user):
         abort(403)
     # Walk up to find root.
     root = seed
@@ -260,6 +257,7 @@ def thread(area_id, message_id):
     while root.reply_id:
         parent = (EchomailMessage.query
                   .filter_by(area_id=area_id, msg_id=root.reply_id)
+                  .filter(_privacy())
                   .first())
         if parent is None or parent.id in seen_ids:
             break
@@ -275,6 +273,7 @@ def thread(area_id, message_id):
             continue
         children = (EchomailMessage.query
                     .filter_by(area_id=area_id, reply_id=node.msg_id)
+                    .filter(_privacy())
                     .order_by(EchomailMessage.created_at)
                     .all())
         for c in children:
@@ -306,7 +305,7 @@ def read(area_id, message_id):
     # NETMAIL-tagged areas carry 1-on-1 private mail (QWK-routed), not
     # broadcast echomail -- see _owns_netmail_echomail()'s own docstring
     # for the real bug this closes.
-    if echo_area.tag == 'NETMAIL' and not _owns_netmail_echomail(msg, current_user):
+    if is_private_area(echo_area) and not _owns_netmail_echomail(msg, current_user):
         abort(403)
 
     # Mark as read + advance lastread pointer
@@ -327,12 +326,14 @@ def read(area_id, message_id):
     # Previous / next navigation
     prev_msg = EchomailMessage.query.filter(
         EchomailMessage.area_id == area_id,
-        EchomailMessage.id < message_id
+        EchomailMessage.id < message_id,
+        _privacy(),
     ).order_by(EchomailMessage.id.desc()).first()
 
     next_msg = EchomailMessage.query.filter(
         EchomailMessage.area_id == area_id,
-        EchomailMessage.id > message_id
+        EchomailMessage.id > message_id,
+        _privacy(),
     ).order_by(EchomailMessage.id.asc()).first()
 
     # For OUR OWN outbound messages, msg.origin_line is stored WITHOUT
@@ -377,7 +378,7 @@ def read_markdown(area_id, message_id):
     echo_area = EchoArea.query.get_or_404(area_id)
     _check_area_access(echo_area)
     msg = EchomailMessage.query.filter_by(id=message_id, area_id=area_id).first_or_404()
-    if echo_area.tag == 'NETMAIL' and not _owns_netmail_echomail(msg, current_user):
+    if is_private_area(echo_area) and not _owns_netmail_echomail(msg, current_user):
         abort(403)
     from .markdown_render import render_markdown
     return jsonify({'html': str(render_markdown(msg.body))})
@@ -455,6 +456,8 @@ def compose(area_id, reply_to_id=None):
     original = None
     if reply_to_id:
         original = EchomailMessage.query.filter_by(id=reply_to_id, area_id=area_id).first_or_404()
+        if is_private_area(echo_area) and not _owns_netmail_echomail(original, current_user):
+            abort(403)
 
     # Build area choices for the select field — filtered by user access level.
     _lvl = getattr(current_user, 'access_level', None)
@@ -535,6 +538,7 @@ def compose(area_id, reply_to_id=None):
             area_id=form.area_id.data,
             network_id=echo_area.network_id,
             from_name=post_name,
+            from_user_id=current_user.id,
             to_name=form.to_name.data,
             subject=maybe_tag_ansi_subject(subject_data, body),
             body=body,
@@ -612,9 +616,9 @@ def netmail_inbox():
             continue
         msgs = (EchomailMessage.query
                 .filter_by(area_id=area.id)
+                .filter(_privacy())
                 .order_by(EchomailMessage.created_at.desc())
-                .limit(200).all())
-        msgs = [m for m in msgs if _owns_netmail_echomail(m, current_user)][:100]
+                .limit(100).all())
         netmail_areas.append({'network': net, 'area': area, 'messages': msgs})
     return render_template('echomail/netmail_inbox.html',
                            netmail_areas=netmail_areas)
@@ -689,6 +693,7 @@ def netmail_compose():
             area_id=area.id,
             network_id=network.id,
             from_name=post_name,
+            from_user_id=current_user.id,
             to_name=form.to_name.data.strip(),
             to_address=(form.to_address.data or '').strip() or None,
             subject=maybe_tag_ansi_subject(subject_data, body),
@@ -729,7 +734,8 @@ def next_unread(area_id):
 
     nxt = (EchomailMessage.query
            .filter(EchomailMessage.area_id == area_id,
-                   EchomailMessage.id > last_id)
+                   EchomailMessage.id > last_id,
+                   _privacy())
            .order_by(EchomailMessage.id)
            .first())
     if nxt is None:
@@ -738,7 +744,8 @@ def next_unread(area_id):
             user_id=current_user.id).all()}
         nxt = (EchomailMessage.query
                .filter(EchomailMessage.area_id == area_id,
-                       ~EchomailMessage.id.in_(read_ids) if read_ids else db.true())
+                       ~EchomailMessage.id.in_(read_ids) if read_ids else db.true(),
+                       _privacy())
                .order_by(EchomailMessage.created_at)
                .first())
     if nxt is None:
@@ -768,7 +775,8 @@ def mark_all_read(area_id):
     }
     msgs = EchomailMessage.query.filter(
         EchomailMessage.area_id == area_id,
-        ~EchomailMessage.id.in_(already_read) if already_read else db.true()
+        ~EchomailMessage.id.in_(already_read) if already_read else db.true(),
+        _privacy(),
     ).all()
 
     for msg in msgs:

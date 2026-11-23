@@ -905,9 +905,82 @@ class EchomailMessage(db.Model):
     # For outbound messages: timestamp of successful send to the network.
     # NULL means "queued, not yet sent". Inbound messages leave this NULL.
     sent_at = db.Column(db.DateTime, index=True)
+    # Local account parties for private (NETMAIL-area) rows. from_user_id
+    # is the local author of a message composed here; to_user_id is the
+    # local recipient of an imported one, assigned once by
+    # anetbbs/messaging/recipients.py. NULL means "no local party".
+    # owner_resolved marks rows whose parties have been assigned, so the
+    # assignment runs exactly once per row. See anetbbs/messaging/access.py.
+    from_user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                             nullable=True, index=True)
+    to_user_id = db.Column(db.Integer, db.ForeignKey('users.id'),
+                           nullable=True, index=True)
+    owner_resolved = db.Column(db.Boolean, nullable=True)
 
     def __repr__(self):
         return f'<EchomailMessage {self.subject}>'
+
+
+class PrivateOwnershipReview(db.Model):
+    """A private message whose local owner needs a sysop decision.
+
+    Written by the one-time upgrade pass (a link it would not make on its
+    own) and by account deletion (a link it removed). The message stays
+    visible to admins only until a sysop assigns it from Admin ->
+    Echomail -> Private message ownership. Holds names and ids only,
+    never message text. user columns are plain integers (no FK) so the
+    generic account purge never deletes these rows; account deletion
+    clears suggested_user_id itself.
+    """
+    __tablename__ = 'private_ownership_reviews'
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_kind = db.Column(db.String(10), nullable=False)    # 'qwk' | 'netmail'
+    message_id = db.Column(db.Integer, nullable=False, index=True)
+    party = db.Column(db.String(4), nullable=False)             # 'to' | 'from'
+    reason = db.Column(db.String(30), nullable=False)
+    suggested_user_id = db.Column(db.Integer, nullable=True, index=True)
+    previous_user_id = db.Column(db.Integer, nullable=True)
+    status = db.Column(db.String(10), nullable=False, default='pending', index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    resolved_at = db.Column(db.DateTime)
+    resolved_by = db.Column(db.String(80))
+
+
+def _assign_private_echomail_parties(session, flush_context, instances):
+    """Give every new NETMAIL-area row its local parties before it is
+    written, whichever import or compose path created it."""
+    pending = [o for o in session.new
+               if isinstance(o, (EchomailMessage, NetmailMessage))
+               and o.owner_resolved is None]
+    if not pending:
+        return
+    from .messaging.recipients import assign_private_parties
+    with session.no_autoflush:
+        for msg in pending:
+            try:
+                assign_private_parties(session, msg)
+            except Exception:
+                # Never block an import or compose. The row stays
+                # unassigned (visible to admins only) and the startup
+                # pass in web_app._lightweight_migrate() assigns it.
+                import logging
+                logging.getLogger(__name__).exception(
+                    'Could not assign private message parties')
+
+
+from sqlalchemy.orm import Session as _OrmSession  # noqa: E402
+event.listen(_OrmSession, 'before_flush', _assign_private_echomail_parties)
+
+
+@event.listens_for(User, 'before_delete')
+def _detach_private_messages_on_user_delete(mapper, connection, target):
+    """Safety net for ORM deletes of an account: unlink its private
+    messages first (they stay, admin-only, queued for review) so a later
+    account that reuses the id can never inherit them. Every explicit
+    deletion path also calls detach_user_from_messages() itself."""
+    from .messaging.recipients import detach_user_from_messages
+    detach_user_from_messages(connection, target.id)
 
 
 class EchomailReadStatus(db.Model):
@@ -1250,6 +1323,9 @@ class NetmailMessage(db.Model):
                            index=True)
     from_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
     to_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+    # Set once the local parties have been assigned (at insert, or by the
+    # one-time upgrade pass for older rows); see messaging/recipients.py.
+    owner_resolved = db.Column(db.Boolean, nullable=True)
 
     from_address = db.Column(db.String(60), index=True)   # FTN addr of sender
     to_address = db.Column(db.String(60), index=True)     # FTN addr of recipient

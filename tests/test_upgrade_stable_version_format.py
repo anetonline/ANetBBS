@@ -58,9 +58,16 @@ class VersionParsingTests(unittest.TestCase):
 
     def test_garbage_still_rejected(self):
         from anetbbs.web.upgrades import _parse_version
-        for bad in ('v1.0', 'v1.0c2.5', '1.0.0', 'v1.0.0.1', '', None,
-                   'v1.0.0; rm -rf /'):
+        for bad in ('v1.0', 'v1.0c2.5', 'vv1.0.0', 'v1.0.0.1', '', None,
+                   'v1.0.0; rm -rf /', '1.0.0; rm -rf /'):
             self.assertIsNone(_parse_version(bad), f'{bad!r} should not parse')
+
+    def test_leading_v_is_optional(self):
+        # VERSION files have been written both ways (v1.1.72 shipped
+        # "1.1.72"); both must compare as the same release.
+        from anetbbs.web.upgrades import _parse_version
+        self.assertEqual(_parse_version('1.0.0'), _parse_version('v1.0.0'))
+        self.assertIsNotNone(_parse_version('1.1.72'))
 
     def test_stable_release_always_newer_than_any_beta_of_same_minor(self):
         from anetbbs.web.upgrades import _version_newer

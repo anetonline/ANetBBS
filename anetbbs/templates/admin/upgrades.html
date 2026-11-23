@@ -93,13 +93,13 @@
             <div class="upg-version {% if newer %}upg-newer{% else %}upg-current{% endif %}">
               {{ upstream.version }}
               {% if newer %}<span class="badge bg-success ms-2">newer</span>
-              {% elif upstream.version == current %}<span class="badge bg-secondary ms-2">same</span>
+              {% elif same %}<span class="badge bg-secondary ms-2">same</span>
               {% else %}<span class="badge bg-secondary ms-2">older</span>{% endif %}
             </div>
             <div class="upg-meta mt-2">
               {{ (upstream.size / 1024 / 1024) | round(1) }} MB &middot;
               published {{ upstream.published_at|eastern('%Y-%m-%d %H:%M %Z') }}<br>
-              sha256 <code>{{ upstream.sha256[:16] }}…</code>
+              {% if upstream.sha256 %}sha256 <code>{{ upstream.sha256[:16] }}…</code>{% endif %}
             </div>
           {% else %}
             <div class="text-muted">No data — click "Re-check".</div>

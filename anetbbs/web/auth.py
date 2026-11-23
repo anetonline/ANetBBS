@@ -507,6 +507,13 @@ class RegisterForm(AuthForm):
             db.func.lower(User.username) == field.data.lower()
         ).first():
             raise ValidationError(_t('validation.username_taken', 'Username already taken. Please choose a different one.'))
+        # A new username can't match another account's display or real
+        # name either (both are used to deliver network mail).
+        # Generic role names (see RESERVED_NAMES) are allowed only for the
+        # very first account, which becomes the sysop.
+        from ..messaging.recipients import name_conflict
+        if name_conflict(field.data, None) and User.query.first() is not None:
+            raise ValidationError(_t('validation.username_taken', 'Username already taken. Please choose a different one.'))
 
     def validate_email(self, field):
         if User.query.filter(

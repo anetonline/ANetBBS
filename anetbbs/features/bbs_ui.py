@@ -454,8 +454,11 @@ class BBSMenuUI:
                                  EchoArea.min_access_level <= _user_level)
             echo_tags = {a.id: a.tag for a in _eq.all()}
             if echo_tags:
+                from ..messaging.access import echomail_privacy_clause
                 ematches = (EchomailMessage.query
                            .filter(EchomailMessage.area_id.in_(echo_tags.keys()))
+                           .filter(echomail_privacy_clause(
+                               (self.session.user or {}).get('id'), _is_admin))
                            .filter(db.or_(EchomailMessage.subject.ilike(like),
                                          EchomailMessage.body.ilike(like)))
                            .order_by(EchomailMessage.created_at.desc())
@@ -1744,11 +1747,14 @@ class BBSMenuUI:
                 )
             areas = _eq.order_by(EchoArea.category, EchoArea.order,
                                   EchoArea.name).all()
+            from ..messaging.access import echomail_privacy_clause
+            _privacy = echomail_privacy_clause(
+                (self.session.user or {}).get('id'), bool(is_admin))
             a_list = []
             for area in areas:
                 cat = area.category or 'General'
                 msg_count = EchomailMessage.query.filter_by(
-                    area_id=area.id).count()
+                    area_id=area.id).filter(_privacy).count()
                 a_list.append((area.id, area.tag, area.name, msg_count, cat))
 
         if not a_list:
@@ -2179,8 +2185,12 @@ class BBSMenuUI:
         from .ansi_ui import banner, FG, RESET, BOLD, ui_width
 
         with _app().app_context():
+            from ..messaging.access import echomail_privacy_clause
+            _me = self.session.user or {}
             msgs = (EchomailMessage.query
                     .filter_by(area_id=area_id)
+                    .filter(echomail_privacy_clause(
+                        _me.get('id'), bool(_me.get('is_admin'))))
                     .order_by(EchomailMessage.created_at.desc())
                     .limit(300).all())
             m_list = [(m.id, m.subject, m.from_name, m.to_name,
@@ -5332,6 +5342,7 @@ async def _compose_echomail(self):
             area_id=area_id,
             network_id=network_id,
             from_name=post_name[:100],
+            from_user_id=(self.session.user or {}).get('id'),
             from_address=our_addr,
             to_name=to_name[:100],
             subject=maybe_tag_ansi_subject(subject, body)[:200],
@@ -5429,10 +5440,17 @@ async def _edit_profile_field(self, kind, attr, label):
         new = (await self.session.read_line(
             f"\r\n{label} [{current[:40]}]: ") or '').strip()
         if new:
+            from anetbbs.messaging.recipients import identity_name_error
             with _app().app_context():
                 u = User.query.get(self.session.user['id'])
-                setattr(u, attr, new[:_maxlen.get(attr, 255)])
-                db.session.commit()
+                value = new[:_maxlen.get(attr, 255)]
+                error = identity_name_error(u, attr, value)
+                if error is None:
+                    setattr(u, attr, value)
+                    db.session.commit()
+            if error:
+                await self.session.write(f"\r\n{FG['red']}{error}{RESET}\r\n")
+                await self.session.read_line("Press Enter...")
 
     elif kind == 'bool':
         picked, value = await self._pick_choice(label, [('Yes', True), ('No', False)])
@@ -6178,6 +6196,11 @@ async def _sysop_edit_user(self, uid):
                     confirm = await self.session.read_line(
                         f"\r\n{FG['red']}Type DELETE to confirm: {RESET}")
                     if confirm == 'DELETE':
+                        # Unlink private messages first (kept for sysop
+                        # review) so a reused id can't inherit them.
+                        from anetbbs.messaging.recipients import \
+                            detach_user_from_messages
+                        detach_user_from_messages(db.session.connection(), u.id)
                         db.session.delete(u)
                         db.session.commit()
                         await self.session.write(f"\r\n{FG['red']}User deleted.{RESET}\r\n")

@@ -82,14 +82,15 @@ class EchomailNetmailAccessControlTests(unittest.TestCase):
             sess['_fresh'] = True
         return client
 
-    def _make_msg(self, to_name, from_name, subject, to_address='', from_address=''):
+    def _make_msg(self, to_name, from_name, subject, to_address='', from_address='',
+                  direction='inbound'):
         from anetbbs.models import db, EchomailMessage
         with self.app.app_context():
             msg = EchomailMessage(
                 area_id=self.area_id, network_id=self.net_id,
                 from_name=from_name, from_address=from_address,
                 to_name=to_name, to_address=to_address,
-                subject=subject, body='x', direction='inbound')
+                subject=subject, body='x', direction=direction)
             db.session.add(msg)
             db.session.commit()
             return msg.id
@@ -112,8 +113,10 @@ class EchomailNetmailAccessControlTests(unittest.TestCase):
         self.assertIn(b'For Alice specifically', resp.data)
 
     def test_regular_user_sees_netmail_they_sent(self):
+        # web/echomail.py netmail_compose() stores the sender's copy with
+        # direction='netmail'.
         self._make_msg(to_name='SomePeer', from_name='alicenmtest',
-                       subject='Alice sent this out')
+                       subject='Alice sent this out', direction='netmail')
         client = self._client_as(self.alice_id)
         resp = client.get('/echomail/netmail')
         self.assertIn(b'Alice sent this out', resp.data)

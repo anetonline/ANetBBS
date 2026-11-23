@@ -269,8 +269,12 @@ def index():
                                                       SysopBroadcast.expires_at > datetime.utcnow()))
                                        .order_by(SysopBroadcast.created_at.desc())
                                        .limit(3).all()), [])
+    from ..messaging.access import echomail_privacy_clause
+    _privacy = echomail_privacy_clause(
+        getattr(current_user, 'id', None) if current_user.is_authenticated else None,
+        getattr(current_user, 'is_admin', False))
     latest_echomail = _safe(lambda: [
-        m for m in EchomailMessage.query
+        m for m in EchomailMessage.query.filter(_privacy)
         .order_by(EchomailMessage.created_at.desc()).limit(50).all()
         if m.area and evaluate_access(
             current_user, m.area.min_access_level,
@@ -569,6 +573,10 @@ def search():
                    .filter((EchomailMessage.subject.ilike(like)) |
                            (EchomailMessage.body.ilike(like)) |
                            (EchomailMessage.from_name.ilike(like))))
+            from ..messaging.access import echomail_privacy_clause
+            qry = qry.filter(echomail_privacy_clause(
+                current_user.id if current_user.is_authenticated else None,
+                getattr(current_user, 'is_admin', False)))
             if df is not None:
                 qry = qry.filter(EchomailMessage.created_at >= df)
             if dt_ is not None:

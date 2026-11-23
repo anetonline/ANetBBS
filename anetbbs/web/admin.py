@@ -43,9 +43,17 @@ def _user_delete_blocked_message(username):
             'Ban/Deactivate keeps the history and disables the account.')
 
 
+def _detach_messages(user_id):
+    """Unlink the account from private messages first (kept for review;
+    see messaging/recipients.detach_user_from_messages)."""
+    from ..messaging.recipients import detach_user_from_messages
+    return detach_user_from_messages(db.session.connection(), user_id)
+
+
 def _try_delete_user(user):
     """Delete only accounts with no dependent history; never leak an SQL 500."""
     try:
+        _detach_messages(user.id)
         db.session.delete(user)
         db.session.commit()
         return True
@@ -55,7 +63,10 @@ def _try_delete_user(user):
 
 
 def _user_fk_columns(conn):
-    """Find every schema column with an FK to users.id."""
+    """Find every schema column with an FK to users.id, except the
+    message-party columns that deletion unlinks instead of deleting
+    (fresh installs declare those FKs, upgraded ones don't)."""
+    from ..messaging.recipients import PRESERVED_USER_REFS
     inspector = sa.inspect(conn)
     refs = []
     for table_name in inspector.get_table_names():
@@ -67,7 +78,8 @@ def _user_fk_columns(conn):
             for local_col, remote_col in zip(
                     fk.get('constrained_columns') or [],
                     fk.get('referred_columns') or []):
-                if remote_col == 'id':
+                if remote_col == 'id' and \
+                        (table_name, local_col) not in PRESERVED_USER_REFS:
                     refs.append((table_name, local_col))
     return sorted(set(refs))
 
@@ -100,6 +112,7 @@ def _purge_user_and_related_rows(user_id):
     metadata = sa.MetaData()
     deleted = 0
     try:
+        _detach_messages(user_id)
         for table_name, column_name in refs:
             table = sa.Table(table_name, metadata, autoload_with=conn)
             result = conn.execute(sa.delete(table).where(
@@ -732,6 +745,7 @@ def bulk_users():
         blocked = []
         for user in users:
             try:
+                _detach_messages(user.id)
                 db.session.delete(user)
                 db.session.commit()
                 deleted += 1

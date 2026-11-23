@@ -19,6 +19,8 @@ from flask_login import login_required, current_user
 from ..models import (db, NetmailMessage, EchomailNetwork, UserAka,
                       maybe_tag_ansi_subject)
 from ..echomail.kludges import make_msgid
+from ..messaging.access import (netmail_inbound_owner_clause,
+                                netmail_outbound_owner_clause)
 from ..echomail.routing import (parse_address, find_network_for_address,
                                 find_aka_for_network)
 
@@ -33,26 +35,19 @@ def _is_telegram(m):
 @telegram_bp.route('/')
 @login_required
 def index():
-    """Inbox of telegrams sent TO this user."""
-    addrs = []
-    for net in EchomailNetwork.query.filter_by(is_active=True).all():
-        if net.our_address:
-            addrs.append(net.our_address)
-    addrs.extend(a.address for a in UserAka.query
-                 .filter_by(user_id=current_user.id).all())
+    """Inbox of telegrams sent TO this user.
 
+    Same ownership rules as the netmail inbox (anetbbs/messaging/
+    access.py). The BBS's own node address is only an admin catch-all;
+    it used to be added for every user here, which listed every
+    telegram addressed to the node.
+    """
     q = NetmailMessage.query.filter(
         NetmailMessage.subject.ilike('TELEGRAM:%'),
         NetmailMessage.deleted_by_recipient.is_(False),
+        NetmailMessage.direction == 'inbound',
+        netmail_inbound_owner_clause(current_user),
     )
-    name_clauses = [
-        NetmailMessage.to_user_id == current_user.id,
-        NetmailMessage.to_name.ilike(current_user.username),
-    ]
-    if addrs:
-        name_clauses.append(NetmailMessage.to_address.in_(addrs))
-    q = q.filter(NetmailMessage.direction == 'inbound') \
-         .filter(db.or_(*name_clauses))
     msgs = q.order_by(NetmailMessage.created_at.desc()).limit(100).all()
     return render_template('telegram/index.html', messages=msgs, folder='inbox')
 
@@ -60,17 +55,12 @@ def index():
 @telegram_bp.route('/sent')
 @login_required
 def sent():
-    addrs = [a.address for a in UserAka.query
-             .filter_by(user_id=current_user.id).all()]
     q = NetmailMessage.query.filter(
         NetmailMessage.direction == 'outbound',
         NetmailMessage.subject.ilike('TELEGRAM:%'),
         NetmailMessage.deleted_by_sender.is_(False),
+        netmail_outbound_owner_clause(current_user),
     )
-    name_clauses = [NetmailMessage.from_user_id == current_user.id]
-    if addrs:
-        name_clauses.append(NetmailMessage.from_address.in_(addrs))
-    q = q.filter(db.or_(*name_clauses))
     msgs = q.order_by(NetmailMessage.created_at.desc()).limit(100).all()
     return render_template('telegram/index.html', messages=msgs, folder='sent')
 

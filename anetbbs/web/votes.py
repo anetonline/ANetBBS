@@ -45,6 +45,11 @@ def _can_vote_on(msg_type, msg_id):
         if msg is None:
             return False
         from ..features.access_control import evaluate_access
+        from ..messaging.access import echomail_private_visible
+        if not echomail_private_visible(
+                current_user.id if current_user.is_authenticated else None,
+                getattr(current_user, 'is_admin', False), msg):
+            return False
         return evaluate_access(current_user, msg.area.min_access_level,
                                is_sysop_only=msg.area.is_sysop_only)
     if msg_type == 'netmail':

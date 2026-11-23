@@ -1083,6 +1083,7 @@ def unclaimed_netmail_assign(nm_id):
         return redirect(url_for('echomail_admin.unclaimed_netmail'))
 
     nm.to_user_id = user.id
+    _resolve_reviews('netmail', nm.id, 'to', 'assigned')
     db.session.commit()
 
     try:
@@ -1096,6 +1097,135 @@ def unclaimed_netmail_assign(nm_id):
 
     flash(f'Assigned to {user.username}.', 'success')
     return redirect(url_for('echomail_admin.unclaimed_netmail'))
+
+
+# ---------------------------------------------- private message ownership
+
+_OWNERSHIP_REASONS = {
+    'inferred_name': 'Matched only by a display or real name',
+    'inferred_link': 'Earlier link not confirmed by username or address',
+    'ambiguous': 'Name used by more than one account',
+    'reserved': 'Addressed to a role name',
+    'account_newer': 'Matching account was created after the message',
+    'stale_link': 'Linked account no longer exists or is newer',
+    'account_deleted': 'Linked account was deleted',
+}
+
+
+def _ownership_target(kind, message_id):
+    """The message a review row points at, if it still exists and is a
+    private message: a NETMAIL-area QWK row or an FTN netmail."""
+    from ..models import NetmailMessage
+    from ..messaging.recipients import is_private_area
+    if kind == 'netmail':
+        return NetmailMessage.query.get(message_id)
+    if kind == 'qwk':
+        m = EchomailMessage.query.get(message_id)
+        if m is not None and is_private_area(m.area):
+            return m
+    return None
+
+
+def _resolve_reviews(kind, message_id, party, status):
+    from datetime import datetime
+    from ..models import PrivateOwnershipReview
+    for r in PrivateOwnershipReview.query.filter_by(
+            message_kind=kind, message_id=message_id, party=party,
+            status='pending').all():
+        r.status = status
+        r.resolved_at = datetime.utcnow()
+        r.resolved_by = current_user.username
+
+
+@echomail_admin_bp.route('/private_ownership')
+@login_required
+@_admin_required
+def private_ownership():
+    """Sysop review queue for private messages whose local owner the
+    upgrade pass or an account deletion left unset. Lists names, dates
+    and reasons only; open a message to read it."""
+    from ..models import PrivateOwnershipReview, User
+    reviews = (PrivateOwnershipReview.query.filter_by(status='pending')
+               .order_by(PrivateOwnershipReview.id).limit(300).all())
+    from ..messaging.recipients import _stored_at
+    rows = []
+    for r in reviews:
+        m = _ownership_target(r.message_kind, r.message_id)
+        # Pre-fill only the account that was previously linked, and only
+        # if it still exists and predates the message (a deleted id that
+        # a newer account has reused is never offered). A name match is
+        # shown as information, never pre-filled.
+        prefill = None
+        if r.reason in ('inferred_link', 'account_deleted') and r.previous_user_id \
+                and m is not None:
+            prev = User.query.get(r.previous_user_id)
+            stored = _stored_at(m)
+            if prev is not None and prev.created_at and stored \
+                    and prev.created_at <= stored:
+                prefill = prev
+        holder = None
+        if r.reason in ('inferred_name', 'account_newer', 'reserved') \
+                and r.suggested_user_id:
+            holder = User.query.get(r.suggested_user_id)
+        rows.append({'review': r, 'msg': m,
+                     'reason': _OWNERSHIP_REASONS.get(r.reason, r.reason),
+                     'prefill': prefill, 'holder': holder})
+    pending = PrivateOwnershipReview.query.filter_by(status='pending').count()
+    return render_template('echomail/admin/private_ownership.html',
+                           rows=rows, pending=pending)
+
+
+@echomail_admin_bp.route('/private_ownership/<kind>/<int:message_id>/<party>',
+                         methods=['POST'])
+@login_required
+@_admin_required
+def private_ownership_set(kind, message_id, party):
+    """Assign, change or clear the local owner of one private message.
+
+    Also usable for any private QWK or FTN netmail message by id, not
+    only queued ones. The user is picked by exact username. Clearing
+    leaves the message visible to admins only."""
+    from ..models import User
+    if kind not in ('qwk', 'netmail') or party not in ('to', 'from'):
+        abort(404)
+    m = _ownership_target(kind, message_id)
+    if m is None:
+        abort(404)
+    action = request.form.get('action')
+    if action == 'dismiss':
+        _resolve_reviews(kind, message_id, party, 'dismissed')
+        db.session.commit()
+        flash('Left as admin-only.', 'info')
+        return redirect(url_for('echomail_admin.private_ownership'))
+    if action in ('clear', 'assign') and request.form.get('confirm') != 'yes':
+        flash('Tick the confirmation box to change who owns this message.', 'danger')
+        return redirect(url_for('echomail_admin.private_ownership'))
+    if action == 'clear':
+        setattr(m, f'{party}_user_id', None)
+        _resolve_reviews(kind, message_id, party, 'cleared')
+        db.session.commit()
+        flash('Owner cleared; the message is admin-only.', 'success')
+        return redirect(url_for('echomail_admin.private_ownership'))
+    if action != 'assign':
+        abort(400)
+    username = (request.form.get('username') or '').strip()
+    user = (User.query.filter(db.func.lower(User.username) == username.lower()).first()
+            if username else None)
+    if user is None:
+        flash('No account with that exact username.', 'danger')
+        return redirect(url_for('echomail_admin.private_ownership'))
+    setattr(m, f'{party}_user_id', user.id)
+    m.owner_resolved = True
+    _resolve_reviews(kind, message_id, party, 'assigned')
+    db.session.commit()
+    try:
+        from ..core.activity_log import web_log_activity
+        web_log_activity(current_user.id, 'private_owner_set',
+                         details=f'{kind} #{message_id} {party} -> {user.username}')
+    except Exception:
+        db.session.rollback()
+    flash(f'Assigned to {user.username}.', 'success')
+    return redirect(url_for('echomail_admin.private_ownership'))
 
 
 @echomail_admin_bp.route('/unclaimed_netmail/clear_all', methods=['POST'])

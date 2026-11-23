@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Private Message Ownership — {{ config.BBS_NAME }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <h2 class="mb-1"><i class="bi bi-person-lock"></i> Private Message Ownership</h2>
+            <p class="text-muted mb-0">
+                Private messages with no local owner set, because the owner
+                couldn't be confirmed or the linked account was deleted. Until
+                you assign one, only admins can see it. Open a message to
+                check it before assigning. {{ pending }} pending.
+                Messages kept here after an account was deleted still hold that
+                person's mail: if they asked for their data to be erased,
+                remove those messages too (see the "Sysop daily ops" guide for
+                how).
+            </p>
+        </div>
+        <a href="{{ url_for('echomail_admin.dashboard') }}" class="btn btn-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Echomail Dashboard
+        </a>
+    </div>
+
+    {% if not rows %}
+        <div class="alert alert-success">Nothing waiting for review.</div>
+    {% else %}
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Message</th>
+                    <th>Party</th>
+                    <th>Name on message</th>
+                    <th>Why it's here</th>
+                    <th>Account information</th>
+                    <th class="text-end">Decision</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                {% set r = row.review %}
+                {% set m = row.msg %}
+                <tr>
+                    <td><small>
+                        {% if m is none %}
+                            {{ r.message_kind }} #{{ r.message_id }} (deleted)
+                        {% elif r.message_kind == 'netmail' %}
+                            <a href="{{ url_for('netmail.read', msg_id=m.id) }}">Netmail #{{ m.id }}</a>
+                        {% else %}
+                            <a href="{{ url_for('echomail.read', area_id=m.area_id, message_id=m.id) }}">QWK #{{ m.id }}</a>
+                        {% endif %}
+                        {% if m is not none %}<br>{{ (m.created_at)|eastern('%Y-%m-%d', '') }}{% endif %}
+                    </small></td>
+                    <td>{{ 'Recipient' if r.party == 'to' else 'Sender' }}</td>
+                    <td><small>{% if m is not none %}{{ m.to_name if r.party == 'to' else m.from_name }}{% endif %}</small></td>
+                    <td><small>{{ row.reason }}</small></td>
+                    <td><small>
+                        {% if row.prefill %}Previously linked account: <b>{{ row.prefill.username }}</b>
+                        {% elif row.holder %}Current holder of this name: {{ row.holder.username }}
+                        <br><span class="text-muted">Not necessarily the recipient. Check the message first.</span>
+                        {% else %}—{% endif %}
+                    </small></td>
+                    <td class="text-end">
+                        {% if m is not none %}
+                        <form method="post" class="d-flex gap-1 justify-content-end flex-wrap"
+                              action="{{ url_for('echomail_admin.private_ownership_set', kind=r.message_kind, message_id=r.message_id, party=r.party) }}">
+                            {% if csrf_token is defined %}
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            {% endif %}
+                            <input type="text" name="username" class="form-control form-control-sm" style="width:10rem"
+                                   id="own-{{ r.id }}-user" placeholder="Exact username" aria-label="Username to assign"
+                                   value="{{ row.prefill.username if row.prefill else '' }}">
+                            <div class="form-check form-check-inline small mb-0">
+                                <input class="form-check-input" type="checkbox" name="confirm" value="yes"
+                                       id="own-{{ r.id }}-confirm">
+                                <label class="form-check-label" for="own-{{ r.id }}-confirm">I checked the message; confirm owner</label>
+                            </div>
+                            <button class="btn btn-success btn-sm" name="action" value="assign">Assign</button>
+                            <button class="btn btn-outline-secondary btn-sm" name="action" value="dismiss">Keep admin-only</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

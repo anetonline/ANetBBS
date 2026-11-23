@@ -22,6 +22,9 @@ from ..features.rate_limit import rate_limit, _user_or_ip
 
 from ..models import (db, NetmailMessage, EchomailNetwork, UserAka,
                       maybe_tag_ansi_subject)
+from ..messaging.access import (netmail_inbound_owner_clause,
+                                netmail_outbound_owner_clause,
+                                netmail_visible, user_netmail_addresses)
 from ..echomail.kludges import make_msgid
 from ..echomail.routing import (parse_address, find_network_for_address,
                                 find_aka_for_network)
@@ -71,41 +74,24 @@ def _user_addresses(user):
     admin-only "Unclaimed Netmail" review queue
     (/admin/echomail/unclaimed_netmail) instead of leaking to everyone.
     """
-    addrs = [a.address for a in (UserAka.query
-                                  .filter_by(user_id=user.id).all())]
-    if getattr(user, 'is_admin', False):
-        for net in EchomailNetwork.query.filter_by(is_active=True).all():
-            if net.our_address and net.our_address not in addrs:
-                addrs.append(net.our_address)
-    return addrs
+    return user_netmail_addresses(user)
 
 
 @netmail_bp.route('/')
 @login_required
 def inbox():
-    """Show netmail addressed to this user (by name or any of their AKAs).
+    """Show netmail addressed to this user.
 
-    We match on either:
-      - to_user_id == current_user.id  (an internal pointer set when the
-        netmail came in to a known local user), or
-      - to_name matches the username (case-insensitive — common for
-        first-time arrivals before we link them to an account)
+    Ownership rules live in anetbbs/messaging/access.py (shared with
+    read/reply/delete, telegrams and bookmarks): the linked recipient
+    account, or one of the user's own addresses.
     """
-    addrs = _user_addresses(current_user)
     q = NetmailMessage.query.filter(
         NetmailMessage.direction == 'inbound',
         NetmailMessage.deleted_by_recipient.is_(False),
         _not_robot_netmail(NetmailMessage.to_name),
+        netmail_inbound_owner_clause(current_user),
     )
-    name_clauses = [
-        NetmailMessage.to_user_id == current_user.id,
-        NetmailMessage.to_name.ilike(current_user.username),
-    ]
-    if current_user.display_name:
-        name_clauses.append(NetmailMessage.to_name.ilike(current_user.display_name))
-    if addrs:
-        name_clauses.append(NetmailMessage.to_address.in_(addrs))
-    q = q.filter(db.or_(*name_clauses))
     msgs = q.order_by(NetmailMessage.created_at.desc()).limit(200).all()
     return render_template('netmail/list.html',
                            messages=msgs, folder='inbox')
@@ -114,16 +100,12 @@ def inbox():
 @netmail_bp.route('/drafts')
 @login_required
 def drafts():
-    addrs = _user_addresses(current_user)
     q = NetmailMessage.query.filter(
         NetmailMessage.direction == 'outbound',
         NetmailMessage.status == 'draft',
         NetmailMessage.deleted_by_sender.is_(False),
+        netmail_outbound_owner_clause(current_user),
     )
-    name_clauses = [NetmailMessage.from_user_id == current_user.id]
-    if addrs:
-        name_clauses.append(NetmailMessage.from_address.in_(addrs))
-    q = q.filter(db.or_(*name_clauses))
     # inbox()/sent() both cap at .limit(200) -- this one didn't, found in
     # a full echomail-subsystem audit. Scoped to the current user only so
     # low practical risk, but inconsistent with its siblings.
@@ -134,19 +116,12 @@ def drafts():
 @netmail_bp.route('/sent')
 @login_required
 def sent():
-    addrs = _user_addresses(current_user)
     q = NetmailMessage.query.filter(
         NetmailMessage.direction == 'outbound',
         NetmailMessage.deleted_by_sender.is_(False),
         _not_robot_netmail(NetmailMessage.from_name),
+        netmail_outbound_owner_clause(current_user),
     )
-    name_clauses = [
-        NetmailMessage.from_user_id == current_user.id,
-        NetmailMessage.from_name.ilike(current_user.username),
-    ]
-    if addrs:
-        name_clauses.append(NetmailMessage.from_address.in_(addrs))
-    q = q.filter(db.or_(*name_clauses))
     msgs = q.order_by(NetmailMessage.created_at.desc()).limit(200).all()
     return render_template('netmail/list.html',
                            messages=msgs, folder='sent')
@@ -540,19 +515,10 @@ def delete(msg_id):
 
 
 def _user_owns(m):
-    """Authorization helper — is `m` visible to the current user?
+    """Authorization helper -- is `m` visible to the current user?
 
-    Either they're the linked sender/recipient (DB-side foreign key), or the
-    name field matches their username, or the address matches one of their
-    AKAs / a network's our_address."""
-    if m.from_user_id == current_user.id or m.to_user_id == current_user.id:
-        return True
-    addrs = set(_user_addresses(current_user))
-    if m.to_address in addrs or m.from_address in addrs:
-        return True
-    uname = (current_user.username or '').lower()
-    if (m.to_name or '').lower() == uname:
-        return True
-    if (m.from_name or '').lower() == uname:
-        return True
-    return False
+    Direction-aware and exact; see anetbbs/messaging/access.py. Inbound
+    mail belongs to its recipient, outbound mail to its sender. The
+    other party's name or address never grants access.
+    """
+    return netmail_visible(current_user, m)

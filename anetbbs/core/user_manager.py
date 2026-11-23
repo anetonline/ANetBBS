@@ -245,6 +245,13 @@ class UserManager:
                 select(User).where(func.lower(User.username) == username.lower())
             ).scalar_one_or_none() is not None:
                 return 'username_taken'
+            # Same rule as the web signup form: a new username can't be
+            # another account's display/real name, or a generic role
+            # name unless this is the first account.
+            from anetbbs.messaging.recipients import name_conflict
+            if (name_conflict(username, None, session=s)
+                    and s.query(User.id).first() is not None):
+                return 'username_taken'
             if s.execute(
                 select(User).where(func.lower(User.email) == email.lower())
             ).scalar_one_or_none() is not None:

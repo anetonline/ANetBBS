@@ -10,6 +10,7 @@ from flask_wtf import FlaskForm
 from datetime import datetime, timedelta
 
 from ..models import db, User, PrivateMessage
+from ..messaging.access import pm_visible
 from ..core.activity_log import web_log_activity
 from ..features.i18n import translate as _t, FormTranslations
 
@@ -191,7 +192,7 @@ def compose(username=None):
 def read(message_id):
     message = PrivateMessage.query.get_or_404(message_id)
 
-    if message.recipient_id != current_user.id and message.sender_id != current_user.id:
+    if not pm_visible(current_user, message):
         abort(403)
 
     if message.recipient_id == current_user.id and not message.read_at:
@@ -220,7 +221,7 @@ def read_markdown(message_id):
     see echomail.py's read_markdown() for why this moved off the
     always-on render path. Same ownership check as read() above."""
     message = PrivateMessage.query.get_or_404(message_id)
-    if message.recipient_id != current_user.id and message.sender_id != current_user.id:
+    if not pm_visible(current_user, message):
         abort(403)
     from .markdown_render import render_markdown
     return jsonify({'html': str(render_markdown(message.body))})
