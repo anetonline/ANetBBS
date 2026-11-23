@@ -18,7 +18,7 @@ This module exposes:
 """
 import re
 from sqlalchemy import func
-from ..models import EchomailNetwork, User, UserAka
+from ..models import EchomailNetwork, User
 
 
 _ADDR_RE = re.compile(r'^(\d+):(\d+)/(\d+)(?:\.(\d+))?$')
