@@ -128,8 +128,8 @@ class WebMatrixLandingTests(unittest.TestCase):
                 "def render_web_landing(request):\n"
                 "    return 'CUSTOM MOD LANDING PAGE', 200\n"
             )
-            orig_data_dir = cfg_mod.Config.DATA_DIR
-            cfg_mod.Config.DATA_DIR = tmp
+            orig_data_dir = cfg_mod.TestingConfig.DATA_DIR
+            cfg_mod.TestingConfig.DATA_DIR = tmp
             self.app.config['WEB_MATRIX_ENABLED'] = True
             try:
                 resp = self.app.test_client().get('/')
@@ -138,7 +138,7 @@ class WebMatrixLandingTests(unittest.TestCase):
                                  'the stock matrix must not also render '
                                  'once a full mod override exists')
             finally:
-                cfg_mod.Config.DATA_DIR = orig_data_dir
+                cfg_mod.TestingConfig.DATA_DIR = orig_data_dir
 
 
 if __name__ == '__main__':

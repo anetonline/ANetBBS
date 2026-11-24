@@ -132,8 +132,48 @@ def _runtime_snapshot():
     return snap
 
 
+# Runtime path attributes defined on the base Config. TestingConfig already
+# points them at a temp dir; tests that build a "development"/"production"
+# app would otherwise inherit the source-tree defaults.
+_RUNTIME_PATH_KEYS = ('DATA_DIR', 'LOG_FILE', 'DOWNLOADS_DIR', 'FILE_BULLETINS_DIR',
+                      'ANSI_EDITOR_BROWSE_DIRS', 'TDF_FONTS_DIR', 'UPLOADS_DIR',
+                      'AVATARS_DIR', 'NETWORK_JOIN_DIR', 'GAMES_DATA_DIR',
+                      'ECHOMAIL_DATA_DIR')
+
+
+def _redirect_base_config_runtime_paths():
+    import anetbbs.config as cfg_mod
+    saved = {}
+    for key in _RUNTIME_PATH_KEYS:
+        saved[key] = cfg_mod.Config.__dict__.get(key)
+        setattr(cfg_mod.Config, key, getattr(cfg_mod.TestingConfig, key))
+    return saved
+
+
+def _base_config_points_into_repo():
+    import anetbbs.config as cfg_mod
+    try:
+        p = _Path(cfg_mod.Config.DATA_DIR).resolve()
+    except (TypeError, OSError):
+        return False
+    return p == _REPO_ROOT or _REPO_ROOT in p.parents
+
+
 def pytest_sessionstart(session):
     session.config._anetbbs_runtime_snapshot = _runtime_snapshot()
+    _redirect_base_config_runtime_paths()
+
+
+@pytest.fixture(autouse=True)
+def _keep_base_config_runtime_paths_out_of_repo():
+    """Several tests importlib.reload(anetbbs.config), which rebuilds the
+    base Config with source-tree defaults. Re-apply the redirect before
+    and after every test so a reload can't leak into later tests."""
+    if _base_config_points_into_repo():
+        _redirect_base_config_runtime_paths()
+    yield
+    if _base_config_points_into_repo():
+        _redirect_base_config_runtime_paths()
 
 
 def pytest_sessionfinish(session, exitstatus):

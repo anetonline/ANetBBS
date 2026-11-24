@@ -146,8 +146,8 @@ class HomePageWebLandingWiringTests(unittest.TestCase):
         # on an already-built app instance gets silently clobbered right
         # back. Patch the class attribute itself, matching how other
         # tests repoint class-level config (e.g. SQLALCHEMY_DATABASE_URI).
-        self._orig_data_dir = cfg_mod.Config.DATA_DIR
-        cfg_mod.Config.DATA_DIR = self._tmp.name
+        self._orig_data_dir = cfg_mod.TestingConfig.DATA_DIR
+        cfg_mod.TestingConfig.DATA_DIR = self._tmp.name
         self.addCleanup(setattr, cfg_mod.Config, 'DATA_DIR', self._orig_data_dir)
 
     def _write_override(self, code):
