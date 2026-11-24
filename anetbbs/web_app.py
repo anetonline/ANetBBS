@@ -57,6 +57,12 @@ def _handle_default_namespace_connect():
         join_room(str(current_user.id))
 
 
+def _source_tree_root():
+    """Real path of the source checkout this package runs from (L-18)."""
+    return os.path.realpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+
+
 def create_app(config_name=None):
     """Application factory pattern"""
     app = Flask(__name__)
@@ -1821,6 +1827,13 @@ def _create_default_data():
         data_dir = _ca.config.get('DATA_DIR') or '.'
         pw_file = os.path.join(data_dir, 'admin_password.txt')
         try:
+            # A test app must never write into the source tree (audit
+            # L-18): that file may be a developer's real bootstrap
+            # password. Refuse, and create no admin, like any other
+            # unwritable-path case below.
+            _src_root = _source_tree_root()
+            if _ca.testing and os.path.realpath(pw_file).startswith(_src_root + os.sep):
+                raise PermissionError('test app may not write into the source tree')
             os.makedirs(data_dir, exist_ok=True)
             fd = os.open(pw_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, 'w') as f:

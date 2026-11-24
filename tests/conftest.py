@@ -86,3 +86,74 @@ def _restore_testing_db_uri_after_module(_pristine_testing_db_uri):
     yield
     import anetbbs.config as cfg_mod
     cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = _pristine_testing_db_uri
+
+
+# ---------------------------------------------------------------------------
+# Repo runtime-path write guard (audit L-18).
+#
+# The test suite must never write into the source tree's runtime locations
+# (data/, logs/, instance/, bbs.log*). A developer's checkout keeps real
+# files there -- e.g. data/admin_password.txt, the dev database, the dev
+# log -- and a test that falls back to the repo default silently overwrites
+# them. Snapshot (path, mtime, size) for those locations when the session
+# starts, compare when it ends, and fail the run if anything changed.
+# ---------------------------------------------------------------------------
+import os as _os
+from pathlib import Path as _Path
+
+_REPO_ROOT = _Path(__file__).resolve().parent.parent
+_GUARDED_DIRS = ('data', 'logs', 'instance')
+
+
+def _runtime_snapshot():
+    snap = {}
+    for name in _GUARDED_DIRS:
+        root = _REPO_ROOT / name
+        if not root.exists():
+            continue
+        snap[str(root)] = ('dir',)
+        for dirpath, dirnames, filenames in _os.walk(root):
+            dirnames[:] = [d for d in dirnames if d != '__pycache__']
+            for d in dirnames:
+                snap[_os.path.join(dirpath, d)] = ('dir',)
+            for fn in filenames:
+                p = _os.path.join(dirpath, fn)
+                try:
+                    st = _os.lstat(p)
+                except OSError:
+                    continue
+                snap[p] = (st.st_mtime_ns, st.st_size)
+    for p in _REPO_ROOT.glob('bbs.log*'):
+        try:
+            st = _os.lstat(p)
+        except OSError:
+            continue
+        snap[str(p)] = (st.st_mtime_ns, st.st_size)
+    return snap
+
+
+def pytest_sessionstart(session):
+    session.config._anetbbs_runtime_snapshot = _runtime_snapshot()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    before = getattr(session.config, '_anetbbs_runtime_snapshot', None)
+    if before is None:
+        return
+    after = _runtime_snapshot()
+    changed = sorted(p for p in set(before) | set(after)
+                     if before.get(p) != after.get(p))
+    if not changed:
+        return
+    rel = [_os.path.relpath(p, _REPO_ROOT) for p in changed]
+    msg = ('Test run wrote into the source tree runtime paths '
+           '(must use temporary directories instead):\n  '
+           + '\n  '.join(rel[:50])
+           + ('\n  ... and %d more' % (len(rel) - 50) if len(rel) > 50 else ''))
+    reporter = session.config.pluginmanager.get_plugin('terminalreporter')
+    if reporter is not None:
+        reporter.write_sep('!', 'REPO RUNTIME WRITE GUARD')
+        reporter.write_line(msg)
+    else:
+        print(msg)
+    session.exitstatus = 1

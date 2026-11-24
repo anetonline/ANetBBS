@@ -728,6 +728,26 @@ class ProductionConfig(Config):
         #return key
 
 
+def _testing_runtime_dir():
+    """Per-process scratch root for TestingConfig's runtime paths.
+
+    The base Config points DATA_DIR/LOG_FILE (and everything derived from
+    them) at the source tree, which is right for a real install but means
+    a test run would write into a developer's checkout -- e.g. the
+    first-admin bootstrap overwriting data/admin_password.txt. Tests get
+    a throwaway directory instead (ANETBBS_TEST_RUNTIME_DIR overrides)."""
+    import atexit
+    import shutil
+    import tempfile
+    explicit = os.environ.get('ANETBBS_TEST_RUNTIME_DIR')
+    if explicit:
+        os.makedirs(explicit, exist_ok=True)
+        return explicit
+    path = tempfile.mkdtemp(prefix='anetbbs-test-runtime-')
+    atexit.register(shutil.rmtree, path, True)
+    return path
+
+
 class TestingConfig(Config):
     """Testing configuration"""
     DEBUG = True
@@ -735,6 +755,22 @@ class TestingConfig(Config):
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
     WTF_CSRF_ENABLED = False
     PUBLIC_BASE_URL = 'http://localhost'
+
+    # Runtime paths never point into the source tree under test (L-18).
+    _RUNTIME_DIR = _testing_runtime_dir()
+    DATA_DIR = os.path.join(_RUNTIME_DIR, 'data')
+    LOG_FILE = os.path.join(_RUNTIME_DIR, 'bbs.log')
+    DOWNLOADS_DIR = os.path.join(DATA_DIR, 'releases')
+    FILE_BULLETINS_DIR = os.path.join(DATA_DIR, 'text', 'bulletins')
+    ANSI_EDITOR_BROWSE_DIRS = (
+        f"text:{os.path.join(DATA_DIR, 'text')};"
+        f"mods/txt:{os.path.join(DATA_DIR, 'mods', 'txt')}")
+    TDF_FONTS_DIR = os.path.join(DATA_DIR, 'tdf-fonts')
+    UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
+    AVATARS_DIR = os.path.join(DATA_DIR, 'avatars')
+    NETWORK_JOIN_DIR = os.path.join(DATA_DIR, 'network_join')
+    GAMES_DATA_DIR = os.path.join(DATA_DIR, 'games')
+    ECHOMAIL_DATA_DIR = os.path.join(DATA_DIR, 'echomail')
 
 
 # Configuration dictionary
