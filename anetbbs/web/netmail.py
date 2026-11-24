@@ -14,6 +14,7 @@ Routes:
     /netmail/<id>/delete                soft-delete (per-side)
 """
 import datetime
+import re
 from flask import (Blueprint, render_template, request, redirect, url_for,
                    flash, abort, jsonify)
 from flask_login import login_required, current_user
@@ -29,6 +30,9 @@ from ..echomail.kludges import make_msgid
 from ..echomail.routing import (parse_address, find_network_for_address,
                                 find_aka_for_network)
 
+
+# C0 controls + DEL: never valid in FTN header/kludge fields (audit H-2).
+_CTRL_RE = re.compile(r'[\x00-\x1f\x7f]')
 
 netmail_bp = Blueprint('netmail', __name__, url_prefix='/netmail')
 
@@ -207,6 +211,36 @@ def compose(reply_to=None):
         if is_direct_crash_reply:
             to_address = parent.from_address or ''
             to_name = parent.from_name or ''
+
+        # Audit H-2: header fields end up in FTN kludges and packet
+        # headers; no control characters may reach them.
+        if any(_CTRL_RE.search(v) for v in (to_address, to_name, subject, from_aka)):
+            flash('Control characters are not allowed in the address, '
+                  'name or subject fields.', 'danger')
+            from ..models import get_active_taglines
+            return render_template('netmail/compose.html',
+                                   networks=networks, user_akas=user_akas,
+                                   parent=parent,
+                                   form=request.form,
+                                   is_direct_crash_reply=is_direct_crash_reply,
+                                   taglines=get_active_taglines())
+        # Audit H-2: the origin address must be one the sender holds --
+        # one of their own AKAs, or (admins only) an active network's
+        # node address. Anything else would let a user send netmail that
+        # claims to come from another node through our hub link.
+        if from_aka:
+            _allowed_from = {a.address for a in user_akas if a.address}
+            if getattr(current_user, 'is_admin', False):
+                _allowed_from |= {n.our_address for n in networks if n.our_address}
+            if from_aka not in _allowed_from or not parse_address(from_aka):
+                flash('You can only send from one of your own FTN addresses.', 'danger')
+                from ..models import get_active_taglines
+                return render_template('netmail/compose.html',
+                                       networks=networks, user_akas=user_akas,
+                                       parent=parent,
+                                       form=request.form,
+                                       is_direct_crash_reply=is_direct_crash_reply,
+                                       taglines=get_active_taglines()), 400
 
         if not parse_address(to_address):
             flash(f'Invalid FTN address: {to_address!r}', 'danger')

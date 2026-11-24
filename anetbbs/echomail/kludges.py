@@ -118,7 +118,12 @@ def build_message(body, kludges=None, tear=None, origin=None,
     """
     parts = []
     for k in (kludges or []):
-        parts.append(SOH + k.lstrip(SOH))
+        k = k.lstrip(SOH)
+        # A kludge is one line. Any embedded CR/LF/NUL/SOH would start a
+        # new, forged line on the wire (audit H-2) -- drop it entirely.
+        if any(c in k for c in ('\r', '\n', '\x00', SOH)):
+            continue
+        parts.append(SOH + k)
     if parts:
         parts.append('')   # blank line separator before body
     if body:
