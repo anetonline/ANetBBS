@@ -42,6 +42,10 @@ DEF_ENABLE_SSL="n"
 
 # ─── Source directory (where install.sh lives) ─────────────────────────────────
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Root-side helpers shared with the other installer script (audit H-1).
+# shellcheck source=deploy/privileged_helpers.sh
+. "$SOURCE_DIR/deploy/privileged_helpers.sh"
+as_service() { anetbbs_as_service "$SERVICE_USER" "$@"; }
 # Real gap found in a pre-release audit: this used to be a separately
 # hardcoded BBS_VERSION="1.3.7" here (and in update.sh) that never
 # tracked the actual ANetBBS release at all -- drifted from day one,
@@ -1328,8 +1332,8 @@ VENV_DIR="$INSTALL_DIR/venv"
 
 if [[ ! -d "$VENV_DIR" ]]; then
     info "Creating virtual environment..."
-    sudo -u "$SERVICE_USER" "$PYTHON_CMD" -m venv "$VENV_DIR" 2>/dev/null || \
-    "$PYTHON_CMD" -m venv "$VENV_DIR" 2>/dev/null || \
+    # Created and populated as the service user, never as root (audit H-1).
+    as_service "$PYTHON_CMD" -m venv "$VENV_DIR" 2>/dev/null || \
     { fail "Could not create Python virtual environment."; exit 1; }
     ok "Virtual environment created"
 else
@@ -1337,21 +1341,18 @@ else
 fi
 
 info "Upgrading pip..."
-sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --upgrade pip --quiet 2>/dev/null || \
-"$VENV_DIR/bin/pip" install --upgrade pip --quiet 2>/dev/null || true
+as_service "$VENV_DIR/bin/pip" install --upgrade pip --quiet 2>/dev/null || true
 
 info "Installing ANetBBS Python dependencies (this may take a minute)..."
 cd "$INSTALL_DIR"
 PIP_LOG=$(mktemp)
 # --prefer-binary: use pre-built wheels when available (avoids source-compile
 # failures on ARM64 / Pi where Rust/C toolchains may be incomplete).
-if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --prefer-binary -e "$INSTALL_DIR" 2>"$PIP_LOG" || \
-   "$VENV_DIR/bin/pip" install --prefer-binary -e "$INSTALL_DIR" 2>"$PIP_LOG"; then
+if as_service "$VENV_DIR/bin/pip" install --prefer-binary -e "$INSTALL_DIR" 2>"$PIP_LOG"; then
     ok "Python dependencies installed"
     STATUS[python]="ok"
 else
-    if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --prefer-binary "$INSTALL_DIR" 2>"$PIP_LOG" || \
-       "$VENV_DIR/bin/pip" install --prefer-binary "$INSTALL_DIR" 2>"$PIP_LOG"; then
+    if as_service "$VENV_DIR/bin/pip" install --prefer-binary "$INSTALL_DIR" 2>"$PIP_LOG"; then
         ok "Python dependencies installed (non-editable)"
         STATUS[python]="ok"
     else
@@ -1366,7 +1367,7 @@ rm -f "$PIP_LOG"
 # Verify that the package actually imports cleanly. setup.py declares aiohttp
 # as a dependency now, so a successful pip install above already pulled it in.
 info "Verifying package imports..."
-if "$VENV_DIR/bin/python" -c "from anetbbs.main import main; from anetbbs.web_app import create_app; print('OK')" 2>/dev/null; then
+if as_service "$VENV_DIR/bin/python" -c "from anetbbs.main import main; from anetbbs.web_app import create_app; print('OK')" 2>/dev/null; then
     ok "anetbbs package verified (telnet, web entry points OK)"
 else
     fail "anetbbs package failed to import — check logs above for ModuleNotFoundError"
@@ -1388,10 +1389,8 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR"
 # install.sh run never called it at all, so a sysop's very first
 # "anetbbs-monitor" on a brand new install was "command not found"
 # with no clue the tool was sitting right there in the venv.
-if [[ -x "$VENV_DIR/bin/anetbbs-symlinks" ]]; then
-    info "Linking sysop console tools onto PATH..."
-    "$VENV_DIR/bin/anetbbs-symlinks" "$INSTALL_DIR" 2>&1 | while read -r line; do info "  $line"; done
-fi
+info "Linking sysop console tools onto PATH..."
+anetbbs_link_console_scripts "$INSTALL_DIR" || warn "Could not link console tools into /usr/local/bin"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 7: GENERATE CONFIGURATION
@@ -1546,8 +1545,7 @@ SSH_KEY_FILE="$INSTALL_DIR/data/ssh_host_key"
 SSH_KEY_FILE_ED25519="${SSH_KEY_FILE}_ed25519"
 if [[ ! -f "$SSH_KEY_FILE" ]] && [[ "$ENABLE_SSH" == "y" ]]; then
     info "Generating SSH host key..."
-    sudo -u "$SERVICE_USER" ssh-keygen -t rsa -b 2048 -f "$SSH_KEY_FILE" -N "" -q 2>/dev/null || \
-    ssh-keygen -t rsa -b 2048 -f "$SSH_KEY_FILE" -N "" -q 2>/dev/null || true
+    as_service ssh-keygen -t rsa -b 2048 -f "$SSH_KEY_FILE" -N "" -q 2>/dev/null || true
     ok "SSH host key generated"
 fi
 # Second host key, offered alongside the RSA one above (not a
@@ -1555,8 +1553,7 @@ fi
 # working) so modern SSH clients that prefer Ed25519 get it too.
 if [[ ! -f "$SSH_KEY_FILE_ED25519" ]] && [[ "$ENABLE_SSH" == "y" ]]; then
     info "Generating SSH Ed25519 host key..."
-    sudo -u "$SERVICE_USER" ssh-keygen -t ed25519 -f "$SSH_KEY_FILE_ED25519" -N "" -q 2>/dev/null || \
-    ssh-keygen -t ed25519 -f "$SSH_KEY_FILE_ED25519" -N "" -q 2>/dev/null || true
+    as_service ssh-keygen -t ed25519 -f "$SSH_KEY_FILE_ED25519" -N "" -q 2>/dev/null || true
     ok "SSH Ed25519 host key generated"
 fi
 # Always reassert ownership/mode — covers re-runs where the key was
@@ -1632,7 +1629,7 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
         MRC_BRIDGE_PORT="$MRC_BRIDGE_PORT_DEFAULT" \
         MRC_DATA_DIR="$INSTALL_DIR/data/mrc" \
         MRC_CONFIG_FILE="$MRC_CONFIG_FILE" \
-        python3 << 'MRCPYEOF'
+        python3 -I << 'MRCPYEOF'
 import json
 import os
 
@@ -1748,7 +1745,7 @@ cd "$INSTALL_DIR"
 # literal. The heredoc delimiter is now quoted ('ADMINEOF') so bash
 # does zero variable expansion inside it at all, closing the class of
 # bug for good rather than just the specific variables found this time.
-ADMIN_RESULT=$(sudo -u "$SERVICE_USER" \
+ADMIN_RESULT=$(as_service env \
     INSTALL_DIR="$INSTALL_DIR" \
     ADMIN_USER="$ADMIN_USER" \
     ADMIN_PASS="$ADMIN_PASS" \
@@ -1838,12 +1835,10 @@ if [[ $ADMIN_RC -eq 0 ]]; then
         ok "Removed an unused, auto-generated 'admin' fallback account (superseded by $ADMIN_USER)"
 else
     # ★ FIX 5b: If running as service user fails, try as root then fix ownership
-    warn "Retrying admin setup as root..."
-    # Same env-var-passing fix as the primary attempt above -- see its
-    # comment for why. Plain `VAR=value command` (no sudo here, this
-    # branch is already running as root) sets these for just this one
-    # command the same way.
-    ADMIN_RESULT2=$(INSTALL_DIR="$INSTALL_DIR" \
+    warn "Retrying admin setup..."
+    # Still as the service user, never as root (audit H-1): the venv and
+    # the code it imports belong to that user.
+    ADMIN_RESULT2=$(as_service env INSTALL_DIR="$INSTALL_DIR" \
         ADMIN_USER="$ADMIN_USER" \
         ADMIN_PASS="$ADMIN_PASS" \
         DOMAIN="$DOMAIN" \
@@ -2534,15 +2529,20 @@ fi
 # the web auto-update both failed with a bare "no sudo rights"-style
 # error. Mirrors update.sh's own block verbatim (same substitution +
 # visudo -cf validation before install).
+# Root-owned copies of the sudo-granted helpers (audit H-1). sudoers
+# below grants ONLY these paths, never anything under INSTALL_DIR.
+if anetbbs_install_root_wrappers "$SOURCE_DIR" "$SERVICE_USER"; then
+    ok "Privileged helpers installed in $ANETBBS_WRAPPER_DIR_DEFAULT (root-owned)"
+else
+    warn "Privileged helpers not installed -- web upgrade/restore will be unavailable until this is fixed"
+fi
 SUDOERS_SRC="$SOURCE_DIR/deploy/sudoers.anetbbs"
 SUDOERS_DST="/etc/sudoers.d/anetbbs"
 if [[ -f "$SUDOERS_SRC" ]]; then
     info "Installing $SUDOERS_DST from deploy/sudoers.anetbbs (user: $SERVICE_USER)..."
-    UPGRADE_WRAPPER="$INSTALL_DIR/deploy/run_upgrade.sh"
-    RESTORE_WRAPPER="$INSTALL_DIR/deploy/run_restore.sh"
+    # The wrapper paths in the template are fixed root-owned locations
+    # (/usr/local/libexec/anetbbs), never INSTALL_DIR (audit H-1).
     sed -e "s/^__SERVICE_USER__ /$SERVICE_USER /" \
-        -e "s|/opt/anetbbs/deploy/run_upgrade.sh|$UPGRADE_WRAPPER|g" \
-        -e "s|/opt/anetbbs/deploy/run_restore.sh|$RESTORE_WRAPPER|g" \
         "$SUDOERS_SRC" > "$SUDOERS_DST.tmp"
     # Real gap found in a security/performance audit: the plain `sed ...
     # > file` redirection above creates $SUDOERS_DST.tmp at the ambient
@@ -2588,14 +2588,9 @@ fi
 
 # Sentinel so the privileged upgrade wrapper (and any other future root
 # helper) can discover the install root without hardcoding a path.
-cat > /etc/anetbbs.install <<EOF
-# Written by install.sh — used by deploy/run_upgrade.sh to locate the
-# install root when invoked under sudo. Do not edit by hand; rerun
-# install.sh or update.sh to refresh.
-INSTALL_DIR=$INSTALL_DIR
-SERVICE_USER=$SERVICE_USER
-EOF
-chmod 0644 /etc/anetbbs.install
+# Root-owned config the privileged helpers trust (audit H-1).
+anetbbs_write_install_conf "$INSTALL_DIR" "$SERVICE_USER" \
+    || warn "Could not write /etc/anetbbs.install -- web upgrade/restore will refuse to run"
 
 # Tarballs built from FAT source trees lose the +x bit on these.
 for w in run_upgrade.sh run_restore.sh; do

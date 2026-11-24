@@ -191,7 +191,6 @@ class UpgradePageAndRoutesTests(unittest.TestCase):
                 patch.object(self.u, '_wrapper_path', return_value=__file__), \
                 patch.object(self.u, '_check_sudo_escalation', return_value={'status': 'ok'}), \
                 patch.object(self.u, '_reset_upgrade_log'), \
-                patch.object(self.u, '_patch_wrapper_if_needed'), \
                 patch.object(self.u, '_spawn_upgrade',
                              side_effect=lambda *a, **k: spawned.append(a)):
             self.u._install_state['running'] = False

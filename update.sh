@@ -51,6 +51,10 @@ fi
 
 # ─── Source directory (where update.sh lives) ──────────────────────────────────
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Root-side helpers shared with the other installer script (audit H-1).
+# shellcheck source=deploy/privileged_helpers.sh
+. "$SOURCE_DIR/deploy/privileged_helpers.sh"
+as_service() { anetbbs_as_service "$SERVICE_USER" "$@"; }
 
 # ─── Parse arguments ──────────────────────────────────────────────────────────
 INSTALL_DIR=""
@@ -348,7 +352,7 @@ backup_sqlite() {
     fi
     if command -v python3 >/dev/null 2>&1; then
         local _integrity
-        _integrity=$(SRC="$src" DST="$dst" python3 << 'PYBACKUPEOF' 2>/dev/null
+        _integrity=$(SRC="$src" DST="$dst" python3 -I << 'PYBACKUPEOF' 2>/dev/null
 import os, sqlite3
 src_conn = sqlite3.connect(os.environ['SRC'])
 dst_conn = sqlite3.connect(os.environ['DST'])
@@ -607,7 +611,8 @@ if [[ "$SOURCE_DIR" == "$INSTALL_DIR" ]]; then
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         info "Updating via git pull..."
         cd "$INSTALL_DIR"
-        if sudo -u "$SERVICE_USER" git pull --ff-only 2>/dev/null || git pull --ff-only 2>/dev/null; then
+        # Never as root: .git/config and hooks belong to the service user (audit H-1).
+        if as_service git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null; then
             ok "git pull succeeded"
         else
             warn "git pull failed — files may already be up to date or have local changes"
@@ -807,8 +812,9 @@ if [[ ! -d "$VENV_DIR" ]]; then
 else
     info "Running pip install -e ..."
     cd "$INSTALL_DIR"
-    if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install -e "$INSTALL_DIR" --quiet 2>/dev/null || \
-       "$VENV_DIR/bin/pip" install -e "$INSTALL_DIR" --quiet 2>/dev/null; then
+    # Everything that executes venv code runs as the service user, never
+    # as root: the venv and the code belong to that user (audit H-1).
+    if as_service "$VENV_DIR/bin/pip" install -e "$INSTALL_DIR" --quiet 2>/dev/null; then
         ok "Python dependencies updated (aiohttp + others pulled in via setup.py)"
     else
         warn "pip install failed — dependencies may be out of date"
@@ -823,11 +829,10 @@ else
     # on a fresh install or an explicit `anetbbs-upgrade` run, so a sysop
     # never hits "command not found" for a script that pip clearly just
     # installed. Idempotent + silent on installs with nothing new to add.
-    if [[ -x "$VENV_DIR/bin/anetbbs-symlinks" ]]; then
-        "$VENV_DIR/bin/anetbbs-symlinks" "$INSTALL_DIR" >/dev/null 2>&1 && \
-            ok "Refreshed /usr/local/bin/ command shortcuts" || \
-            warn "Could not refresh /usr/local/bin/ shortcuts (non-fatal — use \$VENV_DIR/bin/<command> directly)"
-    fi
+    # Done in bash, not by running the venv's own anetbbs-symlinks as root.
+    anetbbs_link_console_scripts "$INSTALL_DIR" >/dev/null 2>&1 && \
+        ok "Refreshed /usr/local/bin/ command shortcuts" || \
+        warn "Could not refresh /usr/local/bin/ shortcuts (non-fatal — use \$VENV_DIR/bin/<command> directly)"
 
     # ── Python 3.13 eventlet safety fix ──────────────────────────────────────
     # eventlet < 0.38.0 crashes on Python 3.13 with:
@@ -851,20 +856,18 @@ else
     else
         info "eventlet wheel missing start_joinable_thread (common piwheels aarch64 issue) — rebuilding from source..."
         _evt_fixed=false
-        if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.40.3" --quiet 2>/dev/null; then
-            _evt_fixed=true
-        elif "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.40.3" --quiet 2>/dev/null; then
+        if as_service "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.40.3" --quiet 2>/dev/null; then
             _evt_fixed=true
         fi
         if [[ "$_evt_fixed" == "true" ]]; then
             ok "eventlet rebuilt from source — Python 3.13 compatible"
         else
             warn "eventlet source rebuild failed — trying relaxed version constraint..."
-            if "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.40.3" --quiet 2>/dev/null; then
+            if as_service "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.40.3" --quiet 2>/dev/null; then
                 ok "eventlet rebuilt (newer version) — Python 3.13 compatible"
             else
                 warn "eventlet fix failed — web service will crash on Python 3.13"
-                warn "Manual fix: sudo $VENV_DIR/bin/pip install --force-reinstall --no-cache-dir --no-binary eventlet 'eventlet>=0.40.3'"
+                warn "Manual fix: sudo -u $SERVICE_USER $VENV_DIR/bin/pip install --force-reinstall --no-cache-dir --no-binary eventlet 'eventlet>=0.40.3'"
             fi
         fi
     fi
@@ -876,7 +879,7 @@ else
     # boxes without prebuilt wheels for the running Python — and the
     # web service is stopped for that entire window. Quick import
     # probes detect a working install in <100 ms and skip the rebuild.
-    if "$VENV_DIR/bin/python" -c "import bcrypt; bcrypt.hashpw(b'x', bcrypt.gensalt())" >/dev/null 2>&1; then
+    if as_service "$VENV_DIR/bin/python" -c "import bcrypt; bcrypt.hashpw(b'x', bcrypt.gensalt())" >/dev/null 2>&1; then
         ok "bcrypt imports + hashes cleanly — skipping reinstall"
     else
         info "bcrypt broken — running the nuke-and-reinstall recovery path..."
@@ -885,23 +888,22 @@ else
         # 0.3.2, which the original setup.py wrongly listed) put it
         # there. Leftover _bcrypt.so → "cannot import name '__author__'
         # from 'bcrypt._bcrypt'". Nuke explicitly first.
-        SITE_PKGS=$("$VENV_DIR/bin/python" -c "import sys; print([p for p in sys.path if 'site-packages' in p][0])")
-        sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" uninstall -y bcrypt python-bcrypt 2>/dev/null || \
-        "$VENV_DIR/bin/pip" uninstall -y bcrypt python-bcrypt 2>/dev/null || true
-        rm -rf "$SITE_PKGS/bcrypt" "$SITE_PKGS/bcrypt-"*.dist-info "$SITE_PKGS/python_bcrypt"* "$SITE_PKGS/_bcrypt"*
-        sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --no-cache-dir --quiet bcrypt 2>/dev/null || \
-        "$VENV_DIR/bin/pip" install --no-cache-dir --quiet bcrypt 2>/dev/null || \
+        SITE_PKGS=$(as_service "$VENV_DIR/bin/python" -c "import sys; print([p for p in sys.path if 'site-packages' in p][0])")
+        as_service "$VENV_DIR/bin/pip" uninstall -y bcrypt python-bcrypt 2>/dev/null || true
+        # As the service user: SITE_PKGS is that user's own venv output.
+        if [[ "$SITE_PKGS" == "$VENV_DIR"/* ]]; then
+            as_service bash -c 'rm -rf -- "$1/bcrypt" "$1/bcrypt-"*.dist-info "$1/python_bcrypt"* "$1/_bcrypt"*' _ "$SITE_PKGS" || true
+        fi
+        as_service "$VENV_DIR/bin/pip" install --no-cache-dir --quiet bcrypt 2>/dev/null || \
         warn "bcrypt reinstall failed"
         ok "bcrypt reinstalled clean"
     fi
 
-    if "$VENV_DIR/bin/python" -c "from cryptography.fernet import Fernet; Fernet.generate_key()" >/dev/null 2>&1; then
+    if as_service "$VENV_DIR/bin/python" -c "from cryptography.fernet import Fernet; Fernet.generate_key()" >/dev/null 2>&1; then
         ok "cryptography imports cleanly — skipping reinstall"
     else
         info "cryptography broken — force-reinstalling..."
-        sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install \
-            --force-reinstall --no-deps --no-cache-dir --quiet cryptography 2>/dev/null || \
-        "$VENV_DIR/bin/pip" install \
+        as_service "$VENV_DIR/bin/pip" install \
             --force-reinstall --no-deps --no-cache-dir --quiet cryptography 2>/dev/null || true
     fi
 
@@ -913,7 +915,7 @@ else
     # Verify the new package imports cleanly — catches stray legacy paths shadowing it.
     # Show the actual error if it fails so we can fix the root cause.
     info "Verifying anetbbs package imports..."
-    IMPORT_ERR=$(cd /tmp && "$VENV_DIR/bin/python" -c "from anetbbs.main import main; from anetbbs.web_app import create_app; from anetbbs.core.ssh_server import start_ssh_server; print('OK')" 2>&1)
+    IMPORT_ERR=$(cd /tmp && as_service "$VENV_DIR/bin/python" -c "from anetbbs.main import main; from anetbbs.web_app import create_app; from anetbbs.core.ssh_server import start_ssh_server; print('OK')" 2>&1)
     if echo "$IMPORT_ERR" | grep -q "^OK$"; then
         ok "Package imports verified"
     else
@@ -979,8 +981,7 @@ else
           || "$DB_SECRET_KEY" == "dev-secret-key-change-in-production" \
           || "$DB_SECRET_KEY" == "your-secret-key-here" ]]; then
         info "  No real SECRET_KEY in .env — generating one and writing it"
-        DB_SECRET_KEY=$("$VENV_DIR/bin/python" -c \
-            'import secrets; print(secrets.token_urlsafe(48))')
+        DB_SECRET_KEY=$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(48))')
         # Lock down permissions BEFORE writing the new key, not just
         # after -- sed -i normally preserves an existing file's mode,
         # but that only holds if $ENV_FILE was already 0600 to begin
@@ -1013,7 +1014,7 @@ else
     # way, via real environment variables read back through os.environ,
     # with the heredoc delimiter quoted so bash does no expansion inside
     # it at all.
-    if sudo -u "$SERVICE_USER" \
+    if as_service env \
         INSTALL_DIR="$INSTALL_DIR" \
         DB_URL="$DB_URL" \
         DB_SECRET_KEY="$DB_SECRET_KEY" \
@@ -1093,7 +1094,7 @@ with app.app_context():
     print('SCHEMA_OK')
 DBEOF
         DB_UPDATED=true
-    elif INSTALL_DIR="$INSTALL_DIR" \
+    elif as_service env INSTALL_DIR="$INSTALL_DIR" \
         DB_URL="$DB_URL" \
         DB_SECRET_KEY="$DB_SECRET_KEY" \
         ENV_FILE="$ENV_FILE" \
@@ -1345,10 +1346,8 @@ if [[ ! -f /etc/systemd/system/anetbbs.service ]]; then
     SSH_KEY="$INSTALL_DIR/data/ssh_host_key"
     if [[ ! -f "$SSH_KEY" ]]; then
         info "Generating SSH host key..."
-        sudo -u "$SERVICE_USER" ssh-keygen -t rsa -b 2048 -f "$SSH_KEY" -N '' -q 2>/dev/null || \
-        ssh-keygen -t rsa -b 2048 -f "$SSH_KEY" -N '' -q 2>/dev/null || \
+        as_service ssh-keygen -t rsa -b 2048 -f "$SSH_KEY" -N '' -q 2>/dev/null || \
         warn "Could not generate SSH host key — SSH may fail until you create $SSH_KEY"
-        chown "$SERVICE_USER":"$SERVICE_USER" "$SSH_KEY" "$SSH_KEY.pub" 2>/dev/null || true
     fi
     # Second host key offered alongside the RSA one -- an already-running
     # install picks this up on its own via ssh_server.py's runtime
@@ -1357,10 +1356,8 @@ if [[ ! -f /etc/systemd/system/anetbbs.service ]]; then
     SSH_KEY_ED25519="${SSH_KEY}_ed25519"
     if [[ ! -f "$SSH_KEY_ED25519" ]]; then
         info "Generating SSH Ed25519 host key..."
-        sudo -u "$SERVICE_USER" ssh-keygen -t ed25519 -f "$SSH_KEY_ED25519" -N '' -q 2>/dev/null || \
-        ssh-keygen -t ed25519 -f "$SSH_KEY_ED25519" -N '' -q 2>/dev/null || \
+        as_service ssh-keygen -t ed25519 -f "$SSH_KEY_ED25519" -N '' -q 2>/dev/null || \
         warn "Could not generate SSH Ed25519 host key — continuing with RSA only"
-        chown "$SERVICE_USER":"$SERVICE_USER" "$SSH_KEY_ED25519" "$SSH_KEY_ED25519.pub" 2>/dev/null || true
     fi
     cat > /etc/systemd/system/anetbbs.service << SVCEOF
 [Unit]
@@ -1970,7 +1967,7 @@ if [[ ! -f "$MRC_BRIDGE_CONFIG" ]]; then
         MRC_LISTEN_PORT="$MRC_LISTEN_PORT" \
         MRC_DATA_DIR="$INSTALL_DIR/data/mrc" \
         MRC_BRIDGE_CONFIG="$MRC_BRIDGE_CONFIG" \
-        python3 << 'MRCPYEOF'
+        python3 -I << 'MRCPYEOF'
 import json
 import os
 
@@ -2067,6 +2064,21 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$INSTALL_DIR/data/mods" 2>/dev/null ||
 # every update because past releases shipped a stale list (anetbbs-telnet,
 # anetbbs-ssh, anetbbs-rlogin — none of which exist post-merge), which
 # left the panel showing "permission denied" on Restart buttons.
+# Running this script as root from a tree the service user owns (e.g.
+# `sudo ./update.sh` inside a git-based INSTALL_DIR) means root is
+# executing code that user can modify. Say so; prefer a release tarball
+# extracted somewhere root-owned (audit H-1).
+if [[ -n "$SERVICE_USER" && "$(stat -c %U "$SOURCE_DIR/update.sh" 2>/dev/null)" == "$SERVICE_USER" ]]; then
+    warn "update.sh is owned by the service user '$SERVICE_USER' -- running it as root trusts that account completely."
+    warn "Prefer running update.sh from a release tarball extracted to a root-owned directory."
+fi
+# Root-owned copies of the sudo-granted helpers (audit H-1). sudoers
+# below grants ONLY these paths, never anything under INSTALL_DIR.
+if anetbbs_install_root_wrappers "$SOURCE_DIR" "$SERVICE_USER"; then
+    ok "Privileged helpers installed in $ANETBBS_WRAPPER_DIR_DEFAULT (root-owned)"
+else
+    warn "Privileged helpers not installed -- web upgrade/restore will be unavailable until this is fixed"
+fi
 SUDOERS_SRC="$SOURCE_DIR/deploy/sudoers.anetbbs"
 SUDOERS_DST="/etc/sudoers.d/anetbbs"
 if [[ -f "$SUDOERS_SRC" ]]; then
@@ -2088,14 +2100,12 @@ if [[ -f "$SUDOERS_SRC" ]]; then
         #   - run as the actual SERVICE_USER (not the template's '__SERVICE_USER__')
         #   - reference the real upgrade wrapper path ($INSTALL_DIR/deploy/run_upgrade.sh,
         #     not the template's /opt/anetbbs/ placeholder)
-        UPGRADE_WRAPPER="$INSTALL_DIR/deploy/run_upgrade.sh"
-        RESTORE_WRAPPER="$INSTALL_DIR/deploy/run_restore.sh"
         # Substitute both deploy paths plus the user placeholder. Without
         # the -g flag each sed only hits its first match; we need every
         # /opt/anetbbs/deploy/* line to land on the real install path.
+        # The wrapper paths in the template are fixed root-owned locations
+        # (/usr/local/libexec/anetbbs), never INSTALL_DIR (audit H-1).
         sed -e "s/^__SERVICE_USER__ /$SERVICE_USER /" \
-            -e "s|/opt/anetbbs/deploy/run_upgrade.sh|$UPGRADE_WRAPPER|g" \
-            -e "s|/opt/anetbbs/deploy/run_restore.sh|$RESTORE_WRAPPER|g" \
             "$SUDOERS_SRC" > "$SUDOERS_DST.tmp"
         # Real gap found in a security/performance audit: the plain `sed
         # ... > file` redirection above creates $SUDOERS_DST.tmp at the
@@ -2167,14 +2177,9 @@ fi
 # Drop a sentinel /etc/anetbbs.install so the privileged upgrade wrapper
 # (and any other future root helper) can discover the install root
 # without hardcoding a path. Sources cleanly with `. /etc/anetbbs.install`.
-cat > /etc/anetbbs.install <<EOF
-# Written by update.sh — used by deploy/run_upgrade.sh to locate the
-# install root when invoked under sudo. Do not edit by hand; rerun
-# install.sh or update.sh to refresh.
-INSTALL_DIR=$INSTALL_DIR
-SERVICE_USER=$SERVICE_USER
-EOF
-chmod 0644 /etc/anetbbs.install
+# Root-owned config the privileged helpers trust (audit H-1).
+anetbbs_write_install_conf "$INSTALL_DIR" "$SERVICE_USER" \
+    || warn "Could not write /etc/anetbbs.install -- web upgrade/restore will refuse to run"
 
 # Ensure deploy/ wrappers are executable. Tarballs built from FAT
 # source trees lose the +x bit, so we set it explicitly post-extract.
@@ -2281,7 +2286,7 @@ if [[ -f "$NGINX_AVAIL" ]]; then
         # combined with a trailing &&/|| line-continuation on the same
         # statement is a known bash-version-sensitive edge case; the
         # `; then ... else ... fi` form avoids it entirely.
-        if NGINX_AVAIL="$NGINX_AVAIL" INSTALL_DIR="$INSTALL_DIR" python3 << 'STATICPYEOF' 2>/dev/null; then
+        if NGINX_AVAIL="$NGINX_AVAIL" INSTALL_DIR="$INSTALL_DIR" python3 -I << 'STATICPYEOF' 2>/dev/null; then
 import os
 nginx_avail = os.environ['NGINX_AVAIL']
 install_dir = os.environ['INSTALL_DIR']
@@ -2330,7 +2335,7 @@ STATICPYEOF
         # -- see its comment for why the chained `&& \ ... || \` form is
         # a confirmed-live bug, not just a style preference.
         if NGINX_AVAIL="$NGINX_AVAIL" REAL_WEB_PORT="$REAL_WEB_PORT" REAL_MRC_PORT="$REAL_MRC_PORT" \
-            python3 << 'MRCWSPYEOF' 2>/dev/null; then
+            python3 -I << 'MRCWSPYEOF' 2>/dev/null; then
 import os
 nginx_avail = os.environ['NGINX_AVAIL']
 real_web_port = os.environ['REAL_WEB_PORT']
@@ -2395,7 +2400,7 @@ MRCWSPYEOF
             # python3 -c string, matching this file's own standing
             # discipline for this bug class rather than judging each
             # site's current exploitability case by case.
-            if NGINX_AVAIL="$NGINX_AVAIL" NGINX_WS_LOC="$NGINX_WS_LOC" python3 << 'WSHDRPYEOF' 2>/dev/null | grep -q patched
+            if NGINX_AVAIL="$NGINX_AVAIL" NGINX_WS_LOC="$NGINX_WS_LOC" python3 -I << 'WSHDRPYEOF' 2>/dev/null | grep -q patched
 import os, re
 loc = os.environ['NGINX_WS_LOC']
 path = os.environ['NGINX_AVAIL']
@@ -2677,8 +2682,7 @@ if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
         warn "anetbbs-web crashed: eventlet wheel missing start_joinable_thread (piwheels aarch64 issue)"
         info "Attempting auto-fix: rebuilding eventlet from source..."
         _evt_retry=false
-        if sudo -u "$SERVICE_USER" "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.40.3" --quiet 2>/dev/null || \
-           "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.40.3" --quiet 2>/dev/null; then
+        if as_service "$VENV_DIR/bin/pip" install --force-reinstall --no-cache-dir --no-binary eventlet "eventlet>=0.40.3" --quiet 2>/dev/null; then
             _evt_retry=true
         fi
         if [[ "$_evt_retry" == "true" ]]; then
@@ -2695,7 +2699,7 @@ if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
         if [[ "${CRITICAL_FAILED:-false}" == "true" ]]; then
             warn "Application files were updated successfully."
             warn "Only anetbbs-web is affected. Fix manually:"
-            warn "  sudo $VENV_DIR/bin/pip install --force-reinstall --no-cache-dir --no-binary eventlet 'eventlet>=0.40.3'"
+            warn "  sudo -u $SERVICE_USER $VENV_DIR/bin/pip install --force-reinstall --no-cache-dir --no-binary eventlet 'eventlet>=0.40.3'"
             warn "  sudo systemctl restart anetbbs-web"
             fail "Web service failed to start — see fix above (files NOT rolled back)"
         fi

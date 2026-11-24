@@ -139,7 +139,9 @@ class SudoProbeMatchesRealUpgradeCommandTests(unittest.TestCase):
         self.assertEqual(len(sudo_calls), 1)
         probed = sudo_calls[0]
         self.assertEqual(probed[:3], ['sudo', '-n', '-l'])
-        wrapper = os.path.join('/opt/anetbbs', 'deploy', 'run_upgrade.sh')
+        # Root-owned location outside INSTALL_DIR (audit H-1), regardless
+        # of the configured INSTALL_DIR.
+        wrapper = '/usr/local/libexec/anetbbs/run_upgrade.sh'
         self.assertIn(wrapper, probed)
         # No detachment mechanism's flags belong in this command at all
         # anymore -- that was the exact root cause of a real outage.

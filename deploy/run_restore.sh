@@ -39,7 +39,7 @@ CONF=/etc/anetbbs.install
 [ -f "$CONF" ] && [ ! -L "$CONF" ] || fail "$CONF missing -- re-run update.sh as root"
 [ "$(stat -c %u "$CONF")" = 0 ] || fail "$CONF is not owned by root"
 [ $(( 0$(stat -c %a "$CONF") & 022 )) -eq 0 ] || fail "$CONF is group/world writable"
-_conf() { grep -m1 "^$1=" "$CONF" | cut -d= -f2- | tr -d '"'"'"; }
+_conf() { { grep -m1 "^$1=" "$CONF" || true; } | cut -d= -f2- | tr -d '"'"'"; }
 INSTALL_DIR=$(_conf INSTALL_DIR)
 SERVICE_USER=$(_conf SERVICE_USER)
 [[ "$INSTALL_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "INSTALL_DIR not in $CONF — re-run update.sh"

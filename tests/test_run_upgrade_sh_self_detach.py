@@ -24,7 +24,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_UPGRADE_SH = REPO_ROOT / 'deploy' / 'run_upgrade.sh'
 
-_START_MARKER = "# ── Resolve install dir from /etc/anetbbs.install"
+_START_MARKER = "# ── Trusted configuration: /etc/anetbbs.install only"
 _END_MARKER = '# ── Argument validation'
 
 
@@ -112,6 +112,8 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
         self.env.pop('INSTALL_DIR', None)
         self.marker = tmp_path / 'marker.txt'
         self.outer_cgroup = Path('/proc/self/cgroup').read_text()
+        self.log_dir = tmp_path / 'varlog'
+        self.conf = tmp_path / 'anetbbs.install'
 
         # The extracted block's INSTALL_DIR fallback derives from the
         # SCRIPT'S OWN location (two-parents-up, matching the real
@@ -123,10 +125,28 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
         self._script_dir = self._fake_install / 'deploy'
         self._script_dir.mkdir(parents=True)
         (self._fake_install / 'data').mkdir()
+        self.conf.write_text(f'INSTALL_DIR={self._fake_install}\nSERVICE_USER=anetbbs\n')
+        self.conf.chmod(0o644)
+
+    def _block_for_test(self):
+        """The real block with only its root-only constants swapped for
+        sandbox equivalents (each substitution must match exactly once,
+        so the test stays tied to the real text)."""
+        block = self.detach_block
+        subs = [
+            ('CONF=/etc/anetbbs.install', f'CONF={self.conf}'),
+            ('[ "$(stat -c %u "$CONF")" = 0 ]', f'[ "$(stat -c %u "$CONF")" = {os.getuid()} ]'),
+            ('LOG_DIR=/var/log/anetbbs', f'LOG_DIR={self.log_dir}'),
+            ('install -d -o root -g root -m 0755 "$LOG_DIR"', 'install -d -m 0755 "$LOG_DIR"'),
+        ]
+        for old, new in subs:
+            assert block.count(old) == 1, old
+            block = block.replace(old, new)
+        return block
 
     def _write_script(self, name, exit_code):
         body = (_SCRIPT_TEMPLATE
-                .replace('__DETACH_BLOCK__', self.detach_block)
+                .replace('__DETACH_BLOCK__', self._block_for_test())
                 .replace('__MARKER__', str(self.marker))
                 .replace('__EXITCODE__', str(exit_code)))
         script = self._script_dir / name
@@ -148,29 +168,41 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
                             'detached process landed in the same cgroup '
                             'as the caller -- not actually detached')
 
-    def test_standard_output_lands_in_data_dir_not_tmp(self):
-        """Regression test for a THIRD real live outage (2026-10-28,
-        found while verifying the second fix): the detach block used
-        to hardcode StandardOutput=append:/tmp/anetbbs_upgrade.log.
-        anetbbs-web.service has PrivateTmp=yes, so the file the WEB
-        PROCESS creates lives in that service's own private /tmp mount
-        namespace -- invisible to systemd/PID1, which resolves the
-        StandardOutput target against the REAL, system-wide /tmp when
-        setting up the detached unit. Confirmed live: `systemd[...]:
-        Failed to set up standard output: Permission denied`, exit
-        209/STDOUT. Fixed by moving the log to INSTALL_DIR/data/, a
-        real, non-virtualized directory every process agrees on."""
+    def test_standard_output_lands_in_root_log_dir(self):
+        """The detached unit's StandardOutput must NOT be a path under the
+        service user's INSTALL_DIR/data/ (audit H-1): systemd opens it as
+        root, so a swapped-in symlink there would redirect a root write.
+        It also must not be under /tmp (PrivateTmp outage, 2026-10-28)."""
+        self.assertIn('LOG_DIR=/var/log/anetbbs\n', self.detach_block)
+        self.assertIn('UPGRADE_LOG="$LOG_DIR/upgrade.log"', self.detach_block)
+        self.assertNotIn('UPGRADE_LOG="$INSTALL_DIR', self.detach_block)
         script = self._write_script('probe-logpath.sh', 0)
         result = subprocess.run([str(script)], env=self.env,
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
-        upgrade_log = self._fake_install / 'data' / 'anetbbs_upgrade.log'
-        self.assertTrue(upgrade_log.exists(),
-                        'the detached unit\'s StandardOutput should have '
-                        'created this file under data/, not /tmp')
-        self.assertIn('pid=', upgrade_log.read_text(),
-                      'the continuation\'s own stdout should have landed '
-                      'in the data/ log via StandardOutput=append:')
+        upgrade_log = self.log_dir / 'upgrade.log'
+        self.assertTrue(upgrade_log.exists())
+        self.assertIn('pid=', upgrade_log.read_text())
+        self.assertFalse((self._fake_install / 'data' / 'anetbbs_upgrade.log').exists())
+
+    def test_refuses_untrusted_or_missing_config(self):
+        script = self._write_script('probe-conf.sh', 0)
+        self.conf.chmod(0o666)
+        r = subprocess.run([str(script)], env=self.env, capture_output=True,
+                           text=True, timeout=30)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('group/world writable', r.stderr)
+        self.assertFalse(self.marker.exists())
+        self.conf.unlink()
+        r = subprocess.run([str(script)], env=self.env, capture_output=True,
+                           text=True, timeout=30)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('missing', r.stderr)
+
+    def test_install_dir_never_comes_from_script_location_or_env(self):
+        self.assertNotIn('BASH_SOURCE', self.detach_block)
+        self.assertNotIn('.env', self.detach_block.replace('# read from INSTALL_DIR (.env included)', ''))
+        self.assertNotIn('. /etc/anetbbs.install', self.detach_block)
 
     def test_relays_a_real_failure_exit_code_too(self):
         script = self._write_script('probe-fail.sh', 7)

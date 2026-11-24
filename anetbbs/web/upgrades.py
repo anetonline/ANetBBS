@@ -466,54 +466,11 @@ def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str) -> list:
     return [wrapper, target, url, sha256]
 
 
-def _patch_wrapper_if_needed(wrapper: str) -> None:
-    """Patch run_upgrade.sh in-place if it still has an outdated version
-    regex that would reject a version string a NEWER release actually
-    uses. Two historical steps chained here, applied in order (each is
-    a no-op if its `old` pattern isn't present, so this is safe to run
-    against a wrapper already on any of the three generations):
-
-    1. alpha-only -> alpha+beta (from when beta version strings were
-       introduced).
-    2. alpha+beta-only -> alpha+beta+stable (from the v1.0.0 milestone,
-       which introduced a plain `vX.Y.Z` stable-release form alongside
-       the existing `vX.Y[ab]Z.NN` beta/alpha form).
-
-    Silently no-ops on any error so a failed patch never blocks the
-    upgrade attempt -- worst case the live wrapper stays one generation
-    behind and the upgrade fails with a clear regex-mismatch message
-    the sysop can act on, same as before this self-heal existed at all.
-    """
-    try:
-        with open(wrapper, 'r', encoding='utf-8') as f:
-            src = f.read()
-        steps = [
-            (r'^v[0-9]+\.[0-9]+a[0-9]+\.[0-9]+$',
-             r'^v[0-9]+\.[0-9]+[ab][0-9]+\.[0-9]+$'),
-            (r'^v[0-9]+\.[0-9]+[ab][0-9]+\.[0-9]+$',
-             r'^v[0-9]+\.[0-9]+([ab][0-9]+\.[0-9]+|\.[0-9]+)$'),
-        ]
-        changed = False
-        for old, new in steps:
-            if old in src:
-                src = src.replace(old, new)
-                changed = True
-        if changed:
-            with open(wrapper, 'w', encoding='utf-8') as f:
-                f.write(src)
-    except Exception:
-        pass
-
-
 def _wrapper_path(cfg) -> str:
-    """Resolve deploy/run_upgrade.sh relative to the install root.
-    INSTALL_DIR config wins; otherwise derive from this file's location."""
-    install_dir = cfg.get('INSTALL_DIR') or ''
-    if not install_dir:
-        # anetbbs/web/upgrades.py → install root is two-parents up
-        install_dir = os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(install_dir, 'deploy', 'run_upgrade.sh')
+    """The root-owned upgrade wrapper sudoers grants (audit H-1). Never
+    under INSTALL_DIR, and never written by this process."""
+    from .privileged_paths import UPGRADE_WRAPPER
+    return UPGRADE_WRAPPER
 
 
 @upgrades_admin_bp.route('/install', methods=['POST'])
@@ -568,8 +525,6 @@ def install():
     # Truncate prior log, then spawn the wrapper detached so the HTTP
     # request doesn't get killed when update.sh restarts gunicorn.
     _reset_upgrade_log()
-
-    _patch_wrapper_if_needed(wrapper)
     _spawn_upgrade(wrapper, target, url, sha256, label='upgrade')
     return jsonify({'ok': True,
                     'log_url': url_for('upgrades_admin.log_tail')})
@@ -704,9 +659,9 @@ def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
                             '\n[!] Web upgrade is not supported on this host.\n'
                             '    sudo cannot access the kernel audit subsystem\n'
                             '    (common on LXC/OpenVZ containers and some VPS).\n'
-                            '    Run the upgrade manually from a terminal:\n\n'
-                            f'      sudo anetbbs-upgrade {target}\n\n'
-                            '    Or extract the tarball and run update.sh as root.\n'
+                            '    Run the upgrade manually from a terminal: download\n'
+                            f'    the {target} tarball, extract it somewhere root-owned,\n'
+                            '    and run its update.sh as root.\n'
                         )
         except Exception as exc:
             try:
@@ -806,13 +761,21 @@ _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 @login_required
 def log_tail():
     _require_admin()
-    try:
-        with open(_UPGRADE_LOG_PATH, 'rb') as f:
-            data = f.read()
-    except FileNotFoundError:
+    # Two logs: this process's own launch/exit lines (data/), and the
+    # detached root unit's output, which lives in a root-owned directory
+    # so root never writes through a path the service user controls.
+    from .privileged_paths import ROOT_UPGRADE_LOG
+    data = b''
+    for path in (_UPGRADE_LOG_PATH, ROOT_UPGRADE_LOG):
+        try:
+            with open(path, 'rb') as f:
+                data += f.read()[-200000:]
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            data += f'(log read error: {exc})\n'.encode()
+    if not data:
         data = b'(no log yet)\n'
-    except OSError as exc:
-        data = f'(log read error: {exc})\n'.encode()
     text = _ANSI_RE.sub('', data.decode('utf-8', errors='replace'))
     body = {'running': _install_state['running'],
             'version': _install_state['version'],

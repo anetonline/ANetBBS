@@ -102,7 +102,6 @@ class InstallSudoPreflightTests(unittest.TestCase):
              patch('os.path.isfile', return_value=True), \
              patch.object(upgrades, '_check_sudo_escalation', return_value=ok_check), \
              patch.object(upgrades, '_spawn_upgrade') as mock_spawn, \
-             patch.object(upgrades, '_patch_wrapper_if_needed'), \
              patch('builtins.open', MagicMock()), \
              patch('anetbbs.web.upgrades.url_for', return_value='/admin/upgrades/log'), \
              patch.object(upgrades, '_require_admin'):

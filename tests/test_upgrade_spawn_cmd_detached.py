@@ -133,7 +133,7 @@ class SudoersGrantMatchesSpawnCommandTests(unittest.TestCase):
         # future change ever reintroduces a flag here, it has reopened
         # exactly the class of bug this test exists to catch.
         line = self._upgrade_line().strip().rstrip(',').strip()
-        self.assertTrue(line.endswith('/deploy/run_upgrade.sh *'), line)
+        self.assertTrue(line.endswith('/usr/local/libexec/anetbbs/run_upgrade.sh *'), line)
         self.assertNotIn('systemd-run', line)
         self.assertNotIn('--', line)
 

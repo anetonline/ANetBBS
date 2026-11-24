@@ -149,9 +149,8 @@ def _check_sudo_escalation(cfg):
     because /bin/true is correctly NOT in the narrow allowlist. The
     proper probe targets the specific command the auto-update will run.
     """
-    install_root = cfg.get('INSTALL_DIR') or os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    wrapper = os.path.join(install_root, 'deploy', 'run_upgrade.sh')
+    from .privileged_paths import UPGRADE_WRAPPER
+    wrapper = UPGRADE_WRAPPER
 
     bad_directives = []
 
