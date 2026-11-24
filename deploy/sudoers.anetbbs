@@ -49,13 +49,13 @@
 # regardless of how detachment works internally. See
 # run_upgrade.sh's own detach-block comment for the full writeup.
 Cmnd_Alias ANETBBS_UPGRADE = \
-    /opt/anetbbs/deploy/run_upgrade.sh *
+    /usr/local/libexec/anetbbs/run_upgrade.sh *
 
 # Restore helper — invoked by /admin/backups/ to copy a snapshot's
 # .env or DB back into place. Same path-rewrite from /opt/anetbbs/
 # happens via update.sh's sed.
 Cmnd_Alias ANETBBS_RESTORE = \
-    /opt/anetbbs/deploy/run_restore.sh *
+    /usr/local/libexec/anetbbs/run_restore.sh *
 
 Cmnd_Alias ANETBBS_SYSCTL = \
     /usr/bin/systemctl start  anetbbs, \

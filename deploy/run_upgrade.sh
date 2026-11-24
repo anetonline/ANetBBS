@@ -2,7 +2,12 @@
 # Privileged in-place upgrade for ANetBBS.
 #
 # Invoked by the sysop "Check for Updates" UI as:
-#   sudo -n /home/<bbs-user>/anetbbs/deploy/run_upgrade.sh <version> <url> <sha256>
+#   sudo -n /usr/local/libexec/anetbbs/run_upgrade.sh <version> <url> <sha256>
+#
+# Installed root:root 0755 into a root-owned directory by install.sh /
+# update.sh (audit H-1). The copy under <INSTALL_DIR>/deploy/ is only the
+# source for that install: sudoers never grants it, because the service
+# user owns everything under INSTALL_DIR and could rewrite it.
 #
 # This is the ONLY command the sudoers grant for this feature ever
 # needs to know about -- see the detach block immediately below for
@@ -17,8 +22,8 @@
 # trust the args even though the calling code is also ours.
 #
 # Logging: everything goes to stdout / stderr, which systemd (after the
-# detach below) redirects to <INSTALL_DIR>/data/anetbbs_upgrade.log.
-# The UI tails that file.
+# detach below) redirects to /var/log/anetbbs/upgrade.log (root-owned
+# directory, file 0644). The UI reads that file.
 
 set -eu -o pipefail
 
@@ -26,22 +31,22 @@ LOG_PREFIX="[upgrade]"
 log()  { printf '%s %s\n' "$LOG_PREFIX" "$*"; }
 fail() { printf '%s FAIL: %s\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
 
-# ── Resolve install dir from /etc/anetbbs.install ─────────────────────────
-# Moved ahead of the detach block below (it used to run after argument
-# validation) because the detach block itself now needs INSTALL_DIR to
-# build the log path. install.sh + update.sh write this file with
-# INSTALL_DIR=/path/to/anetbbs so any privileged helper can find the
-# right install without hardcoding.
-INSTALL_DIR=""
-if [ -r /etc/anetbbs.install ]; then
-    # shellcheck source=/dev/null
-    . /etc/anetbbs.install
-fi
-if [ -z "${INSTALL_DIR:-}" ]; then
-    # Fall back to two-parents-up from this script's location.
-    HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    INSTALL_DIR=$(dirname "$HERE")
-fi
+# ── Trusted configuration: /etc/anetbbs.install only ─────────────────────
+# Everything this root script trusts comes from /etc/anetbbs.install, which
+# install.sh / update.sh write as root. It is PARSED (never sourced) and
+# only accepted if root owns it and nobody else can write it. Nothing is
+# read from INSTALL_DIR (.env included): the service user owns that tree
+# (audit H-1).
+CONF=/etc/anetbbs.install
+[ -f "$CONF" ] && [ ! -L "$CONF" ] || fail "$CONF missing -- re-run update.sh as root"
+[ "$(stat -c %u "$CONF")" = 0 ] || fail "$CONF is not owned by root"
+[ $(( 0$(stat -c %a "$CONF") & 022 )) -eq 0 ] || fail "$CONF is group/world writable"
+_conf() { grep -m1 "^$1=" "$CONF" | cut -d= -f2- | tr -d '"'"'"; }
+INSTALL_DIR=$(_conf INSTALL_DIR)
+REGISTRY_HOST=$(_conf REGISTRY_HOST)
+[ -n "$REGISTRY_HOST" ] || REGISTRY_HOST="bbs.a-net.fyi"
+[[ "$INSTALL_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "INSTALL_DIR in $CONF is missing or invalid"
+[[ "$REGISTRY_HOST" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || fail "REGISTRY_HOST in $CONF is invalid"
 [ -d "$INSTALL_DIR" ] || fail "install dir $INSTALL_DIR does not exist"
 
 # ── Detach from the caller's cgroup ────────────────────────────────────────
@@ -82,8 +87,16 @@ fi
 # line runs) re-execs itself into a detached transient unit with no
 # second sudo call involved -- whatever this mechanism needs to become
 # in the future, it only ever touches this file.
-UPGRADE_LOG="$INSTALL_DIR/data/anetbbs_upgrade.log"
+# The log lives in a root-owned directory: systemd opens it as root, so a
+# path under the service user's data/ could be swapped for a symlink to
+# any root-owned file (audit H-1).
+LOG_DIR=/var/log/anetbbs
+UPGRADE_LOG="$LOG_DIR/upgrade.log"
 if [ -z "${ANETBBS_UPGRADE_DETACHED:-}" ]; then
+    install -d -o root -g root -m 0755 "$LOG_DIR"
+    [ ! -L "$UPGRADE_LOG" ] || fail "$UPGRADE_LOG is a symlink"
+    : > "$UPGRADE_LOG"
+    chmod 0644 "$UPGRADE_LOG"
     export ANETBBS_UPGRADE_DETACHED=1
     exec systemd-run --unit=anetbbs-upgrade --collect --quiet --wait \
         --property=StandardOutput=append:"$UPGRADE_LOG" \
@@ -113,8 +126,8 @@ fi
 # subshell (we use it as an arg to curl/wget, but defensive layering
 # is cheap).
 case "$URL" in
-    https://*.tar.gz|http://*.tar.gz) ;;
-    *) fail "url $URL not a tar.gz over http(s)" ;;
+    https://*.tar.gz) ;;
+    *) fail "url $URL not a tar.gz over https" ;;
 esac
 case "$URL" in
     *[\ \;\&\|\`\$\<\>\"\'\\]*) fail "url contains shell metacharacters" ;;
@@ -138,34 +151,14 @@ log "install dir: $INSTALL_DIR"
 # the admin web UI -- see deploy/sudoers.anetbbs) could host their own
 # tarball anywhere and compute a self-consistent hash, defeating the
 # sha256 check entirely. Bounded here by requiring the download host to
-# match REGISTRY_URL's own host -- read independently from .env (the
-# same config source the web app itself uses via anetbbs/config.py),
-# not trusted from argv, so a caller can't just also pass a self-
-# consistent value for this check. REGISTRY_URL is deliberately sysop-
-# configurable (a private network of peers can run their own release
-# feed -- see anetbbs/web/upgrades.py's own docstring), so this can't
-# be a fixed hardcoded host; it has to track whatever THIS install
-# actually trusts. Falls back to the same default anetbbs/config.py
-# itself uses when REGISTRY_URL isn't set in .env at all.
-REGISTRY_HOST=""
-ENV_FILE="$INSTALL_DIR/.env"
-if [ -r "$ENV_FILE" ]; then
-    REGISTRY_LINE=$(grep -m1 '^REGISTRY_URL=' "$ENV_FILE" 2>/dev/null || true)
-    REGISTRY_VALUE="${REGISTRY_LINE#REGISTRY_URL=}"
-    # Strip optional surrounding quotes some .env writers/editors add.
-    REGISTRY_VALUE="${REGISTRY_VALUE%\"}"; REGISTRY_VALUE="${REGISTRY_VALUE#\"}"
-    REGISTRY_VALUE="${REGISTRY_VALUE%\'}"; REGISTRY_VALUE="${REGISTRY_VALUE#\'}"
-    _reg_no_scheme="${REGISTRY_VALUE#http://}"
-    _reg_no_scheme="${_reg_no_scheme#https://}"
-    REGISTRY_HOST="${_reg_no_scheme%%/*}"
-fi
-[ -n "$REGISTRY_HOST" ] || REGISTRY_HOST="bbs.a-net.fyi"
+# match the install's trusted REGISTRY_HOST, which is not taken from argv.
+# REGISTRY_HOST comes from root-owned /etc/anetbbs.install (parsed above),
+# never from the service-user-owned .env (audit H-1).
 
-_url_no_scheme="${URL#http://}"
-_url_no_scheme="${_url_no_scheme#https://}"
+_url_no_scheme="${URL#https://}"
 URL_HOST="${_url_no_scheme%%/*}"
 [ "$URL_HOST" = "$REGISTRY_HOST" ] \
-    || fail "url host '$URL_HOST' does not match this install's configured REGISTRY_URL host '$REGISTRY_HOST' -- refusing to download from an unexpected origin"
+    || fail "url host '$URL_HOST' does not match this install's trusted REGISTRY_HOST '$REGISTRY_HOST' -- refusing to download from an unexpected origin"
 log "url origin verified against registry host: $REGISTRY_HOST"
 
 # ── Download tarball to a unique tempdir we own ───────────────────────────

@@ -2,8 +2,17 @@
 # Privileged restore helper for ANetBBS pre-update snapshots.
 #
 # Invoked by the admin "Restore" buttons in /admin/backups/:
-#   sudo -n /home/<bbs-user>/anetbbs/deploy/run_restore.sh env  INSTALL_DIR/data/backups/anetbbs-backup-YYYYMMDDHHMMSS
-#   sudo -n /home/<bbs-user>/anetbbs/deploy/run_restore.sh db   INSTALL_DIR/data/backups/anetbbs-backup-YYYYMMDDHHMMSS
+#   sudo -n /usr/local/libexec/anetbbs/run_restore.sh env    INSTALL_DIR/data/backups/anetbbs-backup-YYYYMMDDHHMMSS
+#   sudo -n /usr/local/libexec/anetbbs/run_restore.sh db     INSTALL_DIR/data/backups/anetbbs-backup-YYYYMMDDHHMMSS
+#   sudo -n /usr/local/libexec/anetbbs/run_restore.sh delete INSTALL_DIR/data/backups/anetbbs-backup-YYYYMMDDHHMMSS
+#
+# Installed root:root 0755 in a root-owned directory (audit H-1). Every
+# file operation below runs AS THE SERVICE USER: the backups, .env and
+# the database all belong to that user anyway, and doing the copy/delete
+# as root on paths that user controls would let a swapped-in symlink
+# redirect root's rm/cp. Only `systemctl` needs root. Backups left
+# root-owned by very old releases can no longer be restored or deleted
+# from the web UI; remove those by hand as root.
 #
 # Restores `.env` or the SQLite production DB from the snapshot,
 # preserving ownership. Refuses to operate on anything outside the
@@ -26,14 +35,23 @@ BACKUP="$2"
 # Resolve install dir from the sentinel update.sh drops. Must happen
 # BEFORE path validation below, since the allowlisted prefix is now
 # anchored to INSTALL_DIR rather than a fixed literal like /tmp was.
-INSTALL_DIR=""
-SERVICE_USER=""
-if [ -r /etc/anetbbs.install ]; then
-    # shellcheck source=/dev/null
-    . /etc/anetbbs.install
-fi
-[ -n "${INSTALL_DIR:-}" ] || fail "INSTALL_DIR not in /etc/anetbbs.install — re-run update.sh"
-[ -n "${SERVICE_USER:-}" ] || SERVICE_USER=anetbbs
+CONF=/etc/anetbbs.install
+[ -f "$CONF" ] && [ ! -L "$CONF" ] || fail "$CONF missing -- re-run update.sh as root"
+[ "$(stat -c %u "$CONF")" = 0 ] || fail "$CONF is not owned by root"
+[ $(( 0$(stat -c %a "$CONF") & 022 )) -eq 0 ] || fail "$CONF is group/world writable"
+_conf() { grep -m1 "^$1=" "$CONF" | cut -d= -f2- | tr -d '"'"'"; }
+INSTALL_DIR=$(_conf INSTALL_DIR)
+SERVICE_USER=$(_conf SERVICE_USER)
+[[ "$INSTALL_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "INSTALL_DIR not in $CONF — re-run update.sh"
+[[ "${SERVICE_USER:-}" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "SERVICE_USER missing or invalid in $CONF"
+[ "$SERVICE_USER" != root ] || fail "SERVICE_USER may not be root"
+as_service() {
+    if command -v runuser >/dev/null 2>&1; then
+        runuser -u "$SERVICE_USER" -- "$@"
+    else
+        sudo -n -u "$SERVICE_USER" -- "$@"
+    fi
+}
 log "install dir: $INSTALL_DIR  service user: $SERVICE_USER"
 
 # Path validation. INSTALL_DIR itself comes from a root-written sentinel
@@ -79,8 +97,9 @@ case "$KIND" in
         # dir is root-owned (created before update.sh started chowning
         # backups to the service user). Strict path check is already
         # above — only accepts INSTALL_DIR/data/backups/anetbbs-backup-*.
-        log "rm -rf $BACKUP"
-        rm -rf "$BACKUP"
+        log "rm -rf $BACKUP (as $SERVICE_USER)"
+        as_service rm -rf -- "$BACKUP" \
+            || fail "could not delete $BACKUP as $SERVICE_USER (root-owned backup from an old release? remove it by hand as root)"
         log "delete: ok"
         ;;
     env)
@@ -105,9 +124,9 @@ case "$KIND" in
         # planted between the check above and this line gets removed
         # rather than written through -- defense in depth against the
         # same class of race, not just the already-checked case.
-        cp -f --remove-destination "$SRC" "$DST"
-        chown "$SERVICE_USER":"$SERVICE_USER" "$DST" 2>/dev/null || true
-        chmod 600 "$DST"
+        as_service cp -f --remove-destination -- "$SRC" "$DST" \
+            || fail "copy failed as $SERVICE_USER"
+        as_service chmod 600 -- "$DST"
         log "restore env: ok"
         ;;
     db)
@@ -121,13 +140,15 @@ case "$KIND" in
         log "stopping anetbbs-web before DB swap..."
         systemctl stop anetbbs-web 2>/dev/null || true
         log "copying $SRC -> $DST"
-        cp -f --remove-destination "$SRC" "$DST"
-        chown "$SERVICE_USER":"$SERVICE_USER" "$DST" 2>/dev/null || true
+        if ! as_service cp -f --remove-destination -- "$SRC" "$DST"; then
+            systemctl start anetbbs-web 2>/dev/null || true
+            fail "copy failed as $SERVICE_USER"
+        fi
         # Real gap found in a security/performance audit: the DB holds
         # password hashes, session tokens, and private messages -- see
         # install.sh's matching fix on the fresh-install path for why
         # 600 (not 644) is correct here.
-        chmod 600 "$DST"
+        as_service chmod 600 -- "$DST"
         log "starting anetbbs-web back up..."
         systemctl start anetbbs-web 2>/dev/null || true
         log "restore db: ok (anetbbs-web restarted)"
