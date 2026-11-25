@@ -111,11 +111,18 @@ def _runtime_snapshot():
         root = _REPO_ROOT / name
         if not root.exists():
             continue
-        snap[str(root)] = ('dir',)
+        # Directories carry their mtime, so a file created and deleted
+        # again within the run (no trace left at the end) still shows.
+        def _dmt(p):
+            try:
+                return ('dir', _os.lstat(p).st_mtime_ns)
+            except OSError:
+                return ('dir',)
+        snap[str(root)] = _dmt(root)
         for dirpath, dirnames, filenames in _os.walk(root):
             dirnames[:] = [d for d in dirnames if d != '__pycache__']
             for d in dirnames:
-                snap[_os.path.join(dirpath, d)] = ('dir',)
+                snap[_os.path.join(dirpath, d)] = _dmt(_os.path.join(dirpath, d))
             for fn in filenames:
                 p = _os.path.join(dirpath, fn)
                 try:

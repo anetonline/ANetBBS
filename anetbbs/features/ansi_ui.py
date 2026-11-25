@@ -107,6 +107,26 @@ def ui_height(session) -> int:
     return max(10, min(100, rows))
 
 
+def _configured_data_dir():
+    """The configured DATA_DIR (<install>/data in production, a temp tree
+    in tests), as menu_engine's menu-art lookup already uses."""
+    from pathlib import Path
+    try:
+        from flask import current_app, has_app_context
+        if has_app_context() and current_app.config.get('DATA_DIR'):
+            return Path(current_app.config['DATA_DIR'])
+    except Exception:
+        pass
+    try:
+        from ..config import get_config
+        d = getattr(get_config(), 'DATA_DIR', None)
+        if d:
+            return Path(d)
+    except Exception:
+        pass
+    return Path(__file__).resolve().parent.parent.parent / 'data'
+
+
 def load_menu_ansi(slot: str, mode: str = 'ansi'):
     """Return raw bytes for a menu art file, or None if nothing is found.
 
@@ -140,7 +160,7 @@ def load_menu_ansi(slot: str, mode: str = 'ansi'):
     # not a privilege escalation on its own.
     slot = re.sub(r'[^A-Za-z0-9_-]', '', slot or '')
 
-    data_dir   = Path(__file__).resolve().parent.parent.parent / 'data'
+    data_dir   = _configured_data_dir()
     mods_dir   = data_dir / 'mods' / 'text' / 'menus'
     menus_dir  = data_dir / 'text' / 'menus'
     stock_dir  = Path(__file__).resolve().parent.parent / 'screens' / 'menus'

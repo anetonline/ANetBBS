@@ -368,7 +368,10 @@ class DoorGamesMenuLayoutTests(unittest.TestCase):
                             is_active=True))
         db.session.commit()
 
-        menus_dir = Path(__file__).resolve().parents[1] / 'data' / 'text' / 'menus'
+        from anetbbs.features.ansi_ui import _configured_data_dir
+        menus_dir = _configured_data_dir() / 'text' / 'menus'
+        self.assertNotEqual(menus_dir.resolve().parents[1],
+                            Path(__file__).resolve().parents[1] / 'data')
         menus_dir.mkdir(parents=True, exist_ok=True)
         art_path = menus_dir / 'door_games_customartcat.ans'
         art_path.write_text('CUSTOM_SUBMENU_ART_MARKER\r\n')

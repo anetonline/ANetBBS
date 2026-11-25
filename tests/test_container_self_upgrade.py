@@ -62,6 +62,25 @@ class InstallContainerDispatchTests(unittest.TestCase):
         self._app_ctx = Flask(__name__).app_context()
         self._app_ctx.push()
         self.addCleanup(self._app_ctx.pop)
+        # The updater runs in a background thread that outlives the
+        # test's patch() blocks: keep its log and its spawn out of the
+        # source tree / real Docker, and wait for it before cleanup.
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for p in (patch.object(upgrades, '_UPGRADE_LOG_PATH', tmp.name + '/upgrade.log'),
+                  patch('anetbbs.web.control_docker.spawn_container_upgrade',
+                        return_value='test-updater')):
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(self._join_runner)
+
+    @staticmethod
+    def _join_runner():
+        import threading
+        for t in threading.enumerate():
+            if t.name == 'anetbbs-container-upgrade':
+                t.join(5)
 
     def test_docker_single_returns_501_not_supported(self):
         with patch.object(upgrades, '_RUNTIME', 'docker-single'):
