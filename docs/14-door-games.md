@@ -494,7 +494,10 @@ Synchronet APIs but is not 100% complete (see
   optional. `@USER@` substitutes the real ANetBBS caller's username;
   a single shared account (a literal username, no `@USER@`) is the
   realistic default unless every caller already has a matching Mystic
-  account.
+  account. Mystic only accepts this password as a `-p` command-line
+  argument, so other local accounts on the machine can read it in the
+  process list while the door runs. Use a dedicated, low-privilege
+  Mystic account and a password you don't use anywhere else.
 
 When the door launches, the runner:
 
@@ -664,7 +667,10 @@ dedicated browser tab with sound, pointer-lock mouse, and fullscreen.
 2. The ZIP lives at `<install>/data/dos-games/<slug>.zip`.
 3. When a web user clicks Play, the BBS serves the ZIP from
    `/games/dos-data/<slug>.zip` and opens a full-page frame at
-   `/games/dos-frame/<slug>`.
+   `/games/dos-frame/<slug>`. A ZIP is served only if an active game's
+   **Web Game URL** points at it and the user meets that game's access
+   level. A ZIP in `data/dos-games/` with no game using it isn't served
+   at all.
 4. The frame loads EmulatorJS from CDN
    (`https://cdn.emulatorjs.org/stable/data/`) with `EJS_core =
    'dosbox_pure'`, fetches the ZIP, and runs the game.

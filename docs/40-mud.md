@@ -81,7 +81,13 @@ loop.
 ## Multiplayer
 
 You'll see other players currently in your room, and can talk with
-`say`/`yell`/`tell`/`emote`. Monster encounters, though, are
+`say`/`yell`/`tell`/`emote`:
+- `say` and `emote` reach players in the same room;
+- `yell` reaches everyone in the realm;
+- `tell` reaches only the named player.
+
+Messages arrive within about a second, while you're at the prompt. You
+see only what's said after you enter, not earlier history. Monster encounters, though, are
 **instanced per player** — your fight with a goblin is yours alone,
 not a shared fight every other player in the room also sees mid-combat.
 This is a deliberate design choice, not a missing feature: a true

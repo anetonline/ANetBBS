@@ -157,7 +157,7 @@ row:
 | Internet Mail Enabled | Off until the sysop enables it |
 | Domain | Empty until configured |
 | Minimum access level for opt-in | 100 (sysop tier) |
-| Maximum message size | 25 MiB |
+| Maximum message size | 25 MiB; the setting can't go above 50 MiB |
 | Unique inbound recipients per SMTP transaction | 5 by default; hard maximum 100 |
 | Outbound messages per user | 10 per hour and 50 per day; 0 blocks outbound mail |
 | Stored mailbox data per user | 100 MiB finite quota |
@@ -172,6 +172,18 @@ transaction, plus decoded message content. Keep the recipient limit at its
 default unless the system has been sized for the larger storage impact.
 Repeated transactions and concurrent sessions are separate from that
 single-transaction bound.
+
+Other receiver limits:
+- **Message data held in memory at once** across all SMTP sessions is
+  capped at 200 MiB (`SMTP_MAX_INFLIGHT_BYTES`). A message that would
+  go over it gets a temporary `452`, and the sender retries later.
+- **Unknown recipients:** after 5 in one session, each further one is
+  answered slowly; after 20 the connection is closed.
+- **Account deleted mid-delivery:** if every recipient accepted at
+  `RCPT` time is deleted before the message is stored, the sender gets
+  a permanent `550` rather than a retry.
+- **Off the event loop:** parsing and storing a message run in a worker
+  thread, so a large message doesn't stall other SMTP or BBS sessions.
 
 ## User workflow
 

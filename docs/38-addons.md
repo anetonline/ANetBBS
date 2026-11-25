@@ -42,6 +42,17 @@ here or from the editor's own font picker panel, both trigger the
 exact same download-and-extract. No restart needed: the font picker
 scans `TDF_FONTS_DIR` fresh on every request.
 
+## Download integrity
+
+Each add-on's URL setting has a matching optional SHA-256 pin:
+`ENHANCED_CLIENT_ADDON_SHA256` and `TDF_FONTS_PACK_SHA256`. Set it
+(64 hex characters) in `.env` or Admin → Settings, and the download is
+refused unless it matches exactly. Without a pin, the URL must be
+https. Plain http is accepted only when a pin is set, or when the host
+is this machine (`127.0.0.1`, `::1`, `localhost`). The same rule
+applies to the ANSI editor's font picker, which uses this install
+route.
+
 ## Why no sudo, no service restart triggered automatically
 
 ANetBBS's full self-upgrade mechanism (Admin → Check for Updates) uses

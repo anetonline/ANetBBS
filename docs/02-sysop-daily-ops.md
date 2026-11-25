@@ -31,11 +31,11 @@ For service start/stop/restart from the web to actually work, the
 account the `anetbbs-web` *service* runs as (its systemd unit's
 `User=`, `anetbbs` by default) needs sudoers permission for the units.
 
-`update.sh` sets this up for you automatically on every run — it
-substitutes the real service-account name into the template and
-installs it, so a sysop who's run at least one update already has this
-working. On a brand-new install that hasn't been updated yet, install
-it yourself:
+`update.sh` and `install.sh` set this up for you on every run. They
+substitute the real service-account name into the template, install
+it, and write the files described below. A sysop who has run at least
+one update already has it working. To set it up by hand on an install
+that hasn't been updated yet:
 
 ```
 # Root-owned copies of the two privileged helpers. sudoers grants only
@@ -43,27 +43,65 @@ it yourself:
 sudo install -d -o root -g root -m 0755 /usr/local/libexec/anetbbs
 sudo install -o root -g root -m 0755 /opt/anetbbs/deploy/run_upgrade.sh \
     /opt/anetbbs/deploy/run_restore.sh /usr/local/libexec/anetbbs/
+# The helpers' settings. Root-owned, not writable by anyone else.
+printf '%s\n' INSTALL_DIR=/opt/anetbbs SERVICE_USER=anetbbs \
+    REGISTRY_HOST=bbs.a-net.fyi REQUIRE_SIGNED_UPGRADES=no \
+    | sudo tee /etc/anetbbs.install > /dev/null
+sudo chmod 0644 /etc/anetbbs.install
 sudo sed "s/^__SERVICE_USER__ /anetbbs /" /opt/anetbbs/deploy/sudoers.anetbbs \
     | sudo tee /etc/sudoers.d/anetbbs > /dev/null
 sudo chmod 0440 /etc/sudoers.d/anetbbs
 sudo visudo -cf /etc/sudoers.d/anetbbs    # syntax check
 ```
 
-The helpers read their settings only from `/etc/anetbbs.install`, which
-`install.sh`/`update.sh` write as root: `INSTALL_DIR`, `SERVICE_USER` and
-`REGISTRY_HOST`. `REGISTRY_HOST` is the only host web upgrades will
-download from, and it defaults to `bbs.a-net.fyi`. To trust a different
-release feed, run `update.sh` as root with `ANETBBS_REGISTRY_HOST=<host>`
-set. The helpers never take this from `.env`, because the BBS service
-account can edit `.env`.
+The helpers read their settings only from `/etc/anetbbs.install`, never
+from `.env`, because the BBS service account can edit `.env`. The file
+holds four settings:
+
+| Setting | Meaning |
+|---|---|
+| `INSTALL_DIR`, `SERVICE_USER` | where the BBS lives and which account runs it |
+| `REGISTRY_HOST` | the release feed that unsigned web upgrades may download from (default `bbs.a-net.fyi`) |
+| `REQUIRE_SIGNED_UPGRADES` | `yes` refuses every unsigned web upgrade. The default is `yes` on a registry hub (`REGISTRY_MODE_ENABLED=true`) and `no` elsewhere. |
+
+**Private release feeds.**
+- The first time `update.sh` runs after this change, it carries the
+  feed host already set in `.env` `REGISTRY_URL` over into
+  `REGISTRY_HOST`. It prints a note when it does, so web auto-update
+  keeps working from the feed you already use.
+- After that, `REGISTRY_HOST` changes only when you choose: run
+  `sudo ANETBBS_REGISTRY_HOST=<host> bash update.sh`.
+- If `.env` later names a different host, `update.sh` warns and leaves
+  the trusted host alone.
+
+To change the signing requirement, run update.sh with
+`ANETBBS_REQUIRE_SIGNED_UPGRADES=yes` or `=no`.
+
+**Signed releases.**
+- `/etc/anetbbs/release-signers` (root-owned) lists the keys whose
+  release signatures web upgrades accept. A release signed by one of
+  them installs from any https host. Unsigned releases still install
+  only from `REGISTRY_HOST`.
+- The repository's `deploy/release-signers` ships empty. Add a key
+  there, in OpenSSH allowed-signers format with the principal
+  `anetbbs-release`, and `update.sh` installs it to `/etc/anetbbs/`.
+- `build-release.sh` signs a release when the key
+  `~/.config/anetbbs/release_signing_key` exists (or the path in
+  `ANETBBS_SIGNING_KEY`), and writes `ANetBBS-vX.Y.Z.tar.gz.sig` next
+  to the tarball. Publish the `.sig` alongside the tarball and its
+  `.sha256`.
+
+Web upgrade progress goes to `/var/log/anetbbs/upgrade.log`, which is
+root-owned. **Admin → Upgrades** shows it.
 
 `update.sh` runs everything that executes the BBS's own code (pip, the
 venv's Python, migrations, `git pull`) as the service account, never as
 root. Prefer running `update.sh` from a release tarball extracted to a
 root-owned directory.
 
-Replace `anetbbs` in the `sed` command with your actual service
-account if you didn't use the installer's default. Don't just `cp` the
+Replace `anetbbs` (in `SERVICE_USER=` and the `sed` command) and
+`/opt/anetbbs` with your actual service account and install directory
+if you didn't use the installer's defaults. Don't just `cp` the
 template directly — it ships with a literal `__SERVICE_USER__`
 placeholder, not a real username, so a plain copy installs a rule that
 matches nobody.

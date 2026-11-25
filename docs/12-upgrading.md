@@ -56,10 +56,51 @@ wouldn't fix a broken Python package anyway).
 
 ## Auto-update (Admin UI)
 
-You can also trigger upgrades from **Admin → Upgrades** in the web
-interface. The BBS checks for new releases against the configured
-registry and offers a one-click install that runs `update.sh` in the
-background. Progress is streamed to the browser log viewer.
+You can also upgrade from **Admin → Upgrades** in the web interface.
+The BBS checks the configured registry (`REGISTRY_URL`) for a new
+release and offers a one-click install. The click runs the root-owned
+helper `/usr/local/libexec/anetbbs/run_upgrade.sh` through sudo, in a
+detached systemd unit, so the upgrade survives the web service
+restarting. The helper:
+
+1. Takes its settings from root-owned `/etc/anetbbs.install`, never from
+   `.env`.
+2. Requires an https download.
+3. Checks the release's origin. A release signed by a key in
+   `/etc/anetbbs/release-signers` may come from any host. An unsigned
+   release must come from `REGISTRY_HOST`, and is refused entirely when
+   `REQUIRE_SIGNED_UPGRADES=yes`.
+4. Checks the SHA-256 and, when the release is signed, the signature.
+5. Extracts the release and runs its `update.sh`, the same steps as
+   above, including the automatic rollback.
+
+Progress goes to `/var/log/anetbbs/upgrade.log` and is shown in the
+browser log viewer. Rollback to the previous release uses the same
+checks.
+
+**Using a private release feed?** Your first `update.sh` run after
+upgrading to this version carries the feed host from `.env`
+`REGISTRY_URL` into `/etc/anetbbs.install` automatically. After that,
+change it with `sudo ANETBBS_REGISTRY_HOST=<host> bash update.sh`. The
+details, and how to sign your own releases, are in
+[02 — Sysop daily ops](02-sysop-daily-ops.md).
+
+**Docker installs** upgrade through the separate `control` service; see
+[22 — Containers](22-containers.md#self-upgrade).
+
+### Installs made with `git clone`
+
+On an install that is a git checkout, `update.sh` runs `git pull` (as
+the service account) instead of copying files. If the upstream history
+was rewritten, for example to remove a file from old commits, a normal
+pull refuses. `update.sh` then checks two things:
+- that you have no local changes to tracked files;
+- that your current commit has exactly the same content as a commit on
+  the new upstream branch.
+
+If both hold, it moves the checkout to the new history and updates.
+Otherwise it leaves the checkout alone and tells you why: local
+changes, or local commits that aren't upstream.
 
 ## Manual rollback
 

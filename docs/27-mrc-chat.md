@@ -91,6 +91,27 @@ identify-gating, CTCP, DM routing, join/leave announcements, userlist --
 is the exact same `BridgeApp` code and behaves identically. Switching
 backends only changes how the raw bytes get to the hub.
 
+### Who can use the bridge's WebSocket
+
+The bridge checks each WebSocket connection itself, whether or not
+nginx sits in front:
+
+- **Browsers** must carry a logged-in BBS session cookie. The bridge
+  reads the BBS's own session, using the same `SECRET_KEY`, and the
+  browser can join only under that account's own handle. The IP address
+  reported to the MRC network comes from the connection; the browser
+  can't choose it.
+- **The BBS's terminal clients** connect without a cookie and send a
+  token derived from `SECRET_KEY`. A cookie-less connection from the
+  bridge's own loopback with no `X-Forwarded-For` header is also
+  accepted.
+- **`X-Forwarded-For`** is trusted only when it arrives from loopback,
+  meaning a local reverse proxy.
+
+Every process that talks to the bridge (web, terminal server, bridge)
+must therefore share one `SECRET_KEY`. That's already the case when
+they read the same `.env`.
+
 ## Native `umrc-client` support (one shared bridge, no separate `umrc-bridge`)
 
 **Status: working, verified live against a real `umrc-client` build

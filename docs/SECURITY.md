@@ -41,13 +41,15 @@ Read this whole file before exposing the BBS to the internet.
     every other login path above, applied before a candidate key is
     even evaluated against the database.
   - `/auth/forgot` and `/auth/forgot/verify` (10 / 5 min / IP each) —
-    the security-question recovery flow. Also found and fixed in the
-    same audit: a wrong guess no longer lets the same question be
-    retried indefinitely (capped at 5 attempts per recovery session),
-    and the flow no longer reveals whether an account exists via its
-    redirect target — every submission lands on the same verify page,
-    with a random, unanswerable decoy question for an account that
-    doesn't exist (or has no security questions on file).
+    the security-question recovery flow. Wrong answers are counted on
+    the account itself, not in the browser session: after 5 the account's
+    question recovery locks for 1 hour and the account's email address is
+    told. A locked account answers exactly like a wrong answer. The
+    question asked for an account stays the same across attempts, so
+    restarting the flow can't be used to shop for an easier question.
+    The flow doesn't reveal whether an account exists: every submission
+    lands on the same verify page, with an unanswerable decoy question
+    for an account that doesn't exist or has no questions on file.
   - `/imsg/send` — 30 messages / hour / user
   - `/api/vote` — 60 votes / min / user
 - **`/auth/register` rate limit** (3 attempts / hour / IP) — unlike the
@@ -305,6 +307,42 @@ Read this whole file before exposing the BBS to the internet.
   lets a privacy-conscious sysop turn it off entirely. Editable at
   **Admin → Settings**.
 
+- **Sessions end when the account changes.** A password change, a lock,
+  or a deactivation ends that account's existing web sessions, including
+  "remember me" cookies. **Log out everywhere** in the user menu ends
+  every session of your own account. Logout is a POST with a CSRF token,
+  so a link on another site can't log you out. The remember-me cookie is
+  `HttpOnly`, `SameSite=Lax`, `Secure` when `SESSION_COOKIE_SECURE` is
+  on, and lasts `REMEMBER_COOKIE_DAYS` days (default 30).
+- **Changing your email or security questions needs your current
+  password**, and the old address is told when the email changes, so a
+  hijacked session can't quietly redirect password recovery.
+- **Privileged helpers are root-owned.** The two commands the service
+  account may run with sudo (web upgrade and backup restore) are
+  installed root-owned in `/usr/local/libexec/anetbbs/`. They read their
+  settings only from root-owned `/etc/anetbbs.install`, never from the
+  service account's files, and they don't run any code the service
+  account can modify as root. See
+  [12 — Upgrading](12-upgrading.md#web-upgrades-and-the-trusted-release-feed).
+- **Signed releases.** When `/etc/anetbbs/release-signers` lists a key,
+  a web upgrade accepts a release signed by that key from any https
+  host. An unsigned release is accepted only from the trusted feed host,
+  and never when `REQUIRE_SIGNED_UPGRADES=yes`.
+- **`/healthz` is minimal for the public.** Anonymous remote callers get
+  only `status` and `db_ok`. Version, host name and listener details go
+  to admins and to local probes (127.0.0.1 with no `X-Forwarded-For`).
+- **Outbound connections are limited to public addresses.** RSS feeds,
+  feed images, terminal sixel images and webhooks may only reach
+  globally routable addresses. Every resolved address is checked, and
+  every redirect hop is checked again. The browser terminal also refuses
+  well-known service ports such as mail and databases; set
+  `WEB_TERMINAL_BLOCKED_PORTS` (comma-separated) to change the list.
+- **Personal pages are sandboxed.** See
+  [10 — Personal pages](10-personal-pages.md).
+- **Private messages and netmail don't load remote images**, which would
+  otherwise tell the sender when you read the message and from which IP
+  address. Images hosted on the BBS itself still show.
+
 ## What you MUST do for production
 
 1. **Set `SECRET_KEY`.** Generate once, set in your systemd unit's
@@ -351,9 +389,17 @@ Read this whole file before exposing the BBS to the internet.
   real sweep found both in wide, legitimate use across the template
   tree. Migrating to a nonce-based CSP that blocks inline script/style
   entirely is real future work, not done in this pass.
-- **No per-account lockout** — the auto-ban above works on the source
-  IP, not the targeted username, so a distributed brute-force attempt
-  from many IPs against one account isn't slowed by this mechanism.
+- **No per-account lockout for password logins** — the auto-ban above
+  works on the source IP, not the targeted username, so a distributed
+  brute-force attempt from many IPs against one account isn't slowed by
+  it. (Security-question recovery does have a per-account lockout; see
+  above.)
+- **Mystic door passwords are visible to local users.** Mystic only
+  accepts the script account's password as a `-p` command-line
+  argument, so other accounts on the same machine can read it in the
+  process list while the door runs. Use a dedicated low-privilege Mystic
+  account for `door_mystic_mps` doors, and don't reuse that password
+  anywhere.
 - **Uploads are not sandboxed beyond ClamAV** if you have it installed.
   Don't run the BBS on a host where executable uploads matter.
 - **Synchronet `.js` doors** without real `jsexec` get a Node.js

@@ -47,6 +47,13 @@ overridable as the others).
 
 ## Privileged ports
 
+Connection limits: rlogin accepts at most 64 connections at once and
+8 from one IP address (`RLOGIN_MAX_CONNECTIONS`,
+`RLOGIN_MAX_CONNECTIONS_PER_IP`). The browser terminal (`/terminal`)
+won't connect out to well-known mail, DNS, file-sharing and database
+ports; `WEB_TERMINAL_BLOCKED_PORTS` (a comma-separated list) replaces
+that default list.
+
 Ports < 1024 (Finger/79, MSP/18, SYSTAT/11, FTP/21, rlogin/513) require
 root or the `CAP_NET_BIND_SERVICE` capability. See `docs/INSTALL.md` §6
 for the three fix options. The MSP/SYSTAT/Finger services log a clear

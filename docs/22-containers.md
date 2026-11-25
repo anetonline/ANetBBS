@@ -291,29 +291,35 @@ Then uncomment the `mrc-bridge` service's `5010:5010` `ports:` line in
 security posture actually is before opting in — it's brand new,
 less-reviewed surface than the rest of the bridge.
 
-## The docker.sock trust boundary (read this before enabling)
+## The docker.sock trust boundary
 
-The `web` service's compose entry mounts `/var/run/docker.sock` into
-the container so the Sysop Control Panel can restart/upgrade sibling
-containers via the Docker API instead of `systemctl` (which doesn't
-exist inside a container at all). **This grants root-equivalent
-control of the Docker host to anything that can reach the panel's
-restart/upgrade endpoints.** It's the same tradeoff tools like
-Portainer and Watchtower make, and it's why those endpoints are
-already gated behind `@login_required`/admin-only — but it's worth
-understanding plainly before you opt in.
+The Sysop Control Panel restarts and upgrades sibling containers through
+the Docker API, since there is no `systemctl` inside a container.
+Access to `/var/run/docker.sock` is root-equivalent control of the
+Docker host, so the internet-facing `web` container **doesn't mount
+it**. Only the small `control` service does:
 
-If you'd rather not accept that: delete the `/var/run/docker.sock`
-volume line from the `web` service. Everything else keeps working —
-the panel just won't be able to restart/upgrade sibling containers for
-you; run `docker compose restart <service>` / `docker compose pull &&
-up -d` by hand instead.
+- `control` listens on a unix socket in the shared `anetbbs_control`
+  volume (`/run/anetbbs-control/control.sock`). It isn't published on
+  any port.
+- It accepts only a fixed set of requests, refusing anything else:
+  - read a service's state or recent logs;
+  - start, stop, restart or reload one of the ANetBBS services;
+  - upgrade to a version tag.
+- So a compromise of the web app can at most restart services or start
+  an upgrade to a published tag. It can't run arbitrary containers or
+  commands on the host.
 
-A future hardening option (not implemented, documented for later): put
-a scoped proxy like `tecnativa/docker-socket-proxy` between the web
-container and the real socket, exposing only the specific API
-operations the panel needs (containers list/start/stop/restart,
-images pull) instead of the full Docker API.
+If you don't want any container to have the Docker socket, remove the
+`control` service. Everything else keeps working; the panel just
+reports that it can't restart or upgrade containers. Run
+`docker compose restart <service>` and `docker compose pull && docker
+compose up -d` by hand instead.
+
+Upgrading from a release whose `web` service still mounted
+`docker.sock`: use the new `docker-compose.yml` from the release, which
+adds `control` and removes the mount from `web`. Re-run `docker compose
+up -d` so the change takes effect.
 
 ## `MRC_BRIDGE_HOST` — a real gotcha
 
@@ -333,17 +339,23 @@ when `ANETBBS_RUNTIME=docker-single` (set by the documented `docker
 run` command above) — leave `MRC_BRIDGE_HOST` unset/default for this
 mode.
 
-One consequence either way (single-container OR compose): because the
-browser talks to the bridge **directly**, on port 8080, the bridge
-itself has no login check of its own — the only place MRC web access
-is gated behind your BBS login is nginx's `auth_request` on a
-traditional install. If port 8080 is reachable from the open internet
-in either Docker mode, anyone who finds that port can join MRC chat
-without ever logging into your BBS. If that matters for your
-deployment, don't publish port 8080 to a public interface (bind it to
-`127.0.0.1` only, or put a real reverse proxy in front of it that adds
-its own auth gate) — this is a pre-existing tradeoff of the "direct
-bridge connection, no nginx" path, not something new to fix.
+Either way (single-container or compose), the browser talks to the
+bridge **directly** on port 8080, not through nginx. The bridge
+therefore checks who is connecting itself:
+
+- A browser must carry a logged-in BBS session cookie. The bridge reads
+  it with the same `SECRET_KEY`, so keep that identical in every
+  container's `.env`.
+- That browser can only join MRC under its own BBS handle, and can't
+  choose the IP address reported to the MRC network.
+- Connections without a cookie (the BBS's own terminal clients) must
+  send a token derived from `SECRET_KEY`, or come from the bridge's own
+  loopback with no `X-Forwarded-For`.
+- `X-Forwarded-For` is honoured only from loopback.
+
+You can publish 8080 as the compose file does. Binding it to
+`127.0.0.1` and fronting it with a TLS reverse proxy is still better,
+since plain `ws://` on 8080 is unencrypted.
 
 ## Why this is safe with SQLite (no Postgres required)
 
@@ -396,8 +408,9 @@ the BBS, they just won't work:
 ## Self-upgrade
 
 `docker-compose` mode supports one-click self-upgrade from the admin
-panel (Admin → Upgrades), same UI as bare metal. Behind the scenes it
-launches a detached, ephemeral sibling container (from the same image,
+panel (Admin → Upgrades), same UI as bare metal. Behind the scenes the
+`control` service (see the docker.sock section above) launches a
+detached, ephemeral sibling container (from the same image,
 which bundles the `docker` CLI + compose plugin) that runs `docker
 compose pull && up -d --remove-orphans` against your own
 `docker-compose.yml`/`.env` — the container analogue of the detached
@@ -405,6 +418,9 @@ systemd unit the bare-metal upgrade wrapper puts itself into once it's
 running, so the upgrader survives the web container being recreated
 mid-upgrade the same way the bare-metal wrapper survives anetbbs-web
 being restarted.
+
+The web container only asks for an upgrade to a version tag. The
+`control` service checks the tag's format before starting anything.
 
 This needs `ANETBBS_COMPOSE_DIR` set in `.env` to the absolute host
 path containing your `docker-compose.yml` (defaults to wherever you

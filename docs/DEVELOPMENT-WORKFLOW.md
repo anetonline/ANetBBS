@@ -2,7 +2,7 @@
 
 ## Canonical checkout
 
-`/home/jerry/AIANETBBS/anetbbs-rebuilt` is the canonical working checkout for ANetBBS development on ClaudeDELL. Make source, documentation, and release-preparation changes here. Other extracted trees, test installations, and generated archives are snapshots or test artifacts; do not treat them as competing source checkouts.
+The maintainer's main development checkout is the canonical working checkout for ANetBBS development. Make source, documentation, and release-preparation changes here. Other extracted trees, test installations, and generated archives are snapshots or test artifacts; do not treat them as competing source checkouts.
 
 Before importing work from a snapshot, compare it with this checkout and preserve changes already present here. Never copy runtime state such as `.env`, logs, databases, caches, or user mailboxes into the source tree or release archive.
 
@@ -14,7 +14,7 @@ The release builder includes tracked files and non-ignored untracked files, plus
 
 ## GitHub sync script
 
-`/home/jerry/AIANETBBS/sync_to_github.sh` operates on this canonical checkout. It stages all changes, creates a commit, and creates a version tag. Inspect the full diff and `git status` first, run the relevant checks, and ensure the version tag does not already exist. The script does not publish the changes by itself; pushing the branch and tag is a separate action. Do not run the script as a substitute for review or as part of a private test build.
+The maintainer's `sync_to_github.sh` helper (kept outside the repository) operates on this canonical checkout. It stages all changes, creates a commit, and creates a version tag. Inspect the full diff and `git status` first, run the relevant checks, and ensure the version tag does not already exist. The script does not publish the changes by itself; pushing the branch and tag is a separate action. Do not run the script as a substitute for review or as part of a private test build.
 
 ## ClaudeVM access
 
