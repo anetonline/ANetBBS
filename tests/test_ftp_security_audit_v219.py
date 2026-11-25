@@ -81,6 +81,13 @@ class FtpSecurityAuditTests(unittest.TestCase):
         h = object.__new__(AnetbbsFTPHandler)
         h.app = self.app
         h.username = username
+        # Sessions are bound to the authenticated account id at login
+        # (audit M-2); later checks never re-resolve the wire username.
+        with self.app.app_context():
+            from anetbbs.models import User, db
+            _u = User.query.filter(
+                db.func.lower(User.username) == (username or '').lower()).first()
+            h._bbs_user_id = _u.id if _u else None
         h._qwk_node_id = qwk_node_id
         h.respond = MagicMock()
         h.fs = MagicMock(root=fs_root)
@@ -261,7 +268,10 @@ class FtpSecurityAuditTests(unittest.TestCase):
             handler.respond.assert_called_once()
             self.assertIn('550', handler.respond.call_args[0][0])
 
-    def test_regular_user_allowed_to_delete_in_users_permission_area(self):
+    def test_regular_user_cannot_delete_even_in_users_permission_area(self):
+        """Since audit H-3, deleting/renaming/overwriting existing area
+        files is sysop-only over FTP: an upload-capable user must not be
+        able to remove someone else's file."""
         from anetbbs.models import db, User
         with tempfile.TemporaryDirectory() as fs_root:
             with self.app.app_context():
@@ -277,10 +287,9 @@ class FtpSecurityAuditTests(unittest.TestCase):
 
             with patch('pyftpdlib.handlers.FTPHandler.ftp_DELE',
                       return_value=target) as mock_super:
-                result = handler.ftp_DELE(target)
-            mock_super.assert_called_once_with(target)
-            self.assertEqual(result, target)
-            handler.respond.assert_not_called()
+                handler.ftp_DELE(target)
+            mock_super.assert_not_called()
+            self.assertTrue(handler.respond.call_args[0][0].startswith('550'))
 
     def test_admin_bypasses_area_write_restriction(self):
         from anetbbs.models import db, User

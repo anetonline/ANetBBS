@@ -68,7 +68,11 @@ async def show_last_callers(session, args=None):
         return
 
     lines = ["\x1b[1;36m=== Last Callers ===\x1b[0m"]
+    from ..core.text_safety import strip_untrusted_escapes as _clean
     for username, service, started_at, origin_bbs in rows:
+        # Remote (InterBBS) rows carry other systems' text (audit M-5).
+        username, service = _clean(username) or '?', _clean(service) or '?'
+        origin_bbs = _clean(origin_bbs) if origin_bbs else origin_bbs
         when = fmt_eastern(started_at, '%m-%d %H:%M', '?')
         origin_tag = f" \x1b[36m(via {origin_bbs})\x1b[0m" if origin_bbs else ""
         lines.append(

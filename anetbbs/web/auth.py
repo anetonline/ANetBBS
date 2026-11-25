@@ -1195,6 +1195,65 @@ def _issue_reset_token_and_notify(user):
     _log_activity(user.id, 'password_reset_requested')
 
 
+SQ_MAX_FAILURES = 5
+SQ_LOCKOUT = timedelta(hours=1)
+
+
+def _sq_account_locked(user):
+    return bool(user is not None and user.sq_locked_until
+                and user.sq_locked_until > datetime.utcnow())
+
+
+def _sq_record_failure(user):
+    """Count a wrong security answer on the account itself (audit M-1).
+    After SQ_MAX_FAILURES the account's question step locks for
+    SQ_LOCKOUT, regardless of session, cookie, or client IP, and the
+    account holder is told."""
+    if user is None:
+        return
+    user.sq_failed_count = (user.sq_failed_count or 0) + 1
+    if user.sq_failed_count >= SQ_MAX_FAILURES:
+        user.sq_failed_count = 0
+        user.sq_locked_until = datetime.utcnow() + SQ_LOCKOUT
+        db.session.commit()
+        _log_activity(user.id, 'security_question_lockout')
+        try:
+            from ..features.notify import notify
+            notify(user.id, 'security',
+                   title='Password recovery locked',
+                   body=('Several wrong answers were given to your security '
+                         'question. Recovery by security question is paused '
+                         'for an hour. If this was not you, consider changing '
+                         'your password and security answers.'))
+        except Exception:
+            current_app.logger.exception('security-question lockout notice failed')
+        _email_lockout_notice_async(user.email)
+    else:
+        db.session.commit()
+
+
+def _email_lockout_notice_async(address):
+    if not address:
+        return
+    import threading
+    app = current_app._get_current_object()
+
+    def _send():
+        try:
+            with app.app_context():
+                from ..mailer import smtp_enabled, send_email
+                if smtp_enabled():
+                    send_email(address, 'Password recovery temporarily locked',
+                               'Several wrong answers were given to your '
+                               'security question, so recovery by security '
+                               'question is paused for an hour. If this was '
+                               'not you, consider changing your password and '
+                               'security answers.')
+        except Exception:
+            app.logger.exception('security-question lockout email failed')
+    threading.Thread(target=_send, daemon=True, name='sq-lockout-mail').start()
+
+
 def _clear_sq_session():
     for key in ('sq_nonce', 'sq_user_id', 'sq_answer_id', 'sq_decoy_question',
                'sq_attempts'):
@@ -1261,12 +1320,24 @@ def security_question_verify():
             return redirect(url_for('auth.forgot_password'))
 
         raw = request.form.get('answer', '').strip()
+        account = db.session.get(User, user_id) if user_id else None
+        locked = _sq_account_locked(account)
         if not raw:
             error = _t('auth.answer_required', 'Please enter your answer.')
+        elif locked:
+            # Audit M-1: while the account is locked, answers are not
+            # checked at all. Same response and same hashing cost as a
+            # wrong answer, so a lock doesn't reveal that the account
+            # exists.
+            check_password_hash(_DUMMY_PASSWORD_HASH, raw)
+            error = _t('auth.incorrect_answer', 'Incorrect answer. Please try again.')
         elif qa is not None and qa.check_answer(raw):
             # Correct — issue reset token and send user straight to reset page
             _clear_sq_session()
             user = db.session.get(User, user_id)
+            if user is not None:
+                user.sq_failed_count = 0
+                user.sq_locked_until = None
             if user is None:
                 flash(_t('auth.session_expired', 'Session expired. Please try again.'), 'warning')
                 return redirect(url_for('auth.forgot_password'))
@@ -1289,6 +1360,8 @@ def security_question_verify():
             # answer, instead of a short-circuited instant return.
             if qa is None:
                 check_password_hash(_DUMMY_PASSWORD_HASH, raw)
+            else:
+                _sq_record_failure(account)
             error = _t('auth.incorrect_answer', 'Incorrect answer. Please try again.')
 
     return render_template('auth/security_question_verify.html',

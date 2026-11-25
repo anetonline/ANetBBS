@@ -114,7 +114,7 @@ class _FakeNetworkRow:
         self.network_type = 'binkp'
         self.hub_address = hub_address
         self.our_address = ''
-        self.binkp_password = ''
+        self.binkp_password = 'hubsecret'  # passwordless links are non-secure (audit M-4)
         self.packet_password = ''
         self.default_crash = False
         self.default_hold = False
@@ -140,7 +140,7 @@ def _freq_frames(claimed_address, req_filename='000C0003.req', req_payload=b'a.z
     from anetbbs.echomail import binkp_server as mod
     return [
         (True, _cmd_payload(mod.CMD_ADR, claimed_address)),
-        (True, _cmd_payload(mod.CMD_PWD, '')),
+        (True, _cmd_payload(mod.CMD_PWD, 'hubsecret')),
         (True, _cmd_payload(mod.CMD_FILE,
                             f'{req_filename} {len(req_payload)} 1700000000 0')),
         (False, req_payload),

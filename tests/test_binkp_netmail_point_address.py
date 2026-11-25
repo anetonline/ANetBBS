@@ -155,6 +155,20 @@ class ServerImportUsesParsedAddressesTests(unittest.TestCase):
             from_name = None
             from_address = None
             subject = None
+            msgid = None
+            class _AnyCol:
+                """Comparisons/is_() yield True so the dedup filter builds."""
+                def is_(self, _v):
+                    return True
+
+                def __ne__(self, _v):
+                    return True
+
+                def __eq__(self, _v):
+                    return True
+
+                __hash__ = object.__hash__
+            trust = _AnyCol()   # audit M-4 dedup scoping column
             from datetime import datetime as _dt
             received_at = _dt.max
 

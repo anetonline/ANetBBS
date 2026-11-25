@@ -48,7 +48,7 @@
                             <a href="{{ url_for('netmail.compose', draft_id=m.id) }}">{{ m.to_name }}</a>
                         {% else %}
                             <a href="{{ url_for('netmail.read', msg_id=m.id) }}">
-                                {% if folder == 'inbox' %}{{ m.from_name }}{% else %}{{ m.to_name }}{% endif %}
+                                {% if folder == 'inbox' %}{{ m.from_name }}{% if m.trust == 'insecure' %} <span class="badge bg-warning text-dark" title="Unverified sender (non-secure session)">unverified</span>{% endif %}{% else %}{{ m.to_name }}{% endif %}
                             </a>
                         {% endif %}
                     </td>

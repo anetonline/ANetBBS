@@ -81,6 +81,16 @@ class AnonymousCrashmailTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.app = _fresh_app(str(Path(self._tmp.name) / 'anon_crashmail.db'))
+        # Audit M-4: non-secure (anonymous) netmail is accepted only when
+        # addressed to one of OUR addresses, so the node these tests send
+        # to must be a configured local address.
+        from anetbbs.models import db, EchomailNetwork
+        with self.app.app_context():
+            db.session.add(EchomailNetwork(name='LocalNet', network_type='binkp',
+                                           our_address='1:123/3003',
+                                           hub_address='1:123/0',
+                                           binkp_password='pw', is_active=True))
+            db.session.commit()
 
     def test_netmail_from_unrecognized_peer_is_imported_with_null_network(self):
         """The actual compliance fix: crashmail from a peer we've never
@@ -127,9 +137,12 @@ class AnonymousCrashmailTests(unittest.TestCase):
         through otherwise."""
         from anetbbs.echomail.binkp import _build_ftn_packet
         from anetbbs.echomail import binkp_server
-        from anetbbs.models import NetmailMessage
+        from anetbbs.models import db, User, NetmailMessage
 
         with self.app.app_context():
+            db.session.add(User(username='stingray', email='stingray@example.test',
+                                password_hash='x', access_level=100))
+            db.session.commit()
             msg = _FakeMsg(area=None, from_name='Remote Sysop',
                            to_name='stingray', subject='hi',
                            msg_id='2:280/464 origintest',
@@ -198,10 +211,9 @@ class AnonymousCrashmailTests(unittest.TestCase):
 
     def test_areafix_command_from_unrecognized_peer_does_not_crash_or_apply(self):
         """An anonymous peer emailing 'areafix' must not be able to
-        change subscriptions -- process_request(network=None, ...)
-        already fails closed ("Network not configured"); this just
-        confirms the whole inbound-listener path reaches that safely
-        with network_id=None instead of raising."""
+        change subscriptions, and (audit M-4) must not reach the robot at
+        all: robot netmail from a non-secure session is dropped without
+        a reply, so it can't be used to guess node passwords."""
         from anetbbs.echomail.binkp import _build_ftn_packet
         from anetbbs.echomail import binkp_server
         from anetbbs.models import AreafixLog
@@ -214,13 +226,11 @@ class AnonymousCrashmailTests(unittest.TestCase):
             pkt = _build_ftn_packet([msg], '9:999/999', '1:123/3003')
 
             imported = binkp_server._import_pkt_payload(pkt, None, 'anon.pkt')
-            self.assertEqual(imported, 1,
-                            'the netmail itself still imports/logs even '
-                            'though the command is rejected')
-
-            log = AreafixLog.query.filter_by(from_address='9:999/999').first()
-            self.assertIsNotNone(log)
-            self.assertFalse(log.success)
+            self.assertEqual(imported, 0, 'robot netmail from a non-secure '
+                                          'session is dropped')
+            self.assertIsNone(
+                AreafixLog.query.filter_by(from_address='9:999/999').first(),
+                'the AreaFix robot must never run for a non-secure session')
 
 
 if __name__ == '__main__':

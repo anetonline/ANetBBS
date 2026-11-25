@@ -760,6 +760,15 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
         network = (EchomailNetwork.query
                    .filter(EchomailNetwork.hub_address.in_(candidates))
                    .first()) if candidates else None
+        # Audit M-4: a configured link with NO session password proves
+        # nothing about the caller -- anyone can claim the hub's address.
+        # Such a match is treated exactly like an unknown caller: a
+        # non-secure session with no peer identity or privileges.
+        if network and network.network_type == 'binkp' and not (network.binkp_password or '').strip():
+            logger.warning('BinkP %s: %s matches network %r, which has no session '
+                           'password -- treating the session as NON-SECURE',
+                           peer, remote_addr, network.name)
+            network = None
         if network and network.network_type == 'binkp':
             if not _verify_binkp_password(network.binkp_password, remote_pwd,
                                           cram_challenge_bytes):
@@ -820,6 +829,11 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                     .filter(BinkPNode.ftn_address.in_(candidates))
                     .filter_by(is_active=True)
                     .first()) if candidates else None
+            if node and not (node.password or '').strip():
+                logger.warning('BinkP %s: %s matches downstream node %r, which has '
+                               'no session password -- treating the session as '
+                               'NON-SECURE', peer, remote_addr, node.name)
+                node = None
             if node:
                 if not _verify_binkp_password(node.password, remote_pwd,
                                               cram_challenge_bytes):
@@ -937,7 +951,9 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
     logger.info('BinkP %s: authenticated as %s (%s)', peer, remote_addr, net_name)
 
     # 4. M_OK
-    await _send_cmd(writer, CMD_OK, 'secure', transcript=transcript)
+    session_secure = net_id is not None or downstream_node_id is not None
+    await _send_cmd(writer, CMD_OK, 'secure' if session_secure else 'non-secure',
+                    transcript=transcript)
 
     # 5. Send queued outbound messages FIRST, then our own M_EOB --
     #    moved ahead of receiving (this used to be step "6", after a
@@ -1412,7 +1428,16 @@ async def _handle_connection(reader, writer, our_address: str, system_name: str)
                                 imported_total += _import_pkt_payload(
                                     inner_payload, net_id, inner_name,
                                     peer_address=remote_addr,
-                                    origin_ip=_origin_ip)
+                                    origin_ip=_origin_ip,
+                                    insecure=(net_id is None and downstream_node_id is None),
+                                    downstream_node_id=downstream_node_id)
+                        elif net_id is None and downstream_node_id is None:
+                            # Audit M-4: a non-secure session may deliver
+                            # netmail only -- no file echoes, TICs or
+                            # attachments are accepted from it.
+                            logger.warning(
+                                'BinkP %s: dropped file %s from non-secure session',
+                                peer, fname)
                         else:
                             # Non-packet files (TIC manifests, hatched binaries, etc.)
                             # get written to inbound for later processing.
@@ -2017,8 +2042,30 @@ async def _send_outbound_dir_items(reader, writer, outbound_dir, peer,
     return sent, failures
 
 
+def _local_ftn_addresses():
+    """Normalized FTN addresses that are ours: every active network's node
+    address plus every user AKA (points)."""
+    from ..models import EchomailNetwork, UserAka
+    from .routing import parse_address, format_address
+    out = set()
+    raw = [n.our_address for n in EchomailNetwork.query.filter_by(is_active=True).all()]
+    raw += [a.address for a in UserAka.query.all()]
+    for a in raw:
+        p = parse_address((a or '').split('@', 1)[0])
+        if p:
+            out.add(format_address(*p))
+    return out
+
+
+def _norm_ftn(addr):
+    from .routing import parse_address, format_address
+    p = parse_address((addr or '').split('@', 1)[0])
+    return format_address(*p) if p else None
+
+
 def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
-                        peer_address: str = None, origin_ip: str = None) -> int:
+                        peer_address: str = None, origin_ip: str = None,
+                        insecure: bool = None, downstream_node_id: int = None) -> int:
     """Parse an FTS-0001 .pkt and import each message as inbound. Returns count.
 
     Routes by AREA: kludge:
@@ -2061,6 +2108,11 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
     echomail_objects = []       # EchomailMessage ORM objects for post-commit toss
     echomail_notify_pairs = []  # (EchomailMessage, EchoArea) for post-commit reply-notify
     netmails_to_process = []   # ids of newly-inserted netmails for post-processing
+    _local_addrs = None        # lazily computed for non-secure sessions (audit M-4)
+    # Fail safe: with no network identity, the session is non-secure
+    # unless the caller says otherwise.
+    if insecure is None:
+        insecure = network_id is None
 
     for m in messages:
         kludges = m.get('kludges') or []
@@ -2194,8 +2246,18 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
             # Same dedup gap as echomail above -- poller.py's
             # _import_netmail() already checks NetmailMessage.msgid
             # before inserting; this listener path never did.
-            if msgid and NetmailMessage.query.filter_by(msgid=msgid).first():
-                continue
+            # Duplicate suppression is scoped by trust level (audit M-4),
+            # so a non-secure sender can't pre-plant a MSGID and suppress
+            # a later genuine message.
+            if msgid:
+                _dupe_q = NetmailMessage.query.filter_by(msgid=msgid)
+                if insecure:
+                    _dupe_q = _dupe_q.filter(NetmailMessage.trust == 'insecure')
+                else:
+                    _dupe_q = _dupe_q.filter(db.or_(NetmailMessage.trust.is_(None),
+                                                    NetmailMessage.trust != 'insecure'))
+                if _dupe_q.first():
+                    continue
             reply = find_kludge(kludges, 'REPLY')
             # Use _parse_ftn_packet's own from_address/to_address rather
             # than re-deriving from @INTL locally -- this used to
@@ -2266,7 +2328,36 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
             # received netmail was never linked to a User row and could
             # only be found later by string-matching to_name in the web
             # inbox (and its recipient never got notified of new mail).
+            if insecure:
+                # Audit M-4: a non-secure session may only deliver netmail
+                # to a local user at one of our own addresses. No robots
+                # (AreaFix/FileFix would otherwise be a password-guessing
+                # oracle), no transit, no name-only delivery to admins.
+                if _is_robot_netmail:
+                    logger.warning('BinkP: dropped robot netmail to %r from '
+                                   'non-secure session %s', m.get('to_name'), peer_address)
+                    continue
+                if _local_addrs is None:
+                    _local_addrs = _local_ftn_addresses()
+                if _norm_ftn(to_addr) not in _local_addrs:
+                    logger.warning('BinkP: dropped non-local netmail to %s from '
+                                   'non-secure session %s', to_addr, peer_address)
+                    continue
             to_user = resolve_netmail_recipient(m['to_name'], to_addr, network)
+            if insecure:
+                if to_user is None:
+                    logger.warning('BinkP: dropped netmail to unknown user %r from '
+                                   'non-secure session %s', m.get('to_name'), peer_address)
+                    continue
+                if to_user.is_admin:
+                    from ..models import UserAka as _UA
+                    _own = {_norm_ftn(a.address)
+                            for a in _UA.query.filter_by(user_id=to_user.id).all()}
+                    if _norm_ftn(to_addr) not in _own:
+                        logger.warning('BinkP: dropped name-only netmail to admin %r '
+                                       'from non-secure session %s',
+                                       m.get('to_name'), peer_address)
+                        continue
 
             nm = NetmailMessage(
                 network_id=network_id,
@@ -2286,6 +2377,7 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
                 created_at=datetime.utcnow(),
                 received_at=datetime.utcnow(),
                 origin_ip=(origin_ip if network_id is None else None),
+                trust=('insecure' if insecure else None),
             )
             db.session.add(nm)
             db.session.flush()
@@ -2333,17 +2425,19 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
     for nm_id, to_lower, to_uid, from_name, subject in netmails_to_process:
         if to_lower in ('areafix', 'area fix', 'areamgr'):
             try:
-                handle_areafix_netmail(nm_id)
+                handle_areafix_netmail(nm_id, session_node_id=downstream_node_id)
             except Exception:
                 logger.exception('Areafix bot failed for netmail %d', nm_id)
         elif to_lower in ('filefix', 'file fix', 'filemgr'):
             try:
-                handle_filefix_netmail(nm_id)
+                handle_filefix_netmail(nm_id, session_node_id=downstream_node_id)
             except Exception:
                 logger.exception('FileFix bot failed for netmail %d', nm_id)
         elif to_uid:
             try:
-                notify(to_uid, 'netmail', title=f'Netmail from {from_name}',
+                _who = (f'{from_name} (unverified sender)' if insecure
+                        else from_name)
+                notify(to_uid, 'netmail', title=f'Netmail from {_who}',
                       body=subject or '', target_url=f'/netmail/{nm_id}')
             except Exception:
                 logger.exception('Netmail notify failed for netmail %d', nm_id)

@@ -755,18 +755,14 @@ def upload(area_id):
             flash(f'{safe_name} uploaded — pending sysop approval.', 'info')
             return redirect(url_for('file_areas.view_area', area_id=area.id))
 
-        dest = os.path.join(area.storage_path, safe_name)
-        upload.save(dest)
+        staged = _stage_upload(upload, area.storage_path, safe_name)
 
         # Virus scan (optional — silently skipped if clamscan isn't installed).
         try:
             from ..features.virus_scan import scan_path
-            result = scan_path(dest)
+            result = scan_path(staged)
             if result.infected:
-                try:
-                    os.remove(dest)
-                except OSError:
-                    pass
+                _discard_staged(staged)
                 flash(f'Upload rejected: virus detected ({result.signature}).',
                       'danger')
                 return redirect(url_for('file_areas.view_area', area_id=area.id))
@@ -777,17 +773,21 @@ def upload(area_id):
         # with no test API, or a missing optional library).
         try:
             from ..features.archive_meta import test_archive_integrity
-            result = test_archive_integrity(dest)
+            result = test_archive_integrity(staged)
             if not result.ok:
-                try:
-                    os.remove(dest)
-                except OSError:
-                    pass
+                _discard_staged(staged)
                 flash(f'Upload rejected: corrupt archive ({result.message}).',
                       'danger')
                 return redirect(url_for('file_areas.view_area', area_id=area.id))
         except Exception:
             current_app.logger.exception('archive integrity test crashed; allowing upload')
+
+        dest = _publish_staged(staged, area.storage_path, safe_name,
+                               allow_replace=getattr(current_user, 'is_admin', False))
+        if dest is None:
+            flash(f'A file named {safe_name} already exists in this area. '
+                  'Rename your file and upload again.', 'danger')
+            return redirect(url_for('file_areas.view_area', area_id=area.id))
 
         # Duplicate-content notice (not a block -- see _check_and_record_dupe).
         dupe_of = _check_and_record_dupe(area, dest, safe_name)
@@ -820,6 +820,59 @@ def upload(area_id):
         flash(f'Save failed: {exc}', 'danger')
     return redirect(url_for('file_areas.view_area', area_id=area.id))
 
+
+
+# ---------------------------------------------------------------------------
+# Upload staging (audit H-3). An upload is written to a private, hidden
+# temp file in the area directory, scanned there, and only then published
+# under its real name -- without ever replacing an existing file unless an
+# admin is uploading. Rejected uploads only ever delete the temp file.
+# ---------------------------------------------------------------------------
+
+def _stage_upload(upload, storage_path, safe_name):
+    import secrets as _secrets
+    # Keeps the real name as the suffix: the archive/virus checks pick
+    # their method from the extension.
+    tmp = os.path.join(storage_path, f'.upload-{_secrets.token_hex(8)}-{safe_name}')
+    upload.save(tmp)
+    return tmp
+
+
+def _discard_staged(tmp):
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+
+
+def _publish_staged(tmp, storage_path, safe_name, allow_replace):
+    """Move a staged upload into place. Returns the final path, or None
+    when a file with that name already exists (and replacing isn't
+    allowed). Never follows or overwrites an existing name otherwise."""
+    import shutil
+    dest = os.path.join(storage_path, safe_name)
+    if allow_replace:
+        if os.path.islink(dest):
+            _discard_staged(tmp)
+            return None
+        os.replace(tmp, dest)
+        return dest
+    try:
+        os.link(tmp, dest)
+    except FileExistsError:
+        _discard_staged(tmp)
+        return None
+    except OSError:
+        # Filesystem without hard links: exclusive create + copy.
+        try:
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            _discard_staged(tmp)
+            return None
+        with os.fdopen(fd, 'wb') as out, open(tmp, 'rb') as src:
+            shutil.copyfileobj(src, out)
+    _discard_staged(tmp)
+    return dest
 
 # ---------------------------------------------------------------------------
 # Shared file links (peer-to-peer / anonymous-access shares)
@@ -1270,15 +1323,13 @@ def smart_upload():
                 return redirect(url_for('file_areas.view_area', area_id=target.id))
 
             os.makedirs(target.storage_path, exist_ok=True)
-            dest = os.path.join(target.storage_path, safe)
-            upload.save(dest)
+            staged = _stage_upload(upload, target.storage_path, safe)
             # Optional virus scan
             try:
                 from ..features.virus_scan import scan_path
-                r = scan_path(dest)
+                r = scan_path(staged)
                 if r.infected:
-                    try: os.remove(dest)
-                    except OSError: pass
+                    _discard_staged(staged)
                     flash(f'Rejected: virus ({r.signature}).', 'danger')
                     return redirect(url_for('file_areas.smart_upload'))
             except Exception:
@@ -1291,15 +1342,20 @@ def smart_upload():
             # Optional archive integrity test
             try:
                 from ..features.archive_meta import test_archive_integrity
-                ar = test_archive_integrity(dest)
+                ar = test_archive_integrity(staged)
                 if not ar.ok:
-                    try: os.remove(dest)
-                    except OSError: pass
+                    _discard_staged(staged)
                     flash(f'Rejected: corrupt archive ({ar.message}).', 'danger')
                     return redirect(url_for('file_areas.smart_upload'))
             except Exception:
                 # Same gap and fix as the virus-scan block just above.
                 current_app.logger.exception('archive integrity test crashed; allowing upload')
+            dest = _publish_staged(staged, target.storage_path, safe,
+                                   allow_replace=getattr(current_user, 'is_admin', False))
+            if dest is None:
+                flash(f'A file named {safe} already exists in {target.tag}. '
+                      'Rename your file and upload again.', 'danger')
+                return redirect(url_for('file_areas.smart_upload'))
             dupe_of = _check_and_record_dupe(target, dest, safe)
             _hatch_if_network_area(target, dest, safe,
                                    request.form.get('description'),

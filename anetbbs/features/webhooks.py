@@ -61,7 +61,10 @@ def _do_post(url, body, headers, timeout=8):
     if ssrf_err:
         return 0, f'refused: {ssrf_err}'
     try:
-        resp = requests.post(url, data=body, headers=headers, timeout=timeout)
+        # Never follow a redirect (audit M-3): a 30x could point the POST,
+        # and its Authorization header, at an internal address.
+        resp = requests.post(url, data=body, headers=headers, timeout=timeout,
+                             allow_redirects=False)
         return resp.status_code, None
     except requests.RequestException as exc:
         return 0, str(exc)

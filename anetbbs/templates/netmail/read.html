@@ -19,7 +19,8 @@
     <div class="card-body">
         <dl class="row mb-0">
             <dt class="col-sm-2">From</dt>
-            <dd class="col-sm-10">{{ m.from_name }} &lt;<code>{{ m.from_address }}</code>&gt;</dd>
+            <dd class="col-sm-10">{{ m.from_name }} &lt;<code>{{ m.from_address }}</code>&gt;
+                {% if m.trust == 'insecure' %}<span class="badge bg-warning text-dark ms-2" title="Delivered over a non-secure session: the sender name and address are only what the caller claimed.">Unverified sender (non-secure session)</span>{% endif %}</dd>
             <dt class="col-sm-2">To</dt>
             <dd class="col-sm-10">{{ m.to_name }} &lt;<code>{{ m.to_address }}</code>&gt;</dd>
             <dt class="col-sm-2">Subject</dt>

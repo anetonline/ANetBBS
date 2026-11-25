@@ -177,6 +177,20 @@ class DoorSession:
         self.temp_files = []
 
 
+
+def _install_root_for_logs():
+    """Install root whose logs/ door diagnostics go to. Honours a
+    configured INSTALL_DIR (tests point it at a scratch dir, audit L-18);
+    otherwise the source tree this package runs from."""
+    try:
+        from ..config import get_config
+        configured = getattr(get_config(), 'INSTALL_DIR', None)
+        if configured:
+            return configured
+    except Exception:
+        pass
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 def _js_str(s):
     """Quote a string for safe insertion in a JS expression."""
     import json
@@ -777,8 +791,7 @@ def _build_command(game, node_number, bbs_name='ANetBBS', user=None,
         # to this file on any uncaught Synchronet-compat door error, so
         # sysops don't have to wait for users to report breakage. Path
         # under logs/ so it gets rotated alongside the rest.
-        install_root_for_log = os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))))
+        install_root_for_log = _install_root_for_logs()
         door_err_log = os.path.join(install_root_for_log, 'logs',
                                     'door-errors.log')
         try:
@@ -1753,8 +1766,7 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
         # be silently lost. Check logs/dosbox_<slug>_nodeN.log after a failure.
         if game.game_type == 'door_dos':
             try:
-                _install_root = os.path.dirname(os.path.dirname(
-                    os.path.dirname(os.path.abspath(__file__))))
+                _install_root = _install_root_for_logs()
                 _log_dir = os.path.join(_install_root, 'logs')
                 os.makedirs(_log_dir, exist_ok=True)
                 _slug = (getattr(game, 'slug', None) or 'door').strip() or 'door'
@@ -1781,8 +1793,7 @@ def launch_door_game(game, user, socketio_emit_fn, bbs_name='ANetBBS',
             except Exception:
                 pass
             try:
-                _install_root = os.path.dirname(os.path.dirname(
-                    os.path.dirname(os.path.abspath(__file__))))
+                _install_root = _install_root_for_logs()
                 _log_dir = os.path.join(_install_root, 'logs')
                 os.makedirs(_log_dir, exist_ok=True)
                 _slug = (getattr(game, 'slug', None) or 'door').strip() or 'door'

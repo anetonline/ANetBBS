@@ -2154,12 +2154,30 @@ if [[ -f "$SUDOERS_SRC" ]]; then
                 ok "sudoers refreshed (SCC restart + Check-for-Updates auto-install will work)"
             else
                 rm -f "$SUDOERS_DST.tmp" "$SUDOERS_DST.tmp2"
-                warn "sudoers syntax check failed — leaving $SUDOERS_DST unchanged"
+                # Fail closed (audit H-1): an older sudoers file may still
+                # grant the service user a helper inside INSTALL_DIR. Never
+                # leave that in place -- remove it; web upgrade/restore and
+                # SCC buttons stay off until a refresh succeeds.
+                if [[ -f "$SUDOERS_DST" ]] && grep -q "$INSTALL_DIR/deploy/run_" "$SUDOERS_DST" 2>/dev/null; then
+                    rm -f "$SUDOERS_DST"
+                    warn "sudoers syntax check failed — REMOVED the old $SUDOERS_DST (it granted helpers inside $INSTALL_DIR)"
+                else
+                    warn "sudoers syntax check failed — leaving $SUDOERS_DST unchanged"
+                fi
                 warn "  visudo says: ${VISUDO_ERR:-<no output>}"
             fi
         fi
     fi
 fi
+
+# Post-refresh check (audit H-1): no sudoers drop-in may still grant a
+# helper script that lives inside INSTALL_DIR.
+for _sf in /etc/sudoers.d/*; do
+    [[ -f "$_sf" ]] || continue
+    if grep -q "$INSTALL_DIR/deploy/run_\(upgrade\|restore\)\.sh" "$_sf" 2>/dev/null; then
+        warn "$_sf still grants a helper inside $INSTALL_DIR -- remove that line (root escalation risk)"
+    fi
+done
 
 # Self-heal the terminal gallery viewer for installs from before it
 # existed. Only created if missing -- never overwritten once present,

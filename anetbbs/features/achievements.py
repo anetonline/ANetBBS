@@ -37,7 +37,7 @@ def _check_first_pm(user):
 def _check_first_echomail(user):
     return (EchomailMessage.query
             .filter_by(direction='outbound')
-            .filter(EchomailMessage.from_name.ilike(user.username))
+            .filter(db.func.lower(EchomailMessage.from_name) == (user.username or '').lower())  # exact (audit M-2)
             .count() >= 1)
 
 def _check_first_netmail(user):

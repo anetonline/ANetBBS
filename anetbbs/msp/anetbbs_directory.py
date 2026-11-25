@@ -90,7 +90,7 @@ def refresh(app):
                 continue
             seen_hosts.add(host)
             entry = (BbsDirectoryEntry.query
-                     .filter(BbsDirectoryEntry.hostname.ilike(host))
+                     .filter(db.func.lower(BbsDirectoryEntry.hostname) == (host or '').lower())  # exact (audit M-2)
                      .first())
             if entry is None:
                 entry = BbsDirectoryEntry(

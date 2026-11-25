@@ -80,6 +80,13 @@ class ForgotPasswordEnumerationTests(unittest.TestCase):
         # contained regardless of what else shares the process.
         from anetbbs.features.rate_limit import _buckets
         _buckets.clear()
+        # The account-level security-question lockout (audit M-1) is
+        # persistent state; reset it so one test's wrong guesses don't
+        # lock the shared account for the next test.
+        with self.app.app_context():
+            from anetbbs.models import db, User
+            User.query.update({User.sq_failed_count: 0, User.sq_locked_until: None})
+            db.session.commit()
 
     def _submit_forgot(self, client, identifier):
         return client.post('/auth/forgot', data={'identifier': identifier},

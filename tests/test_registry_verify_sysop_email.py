@@ -68,7 +68,7 @@ class RegistryVerifySysopEmailTests(unittest.TestCase):
         with patch('anetbbs.mailer.send_email') as mock_send:
             mock_send.return_value = (True, '')
             client = self.app.test_client()
-            resp = client.get('/registry/verify/tok-emailtest-1')
+            resp = client.post('/registry/verify/tok-emailtest-1')
         self.assertEqual(resp.status_code, 200)
         mock_send.assert_called_once()
         args = mock_send.call_args[0]
@@ -81,7 +81,7 @@ class RegistryVerifySysopEmailTests(unittest.TestCase):
             self._make_entry('tok-emailtest-2')
         with patch('anetbbs.mailer.send_email') as mock_send:
             client = self.app.test_client()
-            resp = client.get('/registry/verify/tok-emailtest-2')
+            resp = client.post('/registry/verify/tok-emailtest-2')
         self.assertEqual(resp.status_code, 200)
         mock_send.assert_not_called()
 
@@ -93,7 +93,7 @@ class RegistryVerifySysopEmailTests(unittest.TestCase):
             self._make_entry('tok-emailtest-3')
         with patch('anetbbs.mailer.send_email', side_effect=RuntimeError('smtp down')):
             client = self.app.test_client()
-            resp = client.get('/registry/verify/tok-emailtest-3')
+            resp = client.post('/registry/verify/tok-emailtest-3')
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b'verified', resp.data.lower())
 

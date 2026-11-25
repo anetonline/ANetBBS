@@ -2579,6 +2579,11 @@ if [[ -f "$SUDOERS_SRC" ]]; then
             ok "sudoers installed (SCC restart + Check-for-Updates auto-install will work)"
         else
             rm -f "$SUDOERS_DST.tmp" "$SUDOERS_DST.tmp2"
+            # Fail closed (audit H-1): never leave an older grant for a
+            # helper inside INSTALL_DIR in place.
+            if [[ -f "$SUDOERS_DST" ]] && grep -q "$INSTALL_DIR/deploy/run_" "$SUDOERS_DST" 2>/dev/null; then
+                rm -f "$SUDOERS_DST"
+            fi
             warn "sudoers syntax check failed — Service Control Center buttons and web auto-update will not work until this is fixed manually."
         fi
     fi

@@ -334,7 +334,7 @@ def _process_node_request(peer_address, from_address, subject, body,
     })
 
 
-def handle_filefix_netmail(netmail_id):
+def handle_filefix_netmail(netmail_id, session_node_id=None):
     """Process an inbound filefix netmail by id and queue a reply.
 
     Same shape as areafix.handle_areafix_netmail: resolve the sender's
@@ -356,6 +356,18 @@ def handle_filefix_netmail(netmail_id):
                            .first())
 
     network = None
+    # Audit M-4: commands for a downstream node's subscriptions (and its
+    # %PASSWORD, which is also its BinkP session password) are accepted
+    # only when the netmail arrived in THAT node's own authenticated
+    # session -- never from a relay, an outbound poll, or another node
+    # claiming its address.
+    if downstream_node is not None and session_node_id != downstream_node.id:
+        import logging as _lg
+        _lg.getLogger(__name__).warning(
+            'robot netmail %s claims node %s but did not arrive in that '
+            "node's own session -- ignored", netmail_id, nm.from_address)
+        return None
+
     if downstream_node:
         response, log_kwargs = _process_node_request(
             downstream_node.ftn_address, nm.from_address, nm.subject,

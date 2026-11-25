@@ -282,7 +282,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
             nm_id = inbound.id
 
-            response = handle_filefix_netmail(nm_id)
+            response = handle_filefix_netmail(nm_id, session_node_id=node.id)
             self.assertIn('+FF.E2EHUB : subscribed', response)
 
             sub = FileEchoSubscription.query.filter_by(
@@ -410,7 +410,7 @@ class FilefixTests(unittest.TestCase):
             db.session.commit()
             nm_id = inbound.id
 
-            response = handle_filefix_netmail(nm_id)
+            response = handle_filefix_netmail(nm_id, session_node_id=node.id)
             self.assertIn('password', response.lower())
 
             self.assertIsNone(FileEchoSubscription.query.filter_by(

@@ -50,6 +50,13 @@ class FtpFileQuotaTests(unittest.TestCase):
         h = object.__new__(AnetbbsFTPHandler)
         h.app = self.app
         h.username = username
+        # Sessions are bound to the authenticated account id at login
+        # (audit M-2); later checks never re-resolve the wire username.
+        with self.app.app_context():
+            from anetbbs.models import User, db
+            _u = User.query.filter(
+                db.func.lower(User.username) == (username or '').lower()).first()
+            h._bbs_user_id = _u.id if _u else None
         h._qwk_node_id = qwk_node_id
         h.respond = MagicMock()
         return h

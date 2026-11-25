@@ -70,6 +70,12 @@ _RST = '\x1b[0m'
 VERSION = '1.0'
 
 
+
+def _c(v):
+    """Remote (fsxNet) text, escape/control sequences stripped (audit M-5)."""
+    from ..core.text_safety import strip_untrusted_escapes
+    return strip_untrusted_escapes(v or '')
+
 def _ascii_mode(session) -> bool:
     return getattr(session, 'term_mode', 'ansi') == 'ascii'
 
@@ -287,20 +293,20 @@ async def show_last_callers(session, args=None) -> None:
                 date_s = row.created_at.strftime('%m/%d/%y') if row.created_at else '?'
                 time_s = row.created_at.strftime('%H:%M') if row.created_at else '?'
                 await session.write(
-                    f"{_WH}{row.alias[:17]:<17}{_RST} "
-                    f"{_WH_N}{row.bbs_name[:26]:<26}{_RST} "
+                    f"{_WH}{_c(row.alias)[:17]:<17}{_RST} "
+                    f"{_WH_N}{_c(row.bbs_name)[:26]:<26}{_RST} "
                     f"{_WH}{date_s:<8}{_RST} "
                     f"{_WH_N}{time_s:<5}{_RST} "
-                    f"{_WH}{(row.location or '')[:19]:<19}{_RST}\r\n")
+                    f"{_WH}{_c(row.location)[:19]:<19}{_RST}\r\n")
         else:
             await session.write(
                 f"{_GRY}{'Alias':<15} {'BBS':<25} {'Telnet Address':<28} {'OS':<8}{_RST}\r\n")
             for row in shown:
                 await session.write(
-                    f"{_WH}{row.alias[:15]:<15}{_RST} "
-                    f"{_WH_N}{row.bbs_name[:25]:<25}{_RST} "
-                    f"{_WH}{(row.address or '')[:28]:<28}{_RST} "
-                    f"{_WH_N}{(row.os or '')[:8]:<8}{_RST}\r\n")
+                    f"{_WH}{_c(row.alias)[:15]:<15}{_RST} "
+                    f"{_WH_N}{_c(row.bbs_name)[:25]:<25}{_RST} "
+                    f"{_WH}{_c(row.address)[:28]:<28}{_RST} "
+                    f"{_WH_N}{_c(row.os)[:8]:<8}{_RST}\r\n")
 
         if not rows:
             await session.write(f"{_GRY}  (none yet){_RST}\r\n")
@@ -346,18 +352,19 @@ def _aggregate_bbses(rows):
     module docstring / the plan this was built from for why)."""
     agg = {}
     for row in rows:
-        entry = agg.get(row.bbs_name)
+        name = _c(row.bbs_name)
+        entry = agg.get(name)
         if entry is None:
-            agg[row.bbs_name] = {
-                'bbs_name': row.bbs_name, 'address': row.address,
-                'os': row.os, 'lastcall': row.created_at, 'calls': 1,
+            agg[name] = {
+                'bbs_name': name, 'address': _c(row.address),
+                'os': _c(row.os), 'lastcall': row.created_at, 'calls': 1,
             }
             continue
         entry['calls'] += 1
         if row.created_at and (entry['lastcall'] is None or row.created_at > entry['lastcall']):
             entry['lastcall'] = row.created_at
-            entry['address'] = row.address
-            entry['os'] = row.os
+            entry['address'] = _c(row.address)
+            entry['os'] = _c(row.os)
     return list(agg.values())
 
 

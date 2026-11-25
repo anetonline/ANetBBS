@@ -38,11 +38,29 @@ working. On a brand-new install that hasn't been updated yet, install
 it yourself:
 
 ```
+# Root-owned copies of the two privileged helpers. sudoers grants only
+# these paths, never anything inside the install directory.
+sudo install -d -o root -g root -m 0755 /usr/local/libexec/anetbbs
+sudo install -o root -g root -m 0755 /opt/anetbbs/deploy/run_upgrade.sh \
+    /opt/anetbbs/deploy/run_restore.sh /usr/local/libexec/anetbbs/
 sudo sed "s/^__SERVICE_USER__ /anetbbs /" /opt/anetbbs/deploy/sudoers.anetbbs \
     | sudo tee /etc/sudoers.d/anetbbs > /dev/null
 sudo chmod 0440 /etc/sudoers.d/anetbbs
 sudo visudo -cf /etc/sudoers.d/anetbbs    # syntax check
 ```
+
+The helpers read their settings only from `/etc/anetbbs.install`, which
+`install.sh`/`update.sh` write as root: `INSTALL_DIR`, `SERVICE_USER` and
+`REGISTRY_HOST`. `REGISTRY_HOST` is the only host web upgrades will
+download from, and it defaults to `bbs.a-net.fyi`. To trust a different
+release feed, run `update.sh` as root with `ANETBBS_REGISTRY_HOST=<host>`
+set. The helpers never take this from `.env`, because the BBS service
+account can edit `.env`.
+
+`update.sh` runs everything that executes the BBS's own code (pip, the
+venv's Python, migrations, `git pull`) as the service account, never as
+root. Prefer running `update.sh` from a release tarball extracted to a
+root-owned directory.
 
 Replace `anetbbs` in the `sed` command with your actual service
 account if you didn't use the installer's default. Don't just `cp` the

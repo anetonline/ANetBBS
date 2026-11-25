@@ -68,8 +68,10 @@ class RssSixelSsrfTests(unittest.TestCase):
         with mock.patch('anetbbs.core.net_safety.resolve_safe_destination',
                         return_value=(2, ('93.184.216.34', 443), None)), \
              mock.patch('shutil.which', return_value='/usr/bin/img2sixel'), \
-             mock.patch('urllib.request.urlopen') as mock_urlopen:
-            mock_urlopen.side_effect = OSError('simulated network failure')
+             mock.patch('anetbbs.core.net_safety.safe_http_fetch') as mock_urlopen:
+            # The fetch now goes through the pinned, redirect-checked
+            # helper (audit M-3) instead of urllib.
+            mock_urlopen.return_value = (None, 'simulated network failure')
             result = asyncio.run(
                 self.ui._rss_render_sixel('https://example.com/photo.jpg'))
         self.assertFalse(result)  # fetch itself failed, but...

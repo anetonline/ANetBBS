@@ -171,7 +171,7 @@ All env vars are read at service start. Defaults are sensible for the
 
 | Variable | Default | Notes |
 |---|---|---|
-| `REGISTRY_URL` | `https://bbs.a-net.fyi` | where to register + pull |
+| `REGISTRY_URL` | `https://bbs.a-net.fyi` | where to register + pull (web *upgrades* use the root-owned `REGISTRY_HOST` in `/etc/anetbbs.install` instead; see the sysop daily-ops doc) |
 | `REGISTRY_SELF_REGISTER` | `false` | opt in to publishing your BBS |
 | `REGISTRY_MODE_ENABLED` | `false` | THIS install is a hub |
 | `BBS_DOMAIN` | `(empty)` | your public hostname (required for self-reg) |
@@ -379,3 +379,20 @@ else is affected.
 
 For the day-of-development arc that led to this design, see the
 `v287.13` → `v287.20` entries in [`CHANGELOG.md`](CHANGELOG.md).
+
+## Re-registering an existing BBS
+
+A hub only changes an existing directory entry when the request carries
+that entry's current `heartbeat_key`. ANetBBS keeps this key and sends it
+automatically.
+
+If the key is lost (for example after a reinstall):
+
+1. The hub leaves the entry unchanged.
+2. It emails the registered contact address a confirmation link.
+3. After the link is confirmed, the next registration from the same IP
+   address within 24 hours is accepted and gets a new key.
+
+A hub with no SMTP configured can't send that email. In that case the
+hub sysop removes the entry, and the BBS then registers again as new.
+

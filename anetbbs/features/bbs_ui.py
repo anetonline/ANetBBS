@@ -3263,7 +3263,20 @@ class BBSMenuUI:
                             f"\r\nSkipped {raw_orig_name!r}: invalid filename.\r\n")
                         continue
                     dest = os.path.join(target_dir, safe_name)
-                    _shutil.move(tmp_path, dest)
+                    # Never replace an existing area file (audit H-3).
+                    try:
+                        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                    except FileExistsError:
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+                        await self.session.write(
+                            f"\r\nSkipped {safe_name!r}: a file with that name already exists.\r\n")
+                        continue
+                    with os.fdopen(fd, 'wb') as _out, open(tmp_path, 'rb') as _src:
+                        _shutil.copyfileobj(_src, _out)
+                    os.remove(tmp_path)
                     saved.append(orig_name)
                 else:
                     ext = orig_name.rsplit('.', 1)[-1].lower() \
@@ -3750,7 +3763,7 @@ class BBSMenuUI:
         this image URL) are entirely publisher-controlled content any
         subscriber ends up rendering.
         """
-        import shutil, subprocess, tempfile, os, urllib.request as _ur
+        import shutil, subprocess, tempfile, os
         from urllib.parse import urlparse as _urlparse
         from ..core.net_safety import resolve_safe_destination as _resolve_safe_dest
         if not shutil.which('img2sixel'):
@@ -3772,10 +3785,15 @@ class BBSMenuUI:
                 ext = 'jpg'
             fd, tmp = tempfile.mkstemp(suffix=f'.{ext}')
             os.close(fd)
-            req = _ur.Request(image_url, headers={'User-Agent': 'ANetBBS/1.0'})
-            with _ur.urlopen(req, timeout=6) as resp:  # nosec B310 -- scheme restricted to http(s) above
-                with open(tmp, 'wb') as f:
-                    f.write(resp.read(1024 * 512))
+            # Audit M-3: pinned, redirect-checked fetch (urlopen followed
+            # redirects and re-resolved DNS on its own).
+            from ..core.net_safety import safe_http_fetch
+            img_bytes, _fetch_err = safe_http_fetch(
+                image_url, timeout=6, max_bytes=1024 * 512)
+            if _fetch_err or not img_bytes:
+                return False
+            with open(tmp, 'wb') as f:
+                f.write(img_bytes)
             result = subprocess.run(
                 ['img2sixel', '-w', str(width_px), tmp],
                 capture_output=True, timeout=10)
@@ -6688,8 +6706,10 @@ async def _sysop_wall(self):
 
     def render_row(idx, row, selected):
         pid, uname, line1, origin = row
+        from ..core.text_safety import strip_untrusted_escapes as _su
+        uname, origin = _su(uname) or '?', _su(origin)   # audit M-5
         tag = f" {FG['cyan']}[{origin}]{RESET}" if origin else ''
-        clean = re.sub(r'\|\d{2}', '', line1 or '')
+        clean = re.sub(r'\|\d{2}', '', _su(line1))
         return f"  {FG['wht']}{pid:>4}{RESET}  {FG['grn']}{uname[:15]:<15}{RESET}{tag} {clean[:40]}"
 
     def render_hint_extra(sel, total):
@@ -7576,6 +7596,8 @@ async def _sysop_callers(self):
 
     def render_row(idx, row, selected):
         cid, uname, service, started, origin = row
+        from ..core.text_safety import strip_untrusted_escapes as _su
+        uname, service, origin = _su(uname) or '?', _su(service) or '?', _su(origin)  # audit M-5
         ts = fmt_eastern(started, '%m-%d %H:%M', '?')
         tag = f" {FG['cyan']}[{origin}]{RESET}" if origin else ''
         return f"  {FG['dim']}{ts}{RESET}  {FG['grn']}{uname[:18]:<18}{RESET} {FG['gry']}{service}{RESET}{tag}"

@@ -273,7 +273,7 @@ class AreafixTests(unittest.TestCase):
             db.session.commit()
             nm_id = inbound.id
 
-            response = handle_areafix_netmail(nm_id)
+            response = handle_areafix_netmail(nm_id, session_node_id=node.id)
             self.assertIn('password', response.lower())
 
             self.assertIsNone(EchoAreaNode.query.filter_by(

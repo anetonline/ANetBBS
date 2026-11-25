@@ -359,7 +359,8 @@ def _persist(mail_from, rcpt_tos, raw_bytes, recipient_ids=None):
     subject, from_name, message_id, in_reply_to, refs = (
         _CONTROL_CHARS_RE.sub(' ', v or '')
         for v in (subject, from_name, message_id, in_reply_to, refs))
-    from_addr = from_addr or mail_from
+    from_addr = _CONTROL_CHARS_RE.sub('', from_addr or mail_from or '')   # audit M-5
+    cc_list = [_CONTROL_CHARS_RE.sub('', c or '') for c in cc_list]
     cfg = MailConfig.get()
     # Attachment count / per-attachment decoded size: refused before
     # anything is stored or any lock is taken.

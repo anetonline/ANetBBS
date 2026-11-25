@@ -163,6 +163,7 @@ def register():
     new_heartbeat_key = secrets.token_urlsafe(24)
     now = datetime.utcnow()
     needs_verify_email = False
+    created_new = entry is None
 
     if entry is None:
         # First-time registration — create row + email-token in pending.
@@ -190,6 +191,27 @@ def register():
         # background probe's auto-relist — no fresh sysop action
         # anywhere in that chain. is_approved is now part of what a
         # changed contact_email invalidates.
+        # Audit H-4: changing an existing entry requires proof of
+        # ownership -- its current heartbeat_key, or a re-key the
+        # existing contact confirmed by email. Without either, the live
+        # row is left untouched.
+        provided_key = (data.get('heartbeat_key') or '').strip()
+        key_ok = bool(entry.heartbeat_key and provided_key
+                      and hmac.compare_digest(provided_key, entry.heartbeat_key))
+        rekey_ok = bool(
+            not key_ok and entry.rekey_confirmed_at and entry.rekey_ip
+            and entry.rekey_ip == _peer_ip()
+            and now - entry.rekey_confirmed_at < timedelta(hours=24))
+        if not key_ok and not rekey_ok:
+            return _request_owner_confirmation(entry, {
+                'name': name, 'msp_port': msp_port, 'systat_port': systat_port,
+                'sysop': sysop, 'location': location, 'software': software,
+                'software_version': software_version, 'notes': notes,
+                'contact_email': contact_email}, now)
+        if rekey_ok:
+            entry.rekey_confirmed_at = None
+            entry.rekey_ip = None
+            entry.rekey_payload = None
         if entry.contact_email.lower() != contact_email.lower():
             entry.is_verified = False
             entry.is_approved = False
@@ -250,6 +272,9 @@ def register():
         message = 'Contact email already verified — ' + message
     elif email_sent:
         message = 'Check your email for a verification link. ' + message
+    elif not created_new:
+        message = ('SMTP is not configured on this hub — ask the hub sysop '
+                   'to verify the new contact address. ') + message
     else:
         message = ('SMTP is not configured on this hub — click the '
                   'verify_url below directly. ') + message
@@ -263,10 +288,89 @@ def register():
         'heartbeat_key': entry.heartbeat_key,
         'message': message,
     }
-    if needs_verify_email and not email_sent:
+    # Only a brand-new entry may get its verify link back in-band (no-SMTP
+    # hubs). For an existing host it would let the caller self-verify a
+    # new contact address (audit H-4).
+    if needs_verify_email and not email_sent and created_new:
         body['verify_token'] = entry.registration_token
         body['verify_url'] = verify_url
     return jsonify(body)
+
+
+def _request_owner_confirmation(entry, payload, now):
+    """Keyless /register for an existing host (audit H-4): hold the
+    requested change, email the EXISTING contact a confirmation link, and
+    leave the live entry exactly as it is. Never reveals the contact
+    address or any token to the caller."""
+    import json as _json
+    import secrets as _secrets
+    # Never let a request from somewhere else cancel or replace a re-key
+    # the owner already confirmed (still valid for 24h), and don't let it
+    # replace a still-fresh pending request either (audit H-4).
+    confirmed_live = bool(entry.rekey_confirmed_at
+                          and now - entry.rekey_confirmed_at < timedelta(hours=24))
+    pending_fresh = bool(entry.rekey_requested_at and entry.rekey_token
+                         and now - entry.rekey_requested_at < timedelta(hours=1))
+    resend = not confirmed_live and not pending_fresh
+    if resend:
+        entry.rekey_token = _secrets.token_urlsafe(24)
+        entry.rekey_payload = _json.dumps(payload)[:8000]
+        entry.rekey_ip = _peer_ip()
+        entry.rekey_requested_at = now
+        entry.rekey_confirmed_at = None
+        db.session.commit()
+        try:
+            from ..mailer import smtp_enabled, send_email
+            if smtp_enabled():
+                link = (f"{request.host_url.rstrip('/')}"
+                        f"/registry/rekey/{entry.rekey_token}")
+                send_email(
+                    entry.contact_email,
+                    f'Confirm re-registration of {entry.host}',
+                    f'Someone asked this federation hub to re-register '
+                    f'{entry.host} without its current key (request from '
+                    f'{entry.rekey_ip}). If that was you -- for example after '
+                    f'reinstalling -- confirm here, then restart your BBS '
+                    f'within 24 hours:\n\n{link}\n\n'
+                    f'If it was not you, ignore this email; nothing changes.')
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'registry: failed to email re-key confirmation for %s',
+                entry.host, exc_info=True)
+    return jsonify({
+        'ok': False,
+        'status': 'owner_confirmation_required',
+        'error': ('this host is already registered: send its current '
+                  'heartbeat_key, or confirm via the link emailed to the '
+                  'existing contact address'),
+    }), 409
+
+
+@registry_bp.route('/registry/rekey/<token>', methods=['GET', 'POST'])
+def rekey_confirm(token):
+    """Owner confirms a keyless re-registration (audit H-4). GET only
+    shows a button, so mail scanners that prefetch links can't confirm."""
+    _require_hub_mode()
+    entry = (RegistryEntry.query.filter_by(rekey_token=token).first()
+             if token else None)
+    if entry is None or not entry.rekey_requested_at or (
+            datetime.utcnow() - entry.rekey_requested_at > timedelta(hours=24)):
+        return render_template_string(
+            '<h1>Link not recognized</h1><p>Expired, already used, or never '
+            'existed.</p>'), 404
+    if request.method == 'GET':
+        return render_template_string(
+            '<h1>Confirm re-registration of {{ host }}</h1>'
+            '<p>Request came from {{ ip }}.</p>'
+            '<form method="post"><button type="submit">Confirm</button></form>',
+            host=entry.host, ip=entry.rekey_ip)
+    entry.rekey_confirmed_at = datetime.utcnow()
+    entry.rekey_token = None
+    db.session.commit()
+    return render_template_string(
+        '<h1>Confirmed</h1><p>{{ host }} will receive a new key the next time '
+        'it registers from {{ ip }} (within 24 hours).</p>',
+        host=entry.host, ip=entry.rekey_ip)
 
 
 @registry_bp.route('/registry/api/v1/heartbeat', methods=['POST'])
@@ -330,7 +434,7 @@ def heartbeat():
     return jsonify({'ok': True, 'is_listed': bool(entry.is_listed)})
 
 
-@registry_bp.route('/registry/verify/<token>')
+@registry_bp.route('/registry/verify/<token>', methods=['GET', 'POST'])
 def verify(token):
     _require_hub_mode()
     entry = RegistryEntry.query.filter_by(
@@ -339,6 +443,13 @@ def verify(token):
         return render_template_string(
             '<h1>Token not recognized</h1>'
             '<p>Already verified, expired, or never existed.</p>'), 404
+    if request.method == 'GET' and not entry.is_verified:
+        # A GET only shows a button, so mail scanners that prefetch the
+        # link can't verify the address on the owner's behalf (audit H-4).
+        return render_template_string(
+            '<h1>Confirm contact email for {{ host }}</h1>'
+            '<form method="post"><button type="submit">Confirm</button></form>',
+            host=entry.host)
     if not entry.is_verified:
         entry.is_verified = True
         # Don't clear the token immediately — let the sysop see this

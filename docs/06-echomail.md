@@ -608,3 +608,23 @@ which gives each network its own `/join/<slug>/` and node forms grow
 an identity picker once a second one exists. Almost no install needs
 this; single-network installs never see it. Full writeup: the
 [[Sysop Guide]] wiki page, "Running more than one hub identity."
+
+## Secure and non-secure BinkP sessions
+
+An inbound BinkP session is **secure** only when the caller proves it
+knows the session password configured for that network or downstream
+node. Every other session is **non-secure**: unknown callers, and callers
+matching a network or node that has **no** session password set. A
+non-secure session:
+
+- never takes on a configured link's identity and is never sent that
+  link's queued outbound mail or files;
+- has its echomail, file echoes, TIC files, file attachments, file
+  requests and AreaFix/FileFix commands ignored;
+- may deliver only netmail addressed to one of this system's own
+  addresses and to an existing local user. Such netmail is labelled
+  "Unverified sender" wherever it is shown.
+
+The network admin page flags any BinkP network with no session password.
+Set one on both ends to make the link secure.
+

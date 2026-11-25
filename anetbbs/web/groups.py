@@ -96,7 +96,7 @@ def invite(group_id):
     if g.leader_id != current_user.id and not current_user.is_admin:
         abort(403)
     name = (request.form.get('username') or '').strip()
-    target = User.query.filter(User.username.ilike(name)).first()
+    target = User.query.filter(db.func.lower(User.username) == (name or '').lower()).first()  # exact match, no LIKE wildcards (audit M-2)
     if not target:
         flash('User not found.', 'danger')
         return redirect(url_for('groups.view', group_id=g.id))

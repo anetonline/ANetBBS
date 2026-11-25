@@ -51,19 +51,31 @@ URLs that didn't match anything else.
 The serve code rejects any path that resolves outside its intended
 base directory. Safe to expose to the internet.
 
-## Same-origin content — a deliberate tradeoff, not a bug
+## Sandboxing and limits
 
-This feature is deliberately GeoCities-style: any user can publish
-arbitrary HTML/CSS/JS, and it's served same-origin under your BBS
-domain (`/~username/`), not from a separate sandboxed subdomain. That
-means a malicious user's page can run JavaScript in a visitor's
-browser under the same origin as the rest of the BBS. This is a known,
-accepted tradeoff of offering user-published static pages this way —
-not something a future patch is expected to "fix" — so treat
-`PERSONAL_PAGES_ENABLED` the same way you'd treat any other
-user-generated-content feature with no sysop review step: fine for a
-community that trusts its own userbase, worth thinking twice about on
-a fully open-registration public install.
+Pages are served from your BBS's own domain (`/~username/`), but every
+personal-page response is sent with a `Content-Security-Policy: sandbox`
+header (without `allow-same-origin`). The browser treats each page as a
+separate, unique origin. Scripts on the page can still run, but they
+cannot read the visitor's BBS cookies or browser storage, and cannot read
+responses from the rest of the BBS. This holds even when a logged-in sysop
+is the one viewing the page.
+
+Other rules:
+
+- `.svg`, `.xml`, `.xhtml`, `.js` and `.mjs` files are always sent as
+  downloads, never displayed inline.
+- Uploads are limited to common page, image, sound, text and document
+  types.
+- Each user gets at most `PERSONAL_PAGES_MAX_FILES` files (default 100)
+  and `PERSONAL_PAGES_MAX_BYTES` bytes in total (default 10 MB).
+- With `PERSONAL_PAGES_ENABLED=false`, uploading, deleting and serving
+  pages are all switched off.
+
+If you want users' pages to keep full same-origin JavaScript, serve them
+from a separate hostname instead. Prefer a different registrable domain,
+not a subdomain of the BBS host, because a subdomain can set cookies for
+its parent domain.
 
 ## Gemini capsules (related, separate feature)
 

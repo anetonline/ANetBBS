@@ -50,26 +50,69 @@ def _safe_resolve(base, rel_path):
         return None
 
 
+# Audit H-5: personal pages are user-authored HTML served from the BBS's
+# own origin. Every response gets a CSP sandbox WITHOUT allow-same-origin,
+# so the browser treats the page as a unique opaque origin: its scripts
+# can run, but cannot read BBS cookies, storage, or same-origin responses
+# (e.g. an admin page's CSRF token) while a sysop is viewing it.
+PERSONAL_PAGE_CSP = (
+    "sandbox allow-scripts allow-forms allow-popups; "
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+    "media-src 'self' https:; font-src 'self' data:; connect-src 'none'; "
+    "object-src 'none'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'")
+# Types a browser would render as an active document when opened directly
+# (and that the sandbox alone doesn't make inert for every browser) are
+# always downloaded instead of displayed.
+_FORCE_DOWNLOAD_EXTS = {'.svg', '.svgz', '.xml', '.xhtml', '.xht', '.xsl',
+                        '.xslt', '.js', '.mjs'}
+ALLOWED_UPLOAD_EXTS = {'.html', '.htm', '.css', '.js', '.txt', '.md', '.json',
+                       '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp',
+                       '.svg', '.mp3', '.ogg', '.wav', '.pdf', '.ans', '.asc',
+                       '.nfo', '.diz'}
+
+
+def _send_sandboxed(directory, name):
+    resp = send_from_directory(
+        directory, name,
+        as_attachment=os.path.splitext(name)[1].lower() in _FORCE_DOWNLOAD_EXTS)
+    resp.anetbbs_csp_override = PERSONAL_PAGE_CSP
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    resp.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
+    return resp
+
+
 def _try_serve(target):
     """Given a Path, send it as a file or auto-index if it's a directory.
     Returns a Flask response or None if nothing matched."""
     if target is None or not target.exists():
         return None
     if target.is_file():
-        return send_from_directory(target.parent, target.name)
+        return _send_sandboxed(target.parent, target.name)
     if target.is_dir():
         for idx in INDEX_FILES:
             candidate = target / idx
             if candidate.is_file():
-                return send_from_directory(target, idx)
+                return _send_sandboxed(target, idx)
         return None
     return None
+
+
+def _enabled():
+    """Strict flag parse: the admin settings page can leave the raw
+    string 'false' in live config, which is truthy (audit PP-1)."""
+    v = current_app.config.get('PERSONAL_PAGES_ENABLED')
+    if isinstance(v, str):
+        return v.strip().lower() in ('1', 'true', 'yes', 'on')
+    return bool(v)
 
 
 def serve_root_page(path):
     """Serve a path of the form '<dir>[/<rest>]' from personal_pages/.
     Returns a response or None if not handled."""
-    if not current_app.config.get('PERSONAL_PAGES_ENABLED'):
+    if not _enabled():
         return None
     if not path:
         return None
@@ -87,11 +130,20 @@ def serve_root_page(path):
         'robots.txt', 'humans.txt', 'sitemap.xml', '_pages', 'saved',
         'site', 'bulletins', 'file-areas', 'netmail', 'nodelist',
         'contacts', 'games',
+        # Live route prefixes that can 404 internally (audit PP-1): a
+        # sysop directory with one of these names must never be served.
+        'wiki', 'registry', 'docs', 'downloads', 'mail', 'anetbbs.lst',
+        'upgrades', 'pulse', 'mud', 'feeds', 'gallery', 'ebooks', 'pages',
+        'notify', 'mrcweb', 'sixel', 'imsg', 'watch', 'telnet', 'web-terminal',
     }
     parts = path.split('/', 1)
     head = parts[0]
     rest = parts[1] if len(parts) > 1 else ''
-    if head.lower() in reserved:
+    # Every real route prefix is reserved too, derived from the live URL
+    # map so a new blueprint can never be shadowed (audit PP-1).
+    route_heads = {r.rule.strip('/').split('/')[0].lower()
+                   for r in current_app.url_map.iter_rules()}
+    if head.lower() in reserved or head.lower() in route_heads:
         return None
 
     if head.startswith('~'):
@@ -144,16 +196,28 @@ def my_pages():
                 'size': p.stat().st_size,
                 'is_index': p.name.lower() in INDEX_FILES,
             })
-    enabled = current_app.config.get('PERSONAL_PAGES_ENABLED', False)
+    enabled = _enabled()
     return render_template('personal_pages/index.html',
                            files=files, enabled=enabled,
                            username=current_user.username,
                            index_files=INDEX_FILES)
 
 
+def _require_enabled():
+    """Upload/delete exist only while the feature is on (audit H-5)."""
+    if not _enabled():
+        abort(404)
+
+
+def _usage(base):
+    files = [p for p in base.rglob('*') if p.is_file()]
+    return len(files), sum(p.stat().st_size for p in files)
+
+
 @pages_bp.route('/upload', methods=['POST'])
 @login_required
 def upload():
+    _require_enabled()
     base = _root() / 'users' / current_user.username
     base.mkdir(parents=True, exist_ok=True)
     f = request.files.get('file')
@@ -164,7 +228,22 @@ def upload():
     if not safe_name or safe_name.startswith('.'):
         flash('Invalid filename.', 'danger')
         return redirect(url_for('personal_pages.my_pages'))
-    f.save(str(base / safe_name))
+    if os.path.splitext(safe_name)[1].lower() not in ALLOWED_UPLOAD_EXTS:
+        flash('That file type is not allowed on personal pages.', 'danger')
+        return redirect(url_for('personal_pages.my_pages'))
+    max_files = int(current_app.config.get('PERSONAL_PAGES_MAX_FILES', 100))
+    max_bytes = int(current_app.config.get('PERSONAL_PAGES_MAX_BYTES', 10 * 1024 * 1024))
+    count, used = _usage(base)
+    existing = base / safe_name
+    if existing.is_file():
+        count -= 1
+        used -= existing.stat().st_size
+    data = f.read(max_bytes + 1)
+    if count + 1 > max_files or used + len(data) > max_bytes:
+        flash('Personal page storage limit reached.', 'danger')
+        return redirect(url_for('personal_pages.my_pages'))
+    with open(base / safe_name, 'wb') as out:
+        out.write(data)
     flash(f'Uploaded {safe_name}.', 'success')
     return redirect(url_for('personal_pages.my_pages'))
 
@@ -172,6 +251,7 @@ def upload():
 @pages_bp.route('/delete/<path:filename>', methods=['POST'])
 @login_required
 def delete(filename):
+    _require_enabled()
     base = _root() / 'users' / current_user.username
     target = _safe_resolve(base, filename)
     if target is None or not target.is_file():

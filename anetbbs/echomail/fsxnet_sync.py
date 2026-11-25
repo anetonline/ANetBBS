@@ -419,9 +419,12 @@ def sync_fsxnet_inbound(app, params):
                     skipped_unrecognized += 1
                     continue
                 author, source_bbs, lines = parsed
+                # Audit M-5: remote, unauthenticated-to-us text -- strip
+                # escape/control sequences before it is stored.
+                from ..core.text_safety import strip_untrusted_escapes as _clean
                 db.session.add(FsxnetOneliner(
-                    author=author[:80], source_bbs=source_bbs[:100],
-                    body='\n'.join(lines), remote_msg_id=msg.msg_id,
+                    author=_clean(author)[:80], source_bbs=_clean(source_bbs)[:100],
+                    body='\n'.join(_clean(l) for l in lines), remote_msg_id=msg.msg_id,
                 ))
                 db.session.commit()
                 imported_oneliners += 1
@@ -430,6 +433,9 @@ def sync_fsxnet_inbound(app, params):
                 if parsed is None:
                     skipped_unrecognized += 1
                     continue
+                from ..core.text_safety import strip_untrusted_escapes as _clean
+                parsed = {k: (_clean(v) if isinstance(v, str) else v)
+                          for k, v in parsed.items()}   # audit M-5
                 lastcaller_kwargs = dict(
                     alias=parsed['alias'][:80], bbs_name=parsed['bbs_name'][:100],
                     remote_date_str=parsed['remote_date_str'][:20],

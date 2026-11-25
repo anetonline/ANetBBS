@@ -78,6 +78,11 @@ class User(UserMixin, db.Model):
     # NULL preserves pre-upgrade cookies until the first password change.
     # A random generation also revokes remember cookies and terminal logins.
     auth_version = db.Column(db.String(64), nullable=True)
+    # Server-side security-question lockout (audit M-1). The per-session
+    # counter alone could be reset by replaying the cookie or starting a
+    # new /forgot, so wrong answers are also counted on the account.
+    sq_failed_count = db.Column(db.Integer, nullable=True)
+    sq_locked_until = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     last_login = db.Column(db.DateTime)
     login_count = db.Column(db.Integer, default=0)
@@ -1291,6 +1296,17 @@ class RegistryEntry(db.Model):
     # is a different, weaker guarantee than proving email ownership
     # (that's what registration_token/is_verified is for).
     heartbeat_key = db.Column(db.String(64))
+    # Ownership-confirmed re-key flow (audit H-4). A /register for an
+    # existing host WITHOUT its current heartbeat_key never touches the
+    # live row: the requested metadata is held here and the EXISTING
+    # contact_email gets a confirmation link. Once confirmed, the next
+    # keyless /register from the same source IP (within 24h) applies it
+    # and receives a fresh key.
+    rekey_token = db.Column(db.String(64), index=True)
+    rekey_payload = db.Column(db.Text)
+    rekey_ip = db.Column(db.String(45))
+    rekey_requested_at = db.Column(db.DateTime)
+    rekey_confirmed_at = db.Column(db.DateTime)
     is_verified = db.Column(db.Boolean, default=False, index=True)
     is_approved = db.Column(db.Boolean, default=False, index=True)
     is_listed = db.Column(db.Boolean, default=False, index=True)
@@ -1366,6 +1382,11 @@ class NetmailMessage(db.Model):
     # no local nodelist INA/port lookup, so a reply always dials the
     # standard BinkP port (24554), never a custom one.
     origin_ip = db.Column(db.String(64))
+    # 'insecure' for netmail that arrived over a non-secure BinkP session
+    # (anonymous caller, or a link with no session password): the sender
+    # fields are only what the caller claimed (audit M-4). NULL/'secure'
+    # otherwise.
+    trust = db.Column(db.String(16), nullable=True)
 
     # Lifecycle
     direction = db.Column(db.String(10), default='outbound')   # 'inbound'/'outbound'

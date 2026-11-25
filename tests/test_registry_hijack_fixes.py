@@ -178,16 +178,17 @@ class RegistryHijackFixesTests(unittest.TestCase):
         but is_approved stayed True -- letting the background auto-
         relist republish the row under the new (attacker) identity
         with no fresh sysop action. Now is_approved resets too."""
-        self._register()
+        key = self._register().get_json()['heartbeat_key']
         self._mark_verified_and_approved()
         self._age_last_heartbeat()
         entry_before = self._get_entry()
         self.assertTrue(entry_before['is_approved'])
 
-        # "Attacker" (or anyone) re-registers the SAME host with a
-        # DIFFERENT contact_email.
+        # The key holder re-registers the SAME host with a DIFFERENT
+        # contact_email. (Since audit H-4 a keyless attempt changes
+        # nothing at all -- see test_audit_h4_registry_ownership.py.)
         self._register(contact_email='attacker@evil.example.com',
-                       name='Hijacked BBS', sysop='attacker')
+                       name='Hijacked BBS', sysop='attacker', heartbeat_key=key)
 
         entry_after = self._get_entry()
         self.assertFalse(entry_after['is_verified'])
@@ -252,14 +253,13 @@ class RegistryHijackFixesTests(unittest.TestCase):
 
     @patch('anetbbs.mailer.smtp_enabled', return_value=False)
     def test_reregistration_always_issues_a_fresh_heartbeat_key(self, _mock_smtp):
-        """Self-heal path: a legitimate peer whose stored key is stale
-        (predates this fix, or the hub row was reset) must be able to
-        recover a working key just by re-registering, with no email
-        re-verification needed if contact_email is unchanged."""
+        """A key holder re-registering gets a fresh key that works. (A peer
+        that LOST its key now recovers through the emailed re-key
+        confirmation instead -- audit H-4.)"""
         first = self._register()
         key1 = first.get_json()['heartbeat_key']
         self._age_last_heartbeat()
-        second = self._register()
+        second = self._register(heartbeat_key=key1)
         key2 = second.get_json()['heartbeat_key']
         self.assertNotEqual(key1, key2)
         self._age_last_heartbeat()

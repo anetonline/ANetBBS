@@ -159,9 +159,37 @@ def _base_config_points_into_repo():
     return p == _REPO_ROOT or _REPO_ROOT in p.parents
 
 
+# Game modules that keep save files at a module-level SAVE_DIR computed
+# from the source tree (data/doors/<game>). Point them at scratch dirs for
+# the session; tests that need their own dir still patch it themselves.
+_MODULE_SAVE_DIRS = (
+    ('anetbbs.features.darkforces_term', 'darkforces'),
+    ('anetbbs.features.anetcraft', 'anetcraft'),
+    ('anetbbs.features.mud.mp', 'mud'),
+)
+
+
+def _redirect_module_save_dirs():
+    import importlib
+    import anetbbs.config as cfg_mod
+    root = _Path(cfg_mod.TestingConfig.DATA_DIR) / 'doors'
+    for modname, sub in _MODULE_SAVE_DIRS:
+        try:
+            mod = importlib.import_module(modname)
+        except Exception:
+            continue
+        setattr(mod, 'SAVE_DIR', root / sub)
+
+
 def pytest_sessionstart(session):
     session.config._anetbbs_runtime_snapshot = _runtime_snapshot()
     _redirect_base_config_runtime_paths()
+    _redirect_module_save_dirs()
+    # BinkP falls back to a cwd-relative data/ when a test's app config
+    # has no DATA_DIR; point its env override at the scratch tree.
+    import anetbbs.config as cfg_mod
+    _os.environ.setdefault('BINKP_INBOUND_DIR',
+                           _os.path.join(cfg_mod.TestingConfig.DATA_DIR, 'binkp', 'inbound'))
 
 
 @pytest.fixture(autouse=True)

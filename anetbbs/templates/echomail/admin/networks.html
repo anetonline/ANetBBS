@@ -28,7 +28,10 @@
             <tbody>
                 {% for net in networks %}
                 <tr>
-                    <td><strong>{{ net.name }}</strong></td>
+                    <td><strong>{{ net.name }}</strong>
+                        {% if net.network_type == 'binkp' and not (net.binkp_password or '').strip() %}
+                        <br><span class="badge bg-warning text-dark" title="Inbound sessions claiming this hub's address cannot be authenticated, so they are treated as non-secure: netmail to local users only, no echomail, files or outbound mail.">No session password: link runs non-secure, so set one</span>
+                        {% endif %}</td>
                     <td><span class="badge" style="background:#003300; color:#00ff00; border:1px solid #00ff00;">{{ net.network_type|upper }}</span></td>
                     <td style="font-size:0.85rem;">
                         {% if net.network_type == 'binkp' %}{{ net.binkp_host or '—' }}:{{ net.binkp_port or 24554 }}

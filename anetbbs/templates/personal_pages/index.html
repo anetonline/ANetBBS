@@ -37,7 +37,7 @@
     {% for f in files %}
     <tr>
         <td>
-            <a href="/~{{ username }}/{{ f.name }}" target="_blank">{{ f.name }}</a>
+            <a href="/~{{ username }}/{{ f.name }}" target="_blank" rel="noopener noreferrer">{{ f.name }}</a>
             {% if f.is_index %}<span class="badge bg-success ms-1">index</span>{% endif %}
         </td>
         <td><small>{{ '%.1f'|format(f.size / 1024) }} KB</small></td>

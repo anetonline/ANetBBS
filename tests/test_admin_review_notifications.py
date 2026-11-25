@@ -134,7 +134,7 @@ class AdminReviewNotificationTests(unittest.TestCase):
             db.session.commit()
 
         client = self.app.test_client()
-        resp = client.get(f'/registry/verify/{token}')
+        resp = client.post(f'/registry/verify/{token}')
         self.assertEqual(resp.status_code, 200)
 
         with self.app.app_context():

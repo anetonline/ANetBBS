@@ -1153,7 +1153,12 @@ def create_app(config_name=None):
         response.headers['Permissions-Policy'] = (
             'geolocation=(), camera=(), microphone=(), payment=(), usb=()')
         endpoint = _req.endpoint or ''
-        if endpoint == 'games.dos_frame':
+        _csp_override = getattr(response, 'anetbbs_csp_override', None)
+        if _csp_override:
+            # Per-response policy, e.g. sandboxed user content (audit H-5).
+            response.headers['Content-Security-Policy'] = _csp_override
+            response.headers['X-Frame-Options'] = 'DENY'
+        elif endpoint == 'games.dos_frame':
             response.headers['Content-Security-Policy'] = _CSP_DOS_FRAME
             response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         elif endpoint.startswith('watch.'):

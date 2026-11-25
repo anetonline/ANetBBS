@@ -4,6 +4,7 @@ Admin panel blueprint
 import sys
 import os
 import json
+import re
 import shlex
 from datetime import datetime, timedelta
 from time import monotonic
@@ -869,7 +870,7 @@ def board_moderators(board_id):
         action = request.form.get('action')
         if action == 'add':
             uname = (request.form.get('username') or '').strip()
-            u = User.query.filter(User.username.ilike(uname)).first()
+            u = User.query.filter(db.func.lower(User.username) == uname.lower()).first()  # exact (audit M-2)
             if not u:
                 flash('User not found.', 'danger')
             elif BoardModerator.query.filter_by(board_id=board.id,
@@ -1416,6 +1417,13 @@ def _write_env_keys(env_path, updates):
     """Update specific KEY=VALUE pairs in an .env file, preserving existing
     lines (comments + blanks + unrelated keys) and order. Adds missing keys
     at the bottom."""
+    # Audit H-1/L-1: a value containing CR/LF/NUL would add extra KEY=
+    # lines (e.g. a forged REGISTRY_URL); keys must be plain identifiers.
+    for k, v in updates.items():
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', str(k)):
+            raise ValueError(f'invalid .env key: {k!r}')
+        if any(c in str(v) for c in ('\r', '\n', '\x00')):
+            raise ValueError(f'invalid characters in value for {k}')
     existing_lines = []
     if os.path.exists(env_path):
         with open(env_path, 'r') as f:
@@ -1438,8 +1446,14 @@ def _write_env_keys(env_path, updates):
             new_lines.append(f'{k}={v}\n')
 
     # Write atomically
+    # Created 0600 (never umask-readable) and atomically swapped in.
     tmp = env_path + '.new'
-    with open(tmp, 'w') as f:
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as f:
         f.writelines(new_lines)
     os.replace(tmp, env_path)
 

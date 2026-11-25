@@ -270,6 +270,13 @@ class Config:
     SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
+    # Flask-Login's remember cookie gets the same protections (audit PP-1):
+    # without an explicit SameSite, browsers that don't default to Lax
+    # attach it to cross-site requests -- including requests made by a
+    # sandboxed personal page.
+    REMEMBER_COOKIE_SECURE = SESSION_COOKIE_SECURE
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SAMESITE = 'Lax'
     
     # Application
     BBS_NAME = os.environ.get('BBS_NAME', 'ANetBBS')
@@ -758,6 +765,9 @@ class TestingConfig(Config):
 
     # Runtime paths never point into the source tree under test (L-18).
     _RUNTIME_DIR = _testing_runtime_dir()
+    # Code that derives "install root" (logs/, etc.) honours INSTALL_DIR
+    # when set; tests point it at the scratch root too.
+    INSTALL_DIR = _RUNTIME_DIR
     DATA_DIR = os.path.join(_RUNTIME_DIR, 'data')
     LOG_FILE = os.path.join(_RUNTIME_DIR, 'bbs.log')
     DOWNLOADS_DIR = os.path.join(DATA_DIR, 'releases')

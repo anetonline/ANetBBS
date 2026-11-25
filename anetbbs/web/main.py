@@ -544,7 +544,7 @@ def search():
             if board_filter.isdigit():
                 qry = qry.filter(Post.board_id == int(board_filter))
             if user_filter:
-                u = User.query.filter(User.username.ilike(user_filter)).first()
+                u = User.query.filter(db.func.lower(User.username) == user_filter.lower()).first()  # exact (audit M-2)
                 if u:
                     qry = qry.filter(Post.author_id == u.id)
                 else:

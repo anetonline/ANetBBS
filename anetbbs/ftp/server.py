@@ -245,6 +245,7 @@ class AnetbbsAuthorizer(DummyAuthorizer):
         # Bind only human BBS accounts; anonymous/QWK credentials have a
         # separate lifecycle and must not inherit a previous login token.
         handler._bbs_auth = None
+        handler._bbs_user_id = None
         if username == 'anonymous':
             return super().validate_authentication(username, password, handler)
 
@@ -259,10 +260,19 @@ class AnetbbsAuthorizer(DummyAuthorizer):
         from ..models import User, QWKNode
         with self.app.app_context():
             # 1. Try BBS user.
+            # Exact, case-insensitive equality -- never ilike(), which
+            # would treat % and _ in the typed name as wildcards (audit M-2).
+            from sqlalchemy import func as _func
             user = User.query.filter(
-                User.username.ilike(username),
+                _func.lower(User.username) == (username or '').lower(),
                 User.is_active.is_(True),
             ).first()
+            if user is None:
+                # Same hashing cost as a wrong password, so login timing
+                # doesn't reveal which usernames exist.
+                from ..core.user_manager import _DUMMY_PASSWORD_HASH
+                from werkzeug.security import check_password_hash as _cph
+                _cph(_DUMMY_PASSWORD_HASH, password or '')
             if user is not None and user.check_password(password):
                 # Same account-standing gates as web/auth.py's login() and
                 # core/user_manager.py's authenticate() -- FTP previously
@@ -280,6 +290,7 @@ class AnetbbsAuthorizer(DummyAuthorizer):
                 self.add_user(username, password=password,
                               homedir=home, perm=perm)
                 handler._bbs_auth = (user.id, user.auth_version)
+                handler._bbs_user_id = user.id
                 return
 
             # 2. Try QWK node (packet_id as username, plaintext password).
@@ -291,7 +302,7 @@ class AnetbbsAuthorizer(DummyAuthorizer):
             # AreaFix passthrough), not hashable login credentials.
             node = (QWKNode.query
                     .filter_by(is_active=True)
-                    .filter(QWKNode.packet_id.ilike(username))
+                    .filter(_func.lower(QWKNode.packet_id) == (username or '').lower())
                     .first())
             if node is not None and hmac.compare_digest(node.password, password):
                 # self.qwk_root is ALREADY <DATA_DIR>/qwk-hub (set at
@@ -342,6 +353,9 @@ class AnetbbsFTPHandler(FTPHandler):
     _qwk_node_id = None
     _qwk_packet_id = None
     _bbs_auth = None
+    # Id of the authenticated BBS account (never re-derived from the wire
+    # username). None for anonymous and QWK-node sessions.
+    _bbs_user_id = None
     _bbs_transfer_auth = None
     _auth_recheck = None
 
@@ -351,7 +365,8 @@ class AnetbbsFTPHandler(FTPHandler):
             self._auth_recheck = None
 
     def _recheck_auth(self):
-        """Revoke human logins and their data channels after password change."""
+        """Revoke human logins and their data channels after a password change,
+        lock, deactivation or loss of verification."""
         if self._closed:
             self._cancel_auth_recheck()
             return False
@@ -371,7 +386,14 @@ class AnetbbsFTPHandler(FTPHandler):
             with self.app.app_context():
                 for user_id, version in bindings:
                     user = db.session.get(User, user_id, populate_existing=True)
-                    if user is None or user.auth_version != version:
+                    # Also drop the session when the account is locked,
+                    # deactivated or no longer verified (audit M-2) --
+                    # not only on a password change.
+                    if (user is None or user.auth_version != version
+                            or not user.is_active
+                            or getattr(user, 'is_locked', False)
+                            or (not getattr(user, 'is_verified', True)
+                                and not user.is_admin)):
                         self.close()
                         return False
         except Exception:
@@ -473,11 +495,11 @@ class AnetbbsFTPHandler(FTPHandler):
                 # log the violation. Anonymous gets 'elr' permission via
                 # the authorizer so anon can never reach this hook.
                 allowed = area.upload_permission
-                user = User.query.filter(
-                    User.username.ilike(self.username)).first()
-                if user is None:
-                    return
-                if allowed == 'none' or (allowed == 'sysop' and not user.is_admin):
+                user = db.session.get(User, self._bbs_user_id) if self._bbs_user_id else None
+                # user None (session not bound to an account) fails closed
+                # too: the file is removed (audit M-2).
+                if user is None or allowed == 'none' or (
+                        allowed == 'sysop' and not user.is_admin):
                     try:
                         os.remove(file)
                     except OSError:
@@ -485,7 +507,8 @@ class AnetbbsFTPHandler(FTPHandler):
                     logger.warning(
                         'FTP: rejected upload %s by %s (area %s '
                         'permission=%s)',
-                        os.path.basename(file), user.username, area.tag, allowed)
+                        os.path.basename(file),
+                        user.username if user else '<unbound session>', area.tag, allowed)
                     return
 
                 # Optional ClamAV scan -- the web upload routes
@@ -550,10 +573,13 @@ class AnetbbsFTPHandler(FTPHandler):
             return True
         try:
             with self.app.app_context():
-                from ..models import User, FileArea
-                user = User.query.filter(
-                    User.username.ilike(self.username)).first()
-                if user is None or user.is_admin:
+                from ..models import User, FileArea, db
+                user = db.session.get(User, self._bbs_user_id) if self._bbs_user_id else None
+                # Fail closed: a non-anonymous, non-QWK session must map to
+                # its authenticated account (audit M-2).
+                if user is None:
+                    return False
+                if user.is_admin:
                     return True
                 area_tag = self._parent_area_tag(path)
                 if not area_tag:
@@ -571,16 +597,52 @@ class AnetbbsFTPHandler(FTPHandler):
         except Exception:
             logger.exception('FTP: area write-permission check failed for %s',
                              self.username)
-            return True  # fail-open, same posture as ftp_RETR's quota check
+            return False  # fail closed (audit M-2)
         return True
 
+    def _session_user(self):
+        """The authenticated BBS account, re-read by id (so a demotion or
+        lock takes effect), or None for anonymous/QWK/unknown."""
+        if self.app is None or self._bbs_user_id is None:
+            return None
+        try:
+            with self.app.app_context():
+                from ..models import User, db
+                return db.session.get(User, self._bbs_user_id)
+        except Exception:
+            logger.exception('FTP: session user lookup failed')
+            return None
+
+    def _may_modify_existing(self):
+        """Deleting, renaming or overwriting files that already exist is
+        sysop-only (audit H-3): area files belong to whoever uploaded
+        them, and an upload-capable user must not be able to replace or
+        remove someone else's file. QWK node sessions keep full control
+        of their own packet directory."""
+        if self._qwk_node_id is not None:
+            return True
+        user = self._session_user()
+        return bool(user is not None and user.is_admin)
+
+    def ftp_STOR(self, file, mode='w'):
+        if os.path.lexists(file) and not self._may_modify_existing():
+            self.respond('550 A file with that name already exists.')
+            return
+        return super().ftp_STOR(file, mode=mode)
+
     def ftp_DELE(self, path):
+        if not self._may_modify_existing():
+            self.respond('550 Only the sysop can delete files.')
+            return
         if not self._area_write_allowed(path):
             self.respond('550 Permission denied for this area.')
             return
         return super().ftp_DELE(path)
 
     def ftp_RNFR(self, path):
+        if not self._may_modify_existing():
+            self.respond('550 Only the sysop can rename files.')
+            return
         if not self._area_write_allowed(path):
             self.respond('550 Permission denied for this area.')
             return
@@ -599,6 +661,9 @@ class AnetbbsFTPHandler(FTPHandler):
         return super().ftp_MKD(path)
 
     def ftp_RMD(self, path):
+        if not self._may_modify_existing():
+            self.respond('550 Only the sysop can remove directories.')
+            return
         if not self._area_write_allowed(path):
             self.respond('550 Permission denied for this area.')
             return
@@ -620,10 +685,9 @@ class AnetbbsFTPHandler(FTPHandler):
                 and self._qwk_node_id is None):
             try:
                 with self.app.app_context():
-                    from ..models import User
+                    from ..models import User, db
                     from ..features.file_quota import check_quota
-                    user = User.query.filter(
-                        User.username.ilike(self.username)).first()
+                    user = db.session.get(User, self._bbs_user_id) if self._bbs_user_id else None
                     if user is not None:
                         try:
                             size = os.path.getsize(file)
@@ -645,10 +709,9 @@ class AnetbbsFTPHandler(FTPHandler):
             return
         try:
             with self.app.app_context():
-                from ..models import User
+                from ..models import User, db
                 from ..features.file_quota import consume_quota
-                user = User.query.filter(
-                    User.username.ilike(self.username)).first()
+                user = db.session.get(User, self._bbs_user_id) if self._bbs_user_id else None
                 if user is not None:
                     try:
                         size = os.path.getsize(file)

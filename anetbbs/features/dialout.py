@@ -217,6 +217,8 @@ class DialoutMenu:
                 f"\r\n{FG['red']}Connect failed: {ssrf_err}{RESET}\r\n")
             await self.session.read_line('Press Enter...')
             return
+        from ..core.text_safety import strip_untrusted_escapes as _su
+        name, host = _su(name), _su(host)   # may come from remote fsxNet data (audit M-5)
         await self.session.write(
             f"\r\n{FG['cyan']}Connecting to {name} ({host}:{port}) - "
             f"Press Ctrl+] then Q to disconnect.{RESET}\r\n\r\n")

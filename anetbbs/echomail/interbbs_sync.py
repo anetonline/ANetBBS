@@ -232,10 +232,11 @@ def _origin_from_message(msg):
     -- prefers the FTN '* Origin: ...' line, falls back to from_address,
     falls back to a fixed placeholder (never blank/None -- that would
     collide with the "local post" sentinel)."""
+    from ..core.text_safety import strip_untrusted_escapes as _clean
     if msg.origin_line:
-        return msg.origin_line.strip()[:100] or 'unknown'
+        return _clean(msg.origin_line).strip()[:100] or 'unknown'
     if msg.from_address:
-        return msg.from_address[:100]
+        return _clean(msg.from_address)[:100] or 'unknown'
     return 'unknown'
 
 
@@ -310,9 +311,10 @@ def sync_wall_inbound(app, params):
 
             body = msg.body or ''
             lines = body.split('\n', 1)
-            line1 = _wf_apply(lines[0])[:200]
-            line2 = _wf_apply(lines[1])[:200] if len(lines) > 1 else None
-            from_name = _wf_apply(msg.from_name or '?')
+            from ..core.text_safety import strip_untrusted_escapes as _clean
+            line1 = _wf_apply(_clean(lines[0]))[:200]
+            line2 = _wf_apply(_clean(lines[1]))[:200] if len(lines) > 1 else None
+            from_name = _wf_apply(_clean(msg.from_name or '?')) or '?'
             wp = WallPost(
                 username=from_name[:80],
                 display_name=from_name[:100],
@@ -372,7 +374,8 @@ def sync_lastcallers_inbound(app, params):
                 continue
 
             body_lines = (msg.body or '').split('\n')
-            service = _wf_apply((body_lines[0].strip() if body_lines else '') or 'unknown')[:20]
+            from ..core.text_safety import strip_untrusted_escapes as _clean
+            service = _wf_apply(_clean(body_lines[0].strip() if body_lines else '') or 'unknown')[:20]
             started_at = None
             if len(body_lines) > 1 and body_lines[1].strip():
                 try:
@@ -380,7 +383,7 @@ def sync_lastcallers_inbound(app, params):
                 except Exception:
                     started_at = None
             cl = CallerLog(
-                username=_wf_apply(msg.from_name or '?')[:80],
+                username=(_wf_apply(_clean(msg.from_name or '?')) or '?')[:80],
                 service=service,
                 started_at=started_at or _dt.utcnow(),
                 origin_bbs=_origin_from_message(msg),
@@ -547,8 +550,9 @@ def sync_scores_inbound(app, params):
                 score = int(body_lines[1].strip())
             except (ValueError, IndexError):
                 continue
-            remote_username = (body_lines[2].strip()[:100] if len(body_lines) > 2
-                               else (msg.from_name or '?')[:100])
+            from ..core.text_safety import strip_untrusted_escapes as _clean
+            remote_username = (_clean(body_lines[2]).strip()[:100] if len(body_lines) > 2
+                               else (_clean(msg.from_name or '?') or '?')[:100])
 
             game = Game.query.filter_by(slug=slug).first()
             if game is None or not game.share_scores_interbbs:

@@ -193,7 +193,7 @@ def notify_mentions(text, sender_name, target_url='', min_access_level=None):
     sender = None
     try:
         sender = User.query.filter(
-            User.username.ilike(sender_name or '')).first()
+            db.func.lower(User.username) == (sender_name or '').lower()).first()
     except Exception:
         db.session.rollback()
 
@@ -202,7 +202,7 @@ def notify_mentions(text, sender_name, target_url='', min_access_level=None):
         if name == (sender_name or '').lower():
             continue
         try:
-            u = User.query.filter(User.username.ilike(name)).first()
+            u = User.query.filter(db.func.lower(User.username) == (name or '').lower()).first()  # exact match, no LIKE wildcards (audit M-2)
         except Exception:
             db.session.rollback()
             continue

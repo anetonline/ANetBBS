@@ -215,7 +215,12 @@ def _tick(app):
 
     # Full register (first time, or after a 404/401 fallback).
     try:
-        r = sess.post(f'{base}/registry/api/v1/register', json=meta,
+        # Send our current key so the hub can accept an update to an
+        # existing entry (the hub requires ownership proof, audit H-4).
+        payload = dict(meta)
+        if state.get('heartbeat_key'):
+            payload['heartbeat_key'] = state['heartbeat_key']
+        r = sess.post(f'{base}/registry/api/v1/register', json=payload,
                       timeout=20)
         body = r.json() if r.headers.get('content-type', '').startswith(
             'application/json') else {}
@@ -234,6 +239,13 @@ def _tick(app):
             return {'ok': True, 'action': 'register',
                     'verify_url': body.get('verify_url') or '',
                     'message': body.get('message') or ''}
+        elif r.status_code == 409 and body.get('status') == 'owner_confirmation_required':
+            logger.warning(
+                'registry-client: %s already has this host registered under a '
+                'different key -- confirm via the email sent to the registered '
+                'contact address, then restart within 24 hours', base)
+            return {'ok': False, 'action': 'register',
+                    'reason': body.get('error') or 'owner confirmation required'}
         else:
             logger.warning('registry-client: register %s returned %d: %s',
                            base, r.status_code, r.text[:200])

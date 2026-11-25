@@ -128,40 +128,23 @@ def _import_one_feed(app, feed_id):
         # network I/O in that case, so no separate timeout workaround
         # is needed for the parse step (curl's own --max-time covers
         # the only real network call now).
-        import subprocess
-        resolved_ip = _sockaddr[0]
-        try:
-            result = subprocess.run(
-                ['curl', '-sL', '--fail', '--max-time', str(_FEED_FETCH_TIMEOUT),
-                 '-A', 'ANetBBS RSS reader (+https://github.com/anetonline/anetbbs)',
-                 '--resolve', f'{host}:{port}:{resolved_ip}',
-                 '--', url],
-                capture_output=True, timeout=_FEED_FETCH_TIMEOUT + 5,
-            )
-        except subprocess.TimeoutExpired:
-            feed.last_error = f'fetch timed out after {_FEED_FETCH_TIMEOUT}s'
+        # Audit M-3: fetched through net_safety.safe_http_fetch(), which
+        # pins every hop to its validated address and never lets curl
+        # follow a redirect on its own (`curl -L` used to follow a public
+        # feed's 30x straight to an internal address).
+        from ..core.net_safety import safe_http_fetch
+        content, fetch_err = safe_http_fetch(
+            url, timeout=_FEED_FETCH_TIMEOUT,
+            user_agent='ANetBBS RSS reader (+https://github.com/anetonline/anetbbs)')
+        if fetch_err:
+            feed.last_error = fetch_err[:250]
             feed.last_fetched_at = datetime.utcnow()
             db.session.commit()
-            logger.warning('RSS fetch timed out for %s', feed.name)
-            return 0
-        except Exception as exc:  # pylint: disable=broad-except
-            feed.last_error = f'fetch failed: {exc}'
-            feed.last_fetched_at = datetime.utcnow()
-            db.session.commit()
-            logger.warning('RSS fetch failed for %s: %s', feed.name, exc)
-            return 0
-        if result.returncode != 0:
-            feed.last_error = (
-                f'fetch failed: curl exited {result.returncode}: '
-                f'{result.stderr.decode(errors="replace")[:200]}')
-            feed.last_fetched_at = datetime.utcnow()
-            db.session.commit()
-            logger.warning('RSS fetch failed for %s: curl exited %s',
-                           feed.name, result.returncode)
+            logger.warning('RSS fetch failed for %s: %s', feed.name, fetch_err)
             return 0
 
         try:
-            parsed = feedparser.parse(result.stdout)
+            parsed = feedparser.parse(content)
         except Exception as exc:  # pylint: disable=broad-except
             feed.last_error = f'parse failed: {exc}'
             feed.last_fetched_at = datetime.utcnow()

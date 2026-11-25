@@ -142,7 +142,9 @@ class RssFeedUrlSsrfTests(unittest.TestCase):
         from anetbbs.models import RssFeed
         url = 'https://example.com/feed.xml'
         feed_id = self._make_feed(url)
-        fake_result = mock.Mock(returncode=0, stdout=b'<rss></rss>', stderr=b'')
+        # safe_http_fetch() appends curl's -w '\n<code>\n<redirect_url>'
+        # trailer after the body (audit M-3).
+        fake_result = mock.Mock(returncode=0, stdout=b'<rss></rss>\n200\n', stderr=b'')
         # _import_one_feed() does `from ..core.net_safety import
         # resolve_safe_destination` as a LOCAL import at call time, so
         # patching the real source attribute (not a module-level name
@@ -155,11 +157,11 @@ class RssFeedUrlSsrfTests(unittest.TestCase):
              mock.patch('feedparser.parse') as mock_parse:
             mock_parse.return_value = mock.Mock(bozo=False, entries=[], feed={})
             poller_mod._import_one_feed(self.app, feed_id)
-        mock_resolve.assert_called_once()
+        self.assertTrue(mock_resolve.called)
         mock_run.assert_called_once()
         mock_parse.assert_called_once()
         called_bytes = mock_parse.call_args[0][0]
-        self.assertEqual(called_bytes, fake_result.stdout,
+        self.assertEqual(called_bytes, b'<rss></rss>',
                          'feedparser must receive the already-fetched bytes, '
                          'not a URL it would re-resolve itself')
         with self.app.app_context():
