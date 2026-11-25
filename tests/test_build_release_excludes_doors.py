@@ -15,6 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @unittest.skipUnless(shutil.which('git'), 'git not available')
+@unittest.skipUnless(os.path.isfile(os.path.join(ROOT, 'build-release.sh')),
+                     'build-release.sh is not shipped in release archives')
 class BuildReleaseExcludesDoors(unittest.TestCase):
     def test_doors_and_dos_games_not_shipped(self):
         tmp = tempfile.mkdtemp(prefix='brel-')

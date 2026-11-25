@@ -29,6 +29,14 @@ This file covers the other three real, confirmed root causes:
    fail with a clear message instead of silently doing nothing
    ("dial-out does not work" was the live symptom).
 """
+
+import importlib.util as _ilu
+import pytest as _pytest
+# The Enhanced Client add-on is not part of the stock release archive
+# (build-release.sh leaves it out); skip, don't fail, when it's absent.
+pytestmark = _pytest.mark.skipif(
+    _ilu.find_spec('anetbbs.features.enhanced_protocol') is None,
+    reason='Enhanced Client add-on not installed')
 import json
 import sys
 import unittest

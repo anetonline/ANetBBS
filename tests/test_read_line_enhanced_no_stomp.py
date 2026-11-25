@@ -43,6 +43,14 @@ BBSSession.read_line()/write() against a REAL StreamReader-shaped fake
 (one byte at a time, matching read_raw()'s real call pattern) and
 inspects the real JSON frames written to the transport.
 """
+
+import importlib.util as _ilu
+import pytest as _pytest
+# The Enhanced Client add-on is not part of the stock release archive
+# (build-release.sh leaves it out); skip, don't fail, when it's absent.
+pytestmark = _pytest.mark.skipif(
+    _ilu.find_spec('anetbbs.features.enhanced_protocol') is None,
+    reason='Enhanced Client add-on not installed')
 import asyncio
 import json
 import sys

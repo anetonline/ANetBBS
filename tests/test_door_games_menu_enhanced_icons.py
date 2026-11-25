@@ -17,6 +17,14 @@ show_door_menu() builds its category grouping from real SQLAlchemy
 query results) rather than importing them, matching this repo's
 existing convention of self-contained per-file fixtures.
 """
+
+import importlib.util as _ilu
+import pytest as _pytest
+# The Enhanced Client add-on is not part of the stock release archive
+# (build-release.sh leaves it out); skip, don't fail, when it's absent.
+pytestmark = _pytest.mark.skipif(
+    _ilu.find_spec('anetbbs.features.enhanced_protocol') is None,
+    reason='Enhanced Client add-on not installed')
 import asyncio
 import json
 import os

@@ -37,7 +37,10 @@ from anetbbs.web import upgrades
 
 class UpgradeLogPathTests(unittest.TestCase):
     def test_log_path_is_under_data_not_tmp(self):
-        self.assertNotIn('/tmp/', upgrades._UPGRADE_LOG_PATH)
+        # Not the old shared /tmp/anetbbs_upgrade.log (the checkout itself
+        # may legitimately live under a temp directory).
+        self.assertNotEqual(os.path.dirname(upgrades._UPGRADE_LOG_PATH),
+                            tempfile.gettempdir())
         self.assertIn(os.path.join('data', 'anetbbs_upgrade.log'),
                       upgrades._UPGRADE_LOG_PATH)
 
