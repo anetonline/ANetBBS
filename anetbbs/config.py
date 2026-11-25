@@ -46,6 +46,15 @@ def _default_echomail_origin():
     return f"{host}, {' '.join(ways)}"
 
 
+
+def _env_int(name, default):
+    """Integer setting from the environment; a missing or malformed value
+    falls back to the default instead of failing at import."""
+    try:
+        return int(os.environ.get(name, '').strip() or default)
+    except ValueError:
+        return default
+
 class Config:
     """Base configuration"""
     
@@ -296,6 +305,9 @@ class Config:
     # auto-index.html resolution.
     PERSONAL_PAGES_ENABLED = os.environ.get(
         'PERSONAL_PAGES_ENABLED', 'false').lower() == 'true'
+    # Per-user limits (docs/10-personal-pages.md).
+    PERSONAL_PAGES_MAX_FILES = _env_int('PERSONAL_PAGES_MAX_FILES', 100)
+    PERSONAL_PAGES_MAX_BYTES = _env_int('PERSONAL_PAGES_MAX_BYTES', 10 * 1024 * 1024)
     # Public "Watch It Live" page (anetbbs/web/watch.py) — a no-login
     # activity ticker meant to be shared/embedded off-site. Off by
     # default: it's a real, deliberate broadening of who's-online

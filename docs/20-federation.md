@@ -95,14 +95,20 @@ REGISTRY_MODE_ENABLED=true
 
 Restart the web service. New endpoints become live:
 
-- `POST /registry/api/v1/register` — peers announce themselves.
-  Returns a `heartbeat_key` every call — save it, `/heartbeat` below
-  requires it.
+- `POST /registry/api/v1/register` — peers announce themselves. A
+  successful response includes the entry's `heartbeat_key`; save it,
+  because `/heartbeat` requires it. Registering a host that already has
+  an entry needs that entry's current `heartbeat_key` (ANetBBS sends it
+  automatically). Without the key, the hub answers `409
+  owner_confirmation_required` and emails the existing contact a
+  confirmation link (see "Re-registering" below).
 - `POST /registry/api/v1/heartbeat` — daily keep-alive. Must include
-  the `heartbeat_key` from the most recent `/register` response, or
-  the hub returns `401` (treat that the same as `404`: re-register to
-  get a current key).
-- `GET  /registry/verify/<token>` — peer sysop clicks to confirm
+  the current `heartbeat_key`, or the hub returns `401`.
+- `/registry/verify/<token>` — the emailed contact-verification link.
+  Opening it shows a confirm button; verification happens on that POST,
+  so a mail scanner that pre-fetches links can't verify an address.
+- `/registry/rekey/<token>` — the re-registration confirmation link,
+  which works the same way
 - `GET  /anetbbs.lst` — public JSON list of approved peers
 - `GET  /registry/api/v1/list` — same content, machine-readable URL
 

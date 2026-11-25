@@ -211,14 +211,12 @@ sudo certbot --nginx -d bbs.example.com</pre>
         <li>Live who's-online (web + terminal) refreshing every 5s</li>
         <li>One-click journal viewer per service</li>
     </ul>
-    <p><code>update.sh</code> sets up the sudoers rule for service
-       control automatically on every run. If you haven't updated yet,
-       set it up yourself — the template ships with a
-       <code>__SERVICE_USER__</code> placeholder that needs
-       substituting, not a plain copy:</p>
-    <pre>sudo sed "s/^__SERVICE_USER__ /anetbbs /" deploy/sudoers.anetbbs \
-    | sudo tee /etc/sudoers.d/anetbbs > /dev/null
-sudo chmod 0440 /etc/sudoers.d/anetbbs</pre>
+    <p><code>install.sh</code> and <code>update.sh</code> set up service
+       control automatically on every run: the sudoers rule, the
+       root-owned helpers in <code>/usr/local/libexec/anetbbs/</code>, and
+       <code>/etc/anetbbs.install</code>. If you need to do it by hand, follow
+       all of the steps in <code>docs/02-sysop-daily-ops.md</code>. The
+       sudoers rule on its own isn't enough.</p>
 </section>
 
 <!-- Slide 10: Upgrades -->

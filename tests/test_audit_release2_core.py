@@ -128,6 +128,19 @@ class WebTerminalPorts(unittest.TestCase):
             self.assertEqual(wt._blocked_ports(), {25, 2323})
 
 
+class PersonalPageLimitsConfigurable(unittest.TestCase):
+    """The documented PERSONAL_PAGES_MAX_* settings used to be read only
+    from app config, where nothing set them, so .env values were ignored."""
+
+    def test_limits_come_from_the_environment(self):
+        from anetbbs import config
+        self.assertEqual(config.Config.PERSONAL_PAGES_MAX_FILES, 100)
+        with mock.patch.dict(os.environ, {'X_R2_INT': '7'}):
+            self.assertEqual(config._env_int('X_R2_INT', 1), 7)
+        with mock.patch.dict(os.environ, {'X_R2_INT': 'lots'}):
+            self.assertEqual(config._env_int('X_R2_INT', 1), 1)
+
+
 class TemplateFixes(unittest.TestCase):
     def test_broadcast_toast_escaped(self):
         s = (REPO / 'anetbbs/templates/base.html').read_text()

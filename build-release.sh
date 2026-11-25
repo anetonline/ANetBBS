@@ -196,4 +196,4 @@ if [[ -f "$SIGNING_KEY" ]]; then
 else
   echo "NOTE: no signing key at $SIGNING_KEY -- release is unsigned."
 fi
-echo "Upload together: $OUT  $OUT.sha256${SIGNING_KEY:+  (and $OUT.sig if signed)}"
+if [[ -f "$OUT.sig" ]]; then echo "Upload together: $OUT  $OUT.sha256  $OUT.sig"; else echo "Upload together: $OUT  $OUT.sha256"; fi

@@ -285,6 +285,15 @@ one command per line in the body:
                     node that doesn't have one set yet
 ```
 
+**Commands must arrive in the node's own session.** An AreaFix or
+FileFix netmail that claims to be from a hosted node is acted on only
+when it arrives in a secure BinkP session authenticated as that same
+node. A copy relayed through another system, or picked up in an
+outbound poll, is ignored, because its sender can't be verified. This
+closes a route by which one node could change another node's
+subscriptions or `%PASSWORD`. Peers that used to send AreaFix through a
+relay should send it directly.
+
 The bot replies with a netmail confirming what changed. If the
 requester's FTN address matches a `BinkPNode` this BBS hosts as a hub
 peer (see Hub Management below), the change is scoped to that peer's

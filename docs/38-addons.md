@@ -46,8 +46,8 @@ scans `TDF_FONTS_DIR` fresh on every request.
 
 Each add-on's URL setting has a matching optional SHA-256 pin:
 `ENHANCED_CLIENT_ADDON_SHA256` and `TDF_FONTS_PACK_SHA256`. Set it
-(64 hex characters) in `.env` or Admin → Settings, and the download is
-refused unless it matches exactly. Without a pin, the URL must be
+(64 hex characters) in `.env` and restart the web service; the download
+is then refused unless it matches exactly. Without a pin, the URL must be
 https. Plain http is accepted only when a pin is set, or when the host
 is this machine (`127.0.0.1`, `::1`, `localhost`). The same rule
 applies to the ANSI editor's font picker, which uses this install
