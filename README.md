@@ -1,6 +1,6 @@
 # ANetBBS
 
-**Status: private test candidate** (`v1.1.73`, November 2026)
+**Status: private test candidate** (`v1.1.74`, November 2026)
 
 A modern multi-node BBS for the classic FidoNet world. Web, telnet, SSH,
 rlogin, **FTP, and PETSCII (C64/128)** front-ends; FidoNet binkp + DOVE-Net
@@ -29,8 +29,8 @@ pick **test** mode at the prompt if you're behind NAT or just kicking
 the tires (web admin runs on `http://localhost:8080`).
 
 ```
-tar xzf ANetBBS-v1.1.73.tar.gz
-cd ANetBBS-v1.1.73
+tar xzf ANetBBS-v1.1.74.tar.gz
+cd ANetBBS-v1.1.74
 sudo bash install.sh
 ```
 
@@ -50,20 +50,22 @@ and run `update.sh` from inside it (backs up `.env`/database/systemd units
 first, then syncs files and restarts services):
 
 ```
-tar xzf ANetBBS-v1.1.73.tar.gz
-cd ANetBBS-v1.1.73
+tar xzf ANetBBS-v1.1.74.tar.gz
+cd ANetBBS-v1.1.74
 sudo bash update.sh
 ```
 
 `install.sh` itself also takes a few flags:
 
 ```
-sudo bash install.sh --uninstall  # Stops/disables services, then (after one
-                                   # y/N confirmation) deletes the ENTIRE
-                                   # install directory -- including data/ (DB,
-                                   # uploads, echomail) -- with no separate
-                                   # prompt or backup for that. Back up
-                                   # data/ first if you want to keep it.
+sudo bash install.sh --uninstall  # Stops/disables services, then (after you
+                                   # type the install path to confirm) deletes
+                                   # the ENTIRE install directory -- including
+                                   # data/ (DB, uploads, echomail) -- with no
+                                   # separate prompt or backup for that. Back
+                                   # up data/ first if you want to keep it.
+                                   # Also removes the service user, the sudo
+                                   # grant and the root-owned upgrade helpers.
 sudo bash install.sh --defaults   # Non-interactive install, all defaults
 sudo bash install.sh --force      # Re-run install, overwriting an existing
                                    # .env and database (normally preserved)
@@ -84,7 +86,7 @@ docker compose -f docker/compose/docker-compose.yml up -d
 ```
 
 `.env` already points at `ghcr.io/anetonline/anetbbs:latest` by
-default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.73`
+default — pin a specific version instead with `ANETBBS_IMAGE_TAG=v1.1.74`
 (or whatever release you want). Testing a local change instead of a
 published image? `docker build -f docker/Dockerfile -t anetbbs:local .`,
 then set `ANETBBS_IMAGE=anetbbs` / `ANETBBS_IMAGE_TAG=local` in `.env`.

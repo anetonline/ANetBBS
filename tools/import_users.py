@@ -579,6 +579,7 @@ def run_import(users: Iterator[ImportedUser], *,
             is_verified   = not require_verify,
         )
         try:
+            user.ensure_auth_version()  # revocable sessions (audit M-6)
             session.add(user)
             session.commit()
             ok(f'ADD   {handle:<25}  level={u.access_level}')
