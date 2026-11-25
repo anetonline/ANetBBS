@@ -29,6 +29,9 @@ Fixes and improvements:
 - **Deleted private messages** stay hidden from the side that deleted
   them, including in conversation view and quoting.
 - **Feeds** skip inactive boards and expired bulletins.
+- **Admin → Backups → Restore DB** now completes and brings the BBS back:
+  every service stops for the swap, the backup is integrity-checked first,
+  and the previous database is kept beside it.
 - **Add-on downloads** accept an optional SHA-256 pin.
 
 Upgrade notes:

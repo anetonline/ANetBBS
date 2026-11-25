@@ -252,8 +252,12 @@ def restore_db(name):
     if not p:
         flash('Invalid backup name.', 'danger')
         return redirect(url_for('backups_admin.index'))
+    # The helper hands the swap to its own systemd unit and returns at once:
+    # it stops every ANetBBS service, this web process included, restores
+    # the file and starts them again.
     ok, msg = _run_restore('db', p)
-    flash(('DB restored from ' + name + '. ' + msg)
+    flash(('DB restore from ' + name + ' started: the BBS restarts in a few '
+           'seconds; reload this page afterwards. ' + msg)
           if ok else 'Restore failed: ' + msg,
           'success' if ok else 'danger')
     return redirect(url_for('backups_admin.index'))

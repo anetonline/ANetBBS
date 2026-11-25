@@ -132,26 +132,59 @@ case "$KIND" in
     db)
         SRC="$BACKUP/anetbbs.db.bak"
         DST="$INSTALL_DIR/data/anetbbs.db"
-        # Same reasoning as the env case above.
         [ -L "$SRC" ] && fail "refusing: $SRC is a symlink"
         [ -L "$DST" ] && fail "refusing: $DST is a symlink"
         [ -f "$SRC" ] || fail "no anetbbs.db.bak in $BACKUP"
-        # Stop the web service so SQLite write handles aren't dangling.
-        log "stopping anetbbs-web before DB swap..."
-        systemctl stop anetbbs-web 2>/dev/null || true
-        log "copying $SRC -> $DST"
-        if ! as_service cp -f --remove-destination -- "$SRC" "$DST"; then
-            systemctl start anetbbs-web 2>/dev/null || true
-            fail "copy failed as $SERVICE_USER"
+        _db_ok() {   # integrity_check, read-only, as the service user
+            as_service env DBF="$1" python3 -I -c 'import os, sqlite3, sys
+c = sqlite3.connect("file:" + os.environ["DBF"] + "?mode=ro", uri=True)
+sys.exit(0 if c.execute("pragma integrity_check").fetchone()[0] == "ok" else 1)' 2>/dev/null
+        }
+        _db_ok "$SRC" || fail "$SRC fails PRAGMA integrity_check -- not restoring it"
+        if [ "${ANETBBS_RESTORE_DETACHED:-}" != 1 ]; then
+            # The Restore button runs this helper from inside anetbbs-web.
+            # Stopping that unit kills everything in its cgroup, this script
+            # included, so the swap runs in its own transient unit.
+            command -v systemd-run >/dev/null 2>&1 || fail "systemd-run is required to restore the database"
+            systemd-run --unit=anetbbs-restore-db --collect --quiet \
+                --setenv=ANETBBS_RESTORE_DETACHED=1 /bin/bash "$0" db "$BACKUP" \
+                || fail "could not start anetbbs-restore-db (is another restore still running?)"
+            log "restore db: started in anetbbs-restore-db.service; the BBS restarts in a few seconds (journalctl -u anetbbs-restore-db)"
+            exit 0
         fi
-        # Real gap found in a security/performance audit: the DB holds
-        # password hashes, session tokens, and private messages -- see
-        # install.sh's matching fix on the fresh-install path for why
-        # 600 (not 644) is correct here.
+        # Detached. Every running ANetBBS service holds the database open,
+        # so all of them stop for the swap and start again afterwards.
+        mapfile -t UNITS < <(systemctl list-units --type=service --state=running --plain --no-legend 'anetbbs*' \
+            | awk '{print $1}' | grep -vxE 'anetbbs-(restore-db|upgrade)\.service' || true)
+        _start_units() { if [ ${#UNITS[@]} -gt 0 ]; then systemctl start "${UNITS[@]}" || true; fi; }
+        log "stopping: ${UNITS[*]:-(none running)}"
+        if [ ${#UNITS[@]} -gt 0 ]; then systemctl stop "${UNITS[@]}"; fi
+        # Move the live database and its WAL/SHM aside: a stale WAL must never
+        # be replayed onto the restored file. Only the latest set is kept.
+        TS=$(date +%Y%m%d%H%M%S); PRE="$DST.pre-restore-$TS"
+        for s in "" -wal -shm; do
+            if [ -L "$DST$s" ]; then _start_units; fail "refusing: $DST$s is a symlink"; fi
+        done
+        as_service find "$INSTALL_DIR/data" -maxdepth 1 -name 'anetbbs.db.pre-restore-*' -delete 2>/dev/null || true
+        for s in "" -wal -shm; do
+            if [ -e "$DST$s" ]; then
+                as_service mv -f -- "$DST$s" "$PRE$s" || { _start_units; fail "could not move $DST$s aside"; }
+            fi
+        done
+        _revert() {
+            local s
+            as_service rm -f -- "$DST" "$DST-wal" "$DST-shm" || true
+            for s in "" -wal -shm; do
+                if [ -e "$PRE$s" ]; then as_service mv -f -- "$PRE$s" "$DST$s" || true; fi
+            done
+            _start_units
+        }
+        log "copying $SRC -> $DST (previous database kept as $PRE)"
+        as_service cp -f --remove-destination -- "$SRC" "$DST" || { _revert; fail "copy failed as $SERVICE_USER -- previous database put back"; }
         as_service chmod 600 -- "$DST"
-        log "starting anetbbs-web back up..."
-        systemctl start anetbbs-web 2>/dev/null || true
-        log "restore db: ok (anetbbs-web restarted)"
+        _db_ok "$DST" || { _revert; fail "restored database fails PRAGMA integrity_check -- previous database put back"; }
+        _start_units
+        log "restore db: ok (restarted: ${UNITS[*]:-none})"
         ;;
     *)
         fail "unknown kind: $KIND (use env or db)"

@@ -77,7 +77,7 @@
               {% endif %}
               {% if 'anetbbs.db.bak' in r.files %}
               <form method="POST" action="{{ url_for('backups_admin.restore_db', name=r.name) }}" style="display:inline"
-                    onsubmit="return confirm('Replace the live production DB with the snapshot from {{ r.created_str }}? anetbbs-web will restart. ALL changes since then will be LOST.');">
+                    onsubmit="return confirm('Replace the live production DB with the snapshot from {{ r.created_str }}? Every ANetBBS service restarts (connected callers are dropped). ALL changes since then will be LOST; the current DB is kept beside it as anetbbs.db.pre-restore-*.');">
                 {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
                 <button class="btn btn-sm btn-outline-danger" title="Restore DB">
                   <i class="bi bi-arrow-counterclockwise"></i> DB
