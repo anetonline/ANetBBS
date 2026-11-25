@@ -100,29 +100,21 @@ class ShowAnsiScreenModsTextOverrideTests(unittest.TestCase):
 class LoadMenuAnsiModsTextMenusOverrideTests(unittest.TestCase):
     """anetbbs/features/ansi_ui.py's load_menu_ansi().
 
-    load_menu_ansi() computes its data dir from its OWN module
-    `__file__` (Path(__file__).resolve().parent.parent.parent / 'data'),
-    not from Flask config -- so rather than writing into the real,
-    live repo data/ directory (which a running production BBS reads
-    from), a fake module `__file__` pointed at a throwaway temp
-    directory laid out with the same anetbbs/features/ansi_ui.py
-    nesting depth redirects that computation harmlessly.
+    load_menu_ansi() resolves its data dir through the configured
+    DATA_DIR (_configured_data_dir()); point that at a throwaway temp
+    tree so nothing is written into the source tree's data/.
     """
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        fake_repo_root = Path(self._tmp.name)
-        fake_module_path = fake_repo_root / 'anetbbs' / 'features' / 'ansi_ui.py'
-        fake_module_path.parent.mkdir(parents=True)
-        fake_module_path.touch()
-
-        self.data_dir = fake_repo_root / 'data'
+        self.data_dir = Path(self._tmp.name) / 'data'
         (self.data_dir / 'mods' / 'text' / 'menus').mkdir(parents=True)
         (self.data_dir / 'text' / 'menus').mkdir(parents=True)
 
         import anetbbs.features.ansi_ui as ansi_ui_mod
-        self._patcher = patch.object(ansi_ui_mod, '__file__', str(fake_module_path))
+        self._patcher = patch.object(ansi_ui_mod, '_configured_data_dir',
+                                     return_value=self.data_dir)
         self._patcher.start()
         self.addCleanup(self._patcher.stop)
 

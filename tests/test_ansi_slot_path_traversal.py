@@ -53,10 +53,7 @@ def _make_session(**kwargs):
 
 class LoadMenuAnsiPathTraversalTests(unittest.TestCase):
     def test_traversal_slot_never_reaches_a_candidate_path_with_dotdot_or_slash(self):
-        """load_menu_ansi()'s directories are fixed relative to its own
-        module location (not a configurable DATA_DIR), so reliably
-        forcing a REAL cross-directory file read in a fast unit test
-        isn't practical here -- instead, intercept every candidate
+        """Rather than force a REAL cross-directory file read, intercept every candidate
         Path.is_file() check load_menu_ansi() makes and confirm NONE
         of them still contain a traversal segment ('..') or a path
         separator from the slot, i.e. the sanitizer actually ran
