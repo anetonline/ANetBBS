@@ -7,8 +7,8 @@
 # because every container runs as the same fixed UID 1000, the same
 # property that already makes 5 separate systemd processes sharing one
 # SQLite file safe on bare metal today. See docs/22-containers.md
-# before deploying -- especially the docker.sock trust-boundary
-# warning on the web service and the MRC_BRIDGE_HOST gotcha.
+# before deploying -- especially the `control` service (the only one
+# with the Docker socket) and the MRC_BRIDGE_HOST gotcha.
 #
 # Quick start (see docs/22-containers.md for the full walkthrough):
 #   cp .env.docker.example .env            # fill in SECRET_KEY, BBS_NAME, etc.
@@ -46,23 +46,10 @@ services:
     environment:
       <<: *anetbbs-db-env
       ANETBBS_RUNTIME: docker-compose
-      # Host-side absolute path to the directory containing THIS
-      # docker-compose.yml/.env -- needed so the self-upgrade flow can
-      # bind-mount the same files (by host path, not a path as seen
-      # from inside this container) into a sibling updater container.
-      # Defaults to wherever `docker compose up` was run from; override
-      # explicitly in .env if that's not reliable on your setup.
-      ANETBBS_COMPOSE_DIR: ${ANETBBS_COMPOSE_DIR:-${PWD}}
     # NET_BIND_SERVICE: MSP (18) and SYSTAT (11) are privileged ports.
-    # docker.sock (rw): lets the panel restart/upgrade sibling
-    # containers via the Docker API instead of systemctl -- this grants
-    # root-equivalent host control to anything reaching the panel's
-    # endpoints. See docs/22-containers.md before enabling. Omit the
-    # docker.sock mount (and set ANETBBS_RUNTIME=docker-single... no,
-    # keep docker-compose, just accept restart/upgrade won't work) if
-    # you'd rather not accept that tradeoff -- everything else still
-    # works, the sysop just runs `docker compose restart <service>` by
-    # hand instead of clicking the panel button.
+    # No Docker socket here: panel restart/logs and self-upgrade go
+    # through the separate `control` service below, which accepts only
+    # a fixed set of operations (see anetbbs/docker_control_server.py).
     cap_add: ["NET_BIND_SERVICE"]
     ports:
       - "5000:5000"
@@ -70,9 +57,7 @@ services:
       - "11:11/udp"
     volumes:
       - anetbbs_data:/app/data
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./docker-compose.yml:/project/docker-compose.yml:ro
-      - ./.env:/project/.env:ro
+      - anetbbs_control:/run/anetbbs-control
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
       interval: 30s
@@ -129,6 +114,8 @@ services:
     env_file: [.env]
     environment: *anetbbs-db-env
     ports:
+      # Browsers connect here directly (no nginx in front); the bridge
+      # itself requires a valid BBS login cookie for web clients.
       - "8080:8080"
       # - "5010:5010"  # native umrc-client -- see the top-of-file note
     volumes:
@@ -197,6 +184,29 @@ services:
   #     - anetbbs_data:/app/data
   #   restart: unless-stopped
 
+  control:
+    # The ONLY container with the Docker socket (root-equivalent on the
+    # host). It answers the web panel over a unix socket on the shared
+    # anetbbs_control volume and accepts only: state/logs of the ANetBBS
+    # services, start/stop/restart of them, and "upgrade to version tag
+    # vX.Y.Z" (image repository fixed by this read-only compose file).
+    image: *anetbbs-image
+    command: ["/usr/local/bin/entrypoint-web.sh", "python", "-m", "anetbbs.docker_control_server"]
+    env_file: [.env]
+    environment:
+      <<: *anetbbs-db-env
+      # Host-side absolute path of the directory holding this
+      # docker-compose.yml/.env, so the upgrade can bind-mount the same
+      # files into its short-lived updater container.
+      ANETBBS_COMPOSE_DIR: ${ANETBBS_COMPOSE_DIR:-${PWD}}
+    volumes:
+      - anetbbs_control:/run/anetbbs-control
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker-compose.yml:/project/docker-compose.yml:ro
+      - ./.env:/project/.env:ro
+    restart: unless-stopped
+
 volumes:
   anetbbs_data:
   anetbbs_mrc_data:
+  anetbbs_control:

@@ -285,8 +285,10 @@ class _MrcLeg:
         # staying safe across future aiohttp versions, and bounds how
         # much memory one oversized frame from a compromised/malicious
         # upstream bridge can force this process to hold.
+        from ..core.mrc_bridge_token import bridge_headers
         self.ws = await self.session.ws_connect(
-            self.ws_url, heartbeat=30, max_msg_size=262144)
+            self.ws_url, heartbeat=30, max_msg_size=262144,
+            headers=bridge_headers())
         # MRC bridge protocol — handshake message naming the handle and room.
         await self._send_json({'type': 'login', 'handle': self.handle,
                                'room': self.room})

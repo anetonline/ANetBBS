@@ -97,3 +97,40 @@ def bind_bbs_cookie_auth(cookies):
         if candidate.is_current():
             return candidate
     raise InvalidBBSCookie('BBS login is invalid or expired')
+
+
+def handle_for_identifier(identifier):
+    """The MRC handle a browser login may use: the account's username with
+    whitespace runs turned into '_', capped at 32 -- exactly what the
+    terminal MRC door uses (audit N-4)."""
+    import re
+    try:
+        user_id = int(str(identifier).partition(':')[0])
+    except (TypeError, ValueError):
+        return None
+    from anetbbs.core.user_manager import _Session
+    from anetbbs.models import User
+    with _Session() as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return None
+        return re.sub(r'\s+', '_', user.username or '')[:32] or None
+
+
+def terminal_token():
+    """Shared secret for cookie-less terminal clients that don't connect
+    over loopback (docker-compose). Derived from SECRET_KEY, which every
+    ANetBBS container already shares, so no extra configuration."""
+    import hashlib
+    import hmac as _hmac
+    app = _cookie_app()
+    key = (app.secret_key or '').encode() if isinstance(app.secret_key, str) else (app.secret_key or b'')
+    return _hmac.new(key, b'anetbbs-mrc-bridge-terminal', hashlib.sha256).hexdigest()
+
+
+def terminal_token_ok(presented):
+    import hmac as _hmac
+    try:
+        return _hmac.compare_digest(str(presented), terminal_token())
+    except Exception:
+        return False

@@ -33,6 +33,7 @@ Scrollback:
   Up/Down arrows scroll 1 line; /scroll [n] scrolls n lines; /scroll 0 = live view.
   Sending a message snaps view to live so the user sees their own message.
 """
+from ..core.mrc_bridge_token import bridge_headers as _bridge_headers
 import asyncio
 import json
 import logging
@@ -658,7 +659,8 @@ class MRCChat(BaseChatSystem):
                 # same bridge service now uses.
                 self._ws = await asyncio.wait_for(
                     self._aiohttp_session.ws_connect(
-                        bridge_url, max_msg_size=262144), timeout=10)
+                        bridge_url, max_msg_size=262144,
+                        headers=_bridge_headers()), timeout=10)
             except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
                 # This message only ever reached the user's own terminal
                 # screen -- gone the instant the menu redraws, and

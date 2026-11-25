@@ -114,7 +114,8 @@ class ReadJournalDispatchTests(unittest.TestCase):
 
 
 class ControlDockerBackendTests(unittest.TestCase):
-    """anetbbs/web/control_docker.py, exercised against a mocked
+    """anetbbs/docker_control_server.py (the privileged side; the web
+    container's control_docker.py is now only a socket client), exercised against a mocked
     docker.from_env() client (no real daemon available in CI/sandbox)."""
 
     def _fake_container(self, status='running', pid=123, started_at='2026-07-04T00:00:00Z'):
@@ -124,7 +125,7 @@ class ControlDockerBackendTests(unittest.TestCase):
         return c
 
     def test_unit_state_reports_running_container(self):
-        from anetbbs.web import control_docker
+        from anetbbs import docker_control_server as control_docker
         fake_client = MagicMock()
         fake_client.containers.list.return_value = [self._fake_container()]
         with patch.object(control_docker, '_client', return_value=fake_client):
@@ -135,7 +136,7 @@ class ControlDockerBackendTests(unittest.TestCase):
             all=True, filters={'label': 'com.docker.compose.service=web'})
 
     def test_unit_state_no_container_found(self):
-        from anetbbs.web import control_docker
+        from anetbbs import docker_control_server as control_docker
         fake_client = MagicMock()
         fake_client.containers.list.return_value = []
         with patch.object(control_docker, '_client', return_value=fake_client):
@@ -144,7 +145,7 @@ class ControlDockerBackendTests(unittest.TestCase):
         self.assertEqual(state['ActiveState'], 'unknown')
 
     def test_change_state_restart_calls_container_restart(self):
-        from anetbbs.web import control_docker
+        from anetbbs import docker_control_server as control_docker
         container = self._fake_container()
         fake_client = MagicMock()
         fake_client.containers.list.return_value = [container]
@@ -154,13 +155,13 @@ class ControlDockerBackendTests(unittest.TestCase):
         container.restart.assert_called_once_with(timeout=10)
 
     def test_change_state_unmapped_unit_fails_cleanly(self):
-        from anetbbs.web import control_docker
+        from anetbbs import docker_control_server as control_docker
         ok, out, err = control_docker.change_state('not-a-real-unit', 'restart')
         self.assertFalse(ok)
         self.assertIn('no compose service mapped', err)
 
     def test_read_logs_returns_decoded_text(self):
-        from anetbbs.web import control_docker
+        from anetbbs import docker_control_server as control_docker
         container = self._fake_container()
         container.logs.return_value = b'hello from the container\n'
         fake_client = MagicMock()
@@ -171,7 +172,7 @@ class ControlDockerBackendTests(unittest.TestCase):
         container.logs.assert_called_once_with(tail=100, timestamps=True)
 
     def test_spawn_container_upgrade_requires_compose_dir_env(self):
-        from anetbbs.web import control_docker
+        from anetbbs import docker_control_server as control_docker
         import os
         old = os.environ.pop('ANETBBS_COMPOSE_DIR', None)
         try:
@@ -183,7 +184,7 @@ class ControlDockerBackendTests(unittest.TestCase):
                 os.environ['ANETBBS_COMPOSE_DIR'] = old
 
     def test_spawn_container_upgrade_mounts_host_dir_not_container_path(self):
-        from anetbbs.web import control_docker
+        from anetbbs import docker_control_server as control_docker
         import os
         container = self._fake_container()
         container.image = 'anetbbs:latest'

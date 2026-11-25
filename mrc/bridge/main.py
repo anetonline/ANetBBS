@@ -38,7 +38,7 @@ from aiohttp import web
 from .db import BridgeDB
 from .latency import LatencyTracker
 from .mrc_protocol import MRCProtocol
-from .bbs_auth import bind_bbs_cookie_auth
+from .bbs_auth import bind_bbs_cookie_auth, handle_for_identifier, terminal_token_ok
 
 # MRC_BRIDGE_LOG_LEVEL=DEBUG enables full raw packet tracing (every
 # outgoing send_packet() call and every incoming line, both directions,
@@ -961,6 +961,11 @@ class BridgeApp:
         # connection, this would force a fresh /identify on every single
         # join with no way around it.
         self._ws_remote_ip: Dict[int, str] = {}
+        # Per-connection identity (audit N-4): the only handle a
+        # cookie-authenticated browser may use, and which connections are
+        # trusted local terminal clients (allowed to name the caller's IP).
+        self._ws_allowed_handle: Dict[int, str] = {}
+        self._ws_trusted_terminal: set = set()
 
         # Raw-TCP counterpart of self.websockets/_ws_remote_ip above --
         # lets a real umrc-client (github.com/codefenix-dev/uMRC) connect
@@ -2127,9 +2132,30 @@ class BridgeApp:
         # dials ws://127.0.0.1:8080 itself), so for that path this is
         # expected to stay a loopback address -- _handle_join_room lets
         # an explicit "ip" field in the join_room message override it.
-        xff = request.headers.get("X-Forwarded-For", "")
-        remote_ip = (
-            xff.split(",")[0].strip() if xff else (request.remote or ""))
+        # X-Forwarded-For is only meaningful from a proxy on this host
+        # (nginx); from anywhere else it is caller-controlled (audit N-4).
+        peer = request.remote or ""
+        peer_is_loopback = peer in ("127.0.0.1", "::1") or peer.startswith("127.")
+        xff = request.headers.get("X-Forwarded-For", "") if peer_is_loopback else ""
+        remote_ip = xff.split(",")[0].strip() if xff else peer
+
+        # Without a BBS login, only a local terminal client may connect:
+        # loopback with no proxy header (traditional install), or a
+        # caller presenting the token derived from the shared SECRET_KEY
+        # (docker-compose, where the terminal container is not loopback).
+        trusted_terminal = False
+        if bbs_auth is None:
+            token = request.headers.get("X-ANetBBS-Bridge-Token", "")
+            if (peer_is_loopback and not request.headers.get("X-Forwarded-For")) \
+                    or (token and terminal_token_ok(token)):
+                trusted_terminal = True
+            else:
+                return web.Response(status=401, text="BBS login required")
+        allowed_handle = None
+        if bbs_auth is not None:
+            allowed_handle = await asyncio.to_thread(handle_for_identifier, bbs_auth.identifier)
+            if not allowed_handle:
+                return web.Response(status=401, text="BBS login is invalid or expired")
 
         # Connection-count caps -- see MRC_WS_MAX_CONNECTIONS's own
         # comment. Rejected BEFORE the WebSocket upgrade even happens
@@ -2155,6 +2181,10 @@ class BridgeApp:
         ws_id = id(ws)
         self.websockets[ws_id] = ws
         self._ws_remote_ip[ws_id] = remote_ip
+        if trusted_terminal:
+            self.__dict__.setdefault('_ws_trusted_terminal', set()).add(ws_id)
+        if allowed_handle:
+            self.__dict__.setdefault('_ws_allowed_handle', {})[ws_id] = allowed_handle
         logger.info(f"WebSocket connected: {ws_id}")
 
         auth_watch = None
@@ -2200,6 +2230,8 @@ class BridgeApp:
                     logger.warning('MRC browser authentication watchdog stopped')
             self.websockets.pop(ws_id, None)
             self._ws_remote_ip.pop(ws_id, None)
+            getattr(self, '_ws_allowed_handle', {}).pop(ws_id, None)
+            getattr(self, '_ws_trusted_terminal', set()).discard(ws_id)
             # Real gap found in a security/performance audit: every
             # connection that ever sent a rate-limited message type
             # left a permanent entry here -- this dict was never
@@ -2377,7 +2409,18 @@ class BridgeApp:
             self._cancel_pending_disconnect(handle)
             return
 
-        remote_ip = (data.get("ip") or "").strip()[:64] or self._ws_remote_ip.get(ws_id, "")
+        # A browser may only use its own BBS account's handle (audit N-4).
+        allowed = getattr(self, '_ws_allowed_handle', {}).get(ws_id)
+        if allowed is not None and handle.lower() != allowed.lower():
+            await self._safe_send(ws, {"type": "error",
+                                  "message": f"Use your BBS handle: {allowed}"})
+            return
+        # A browser login can't choose the IP reported upstream; local
+        # terminal clients (which relay a caller's real IP) can.
+        if allowed is not None:
+            remote_ip = self._ws_remote_ip.get(ws_id, "")
+        else:
+            remote_ip = (data.get("ip") or "").strip()[:64] or self._ws_remote_ip.get(ws_id, "")
 
         try:
             sess = await self._register_session_and_join(str(ws_id), handle, room, remote_ip)
