@@ -88,21 +88,25 @@ To change the signing requirement, run update.sh with
 **Registry hubs.** A hub's releases directory is writable by the BBS
 service account, so on a hub `REQUIRE_SIGNED_UPGRADES` defaults to
 `yes`. The hub's own **Admin → Upgrades** button then installs only
-releases signed by a key in `/etc/anetbbs/release-signers`. Until you
-add a signing key, upgrade the hub with `sudo bash update.sh` from the
-extracted release. You can also run `update.sh` once with
-`ANETBBS_REQUIRE_SIGNED_UPGRADES=no`, which accepts that the service
-account could then install a release of its own choosing as root.
-Peers that point at the hub are not affected: they default to `no`.
+releases signed by a key in `/etc/anetbbs/release-signers`. Official
+releases are signed with the project key that `update.sh` installs
+there, so keep the `.sig` file next to each tarball in the releases
+directory. A release without a valid signature has to be installed
+with `sudo bash update.sh` from the extracted release instead. You can
+also run `update.sh` once with `ANETBBS_REQUIRE_SIGNED_UPGRADES=no`,
+which accepts that the service account could then install a release of
+its own choosing as root. Peers that point at the hub are not
+affected: they default to `no`.
 
 **Signed releases.**
 - `/etc/anetbbs/release-signers` (root-owned) lists the keys whose
   release signatures web upgrades accept. A release signed by one of
   them installs from any https host. Unsigned releases still install
   only from `REGISTRY_HOST`.
-- The repository's `deploy/release-signers` ships empty. Add a key
-  there, in OpenSSH allowed-signers format with the principal
-  `anetbbs-release`, and `update.sh` installs it to `/etc/anetbbs/`.
+- The repository's `deploy/release-signers` ships the project's
+  release key. To trust another key, add a line there in OpenSSH
+  allowed-signers format with the principal `anetbbs-release`;
+  `update.sh` installs the file to `/etc/anetbbs/`.
 - `build-release.sh` signs a release when the key
   `~/.config/anetbbs/release_signing_key` exists (or the path in
   `ANETBBS_SIGNING_KEY`), and writes `ANetBBS-vX.Y.Z.tar.gz.sig` next

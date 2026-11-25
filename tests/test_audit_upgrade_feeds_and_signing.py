@@ -73,10 +73,42 @@ class InstallConfMigration(unittest.TestCase):
         self.assertIn('REQUIRE_SIGNED_UPGRADES=no\n', text)
 
     def test_empty_signers_template_installs_nothing(self):
+        fake = os.path.join(self.tmp, 'fakerepo')
+        os.makedirs(os.path.join(fake, 'deploy'))
+        with open(os.path.join(fake, 'deploy', 'release-signers'), 'w') as f:
+            f.write('# comments only\n\n')
+        dst = os.path.join(self.tmp, 'etc', 'release-signers')
+        r = _bash(f'anetbbs_install_release_signers "{fake}" "{dst}"')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(dst))
+
+    def test_shipped_signers_are_well_formed_and_install(self):
+        import re
+        lines = [ln for ln in (DEPLOY / 'release-signers').read_text().splitlines()
+                 if ln.strip() and not ln.lstrip().startswith('#')]
+        self.assertTrue(lines, 'deploy/release-signers ships no key')
+        for ln in lines:
+            self.assertRegex(ln, r'^anetbbs-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5[A-Za-z0-9+/]+={0,2}( \S+)?$')
         dst = os.path.join(self.tmp, 'etc', 'release-signers')
         r = _bash(f'anetbbs_install_release_signers "{REPO}" "{dst}"')
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertFalse(os.path.exists(dst))
+        self.assertEqual(Path(dst).read_text(), (DEPLOY / 'release-signers').read_text())
+        self.assertEqual(os.stat(dst).st_mode & 0o777, 0o644)
+        if shutil.which('ssh-keygen'):
+            # ssh-keygen must accept the file: a signature from an unrelated
+            # key has to be rejected as "not trusted", not as a parse error.
+            key = os.path.join(self.tmp, 'other')
+            subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', key],
+                           check=True)
+            data = os.path.join(self.tmp, 'blob')
+            Path(data).write_bytes(b'x')
+            subprocess.run(['ssh-keygen', '-Y', 'sign', '-f', key, '-n', 'anetbbs-release', data],
+                           check=True, capture_output=True)
+            v = subprocess.run(['ssh-keygen', '-Y', 'verify', '-f', dst, '-I', 'anetbbs-release',
+                                '-n', 'anetbbs-release', '-s', data + '.sig'],
+                               stdin=open(data, 'rb'), capture_output=True, text=True)
+            self.assertNotEqual(v.returncode, 0)
+            self.assertNotRegex(v.stderr.lower(), r'line \d+|invalid|parse')
 
 
 @unittest.skipUnless(shutil.which('ssh-keygen'), 'ssh-keygen not installed')

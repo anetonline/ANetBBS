@@ -14,9 +14,11 @@ Fixes and improvements:
   `http://` links for its `https://` address, and for a hub whose
   `REGISTRY_URL` points at itself on `localhost`. A hub's own one-click
   update needs a signed release; see docs/02-sysop-daily-ops.md.
-- **Signed releases.** Releases can carry an OpenSSH signature, and an
-  install that trusts the signing key accepts a signed release from any
-  https mirror. See docs/02-sysop-daily-ops.md.
+- **Signed releases.** Releases are now signed with the project's
+  OpenSSH release key, which updating installs as a trusted key. A
+  signed release is accepted from any https mirror. Publish the `.sig`
+  file alongside the tarball and its `.sha256`. See
+  docs/02-sysop-daily-ops.md.
 - **Git-clone installs** now follow an upstream history rewrite safely,
   instead of silently stopping updates. Local changes are never
   overwritten.
