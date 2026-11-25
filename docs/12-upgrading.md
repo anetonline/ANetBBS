@@ -63,28 +63,37 @@ helper `/usr/local/libexec/anetbbs/run_upgrade.sh` through sudo, in a
 detached systemd unit, so the upgrade survives the web service
 restarting. The helper:
 
-1. Takes its settings from root-owned `/etc/anetbbs.install`, never from
-   `.env`.
-2. Requires an https download (plain http only to this machine's loopback,
+1. Takes its settings from root-owned files only (`/etc/anetbbs.install`,
+   `/etc/anetbbs/`, `/var/lib/anetbbs/release-state`), never from `.env`
+   or anything else in the install directory.
+2. Only moves forward: the release must be a stable `vX.Y.Z` newer than
+   the installed one. Reinstalls and downgrades are done as root.
+3. Requires an https download (plain http only to this machine's loopback,
    for a hub whose `REGISTRY_URL` is `http://localhost:<port>/`).
-3. Checks the release's origin. A release signed by a key in
-   `/etc/anetbbs/release-signers` may come from any host. An unsigned
-   release must come from `REGISTRY_HOST`, and is refused entirely when
-   `REQUIRE_SIGNED_UPGRADES=yes`.
-4. Checks the SHA-256 and, when the release is signed, the signature.
-5. Extracts the release and runs its `update.sh`, the same steps as
-   above, including the automatic rollback.
+4. Requires a release signed by a key in `/etc/anetbbs/release-signers`,
+   unless an operator turned that off (see
+   [02 — Sysop daily ops](02-sysop-daily-ops.md)). Revoked keys and
+   denylisted archives are refused.
+5. Checks the SHA-256 and the signature, and that the archive contains
+   exactly `ANetBBS-<version>/` with a matching `VERSION` file.
+6. Runs that release's `update.sh`, the same steps as above, including
+   the automatic rollback, and checks that it recorded the new version.
 
 Progress goes to `/var/log/anetbbs/upgrade.log` and is shown in the
-browser log viewer. Rollback to the previous release uses the same
-checks.
+browser log viewer. Each run starts the log fresh and ends with
+`result=ok` or `result=fail` and its run id.
 
-**Using a private release feed?** Your first `update.sh` run after
-upgrading to this version carries the feed host from `.env`
-`REGISTRY_URL` into `/etc/anetbbs.install` automatically. After that,
-change it with `sudo ANETBBS_REGISTRY_HOST=<host> bash update.sh`. The
-details, and how to sign your own releases, are in
-[02 — Sysop daily ops](02-sysop-daily-ops.md).
+**Using a private release feed?** Nothing in `.env` is trusted for
+upgrades any more. A feed that serves official, signed releases needs no
+setup. A feed with its own unsigned releases has to be allowed by the
+operator as root; see [02 — Sysop daily ops](02-sysop-daily-ops.md).
+
+**Run `update.sh` from a root-owned copy.** `update.sh` refuses to run
+from a directory the BBS service account can modify, such as the install
+directory itself, because that would run code the account controls as
+root. Extract the release somewhere root-owned (for example under
+`/root`) and run it from there. Git-checkout installs can accept that
+risk with `ANETBBS_ALLOW_SERVICE_OWNED_SOURCE=yes`.
 
 **Docker installs** upgrade through the separate `control` service; see
 [22 — Containers](22-containers.md#self-upgrade).

@@ -171,7 +171,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     info "Removing sudo grant and privileged helpers..."
     if [ -f /etc/anetbbs.install ] && grep -qxF "INSTALL_DIR=$REAL_UNI_DIR" /etc/anetbbs.install; then
         rm -f /etc/sudoers.d/anetbbs /etc/anetbbs.install
-        rm -rf /usr/local/libexec/anetbbs /etc/anetbbs /var/log/anetbbs
+        rm -rf /usr/local/libexec/anetbbs /etc/anetbbs /var/log/anetbbs /var/lib/anetbbs
     elif [ ! -f /etc/anetbbs.install ] && [ -f /etc/sudoers.d/anetbbs ] \
             && grep -qF "$REAL_UNI_DIR/deploy/" /etc/sudoers.d/anetbbs; then
         rm -f /etc/sudoers.d/anetbbs      # grant from a release before v1.1.74
@@ -1269,6 +1269,37 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 4: CREATE SYSTEM USER & DIRECTORIES
 # ═══════════════════════════════════════════════════════════════════════════════
+# ─── Trust boundary (audit H-1) ────────────────────────────────────────────────
+# install.sh writes into INSTALL_DIR as root throughout. That is only safe
+# while the service account has never controlled the tree. Re-running it
+# over an existing installation would let anything that account planted
+# there (symlinks, swapped directories) redirect root's writes, so that
+# needs the operator's explicit say-so. Upgrades use update.sh.
+_existing_untrusted=""
+if [[ -e "$INSTALL_DIR" && "$SOURCE_DIR" != "$INSTALL_DIR" ]]; then
+    if [[ -L "$INSTALL_DIR" || "$(stat -c %u "$INSTALL_DIR")" != 0 ]]; then
+        _existing_untrusted="$INSTALL_DIR is not owned by root"
+    elif [[ -n "$(find -P "$INSTALL_DIR" -mindepth 1 ! -uid 0 -print -quit 2>/dev/null)" ]]; then
+        _existing_untrusted="$INSTALL_DIR already contains files not owned by root"
+    fi
+fi
+if id "$SERVICE_USER" &>/dev/null && pgrep -u "$SERVICE_USER" >/dev/null 2>&1; then
+    _existing_untrusted="${_existing_untrusted:+$_existing_untrusted; }processes are running as $SERVICE_USER"
+fi
+if ! anetbbs_tree_not_service_writable "$SOURCE_DIR" "$SERVICE_USER"; then
+    _existing_untrusted="${_existing_untrusted:+$_existing_untrusted; }this installer ($SOURCE_DIR) can be modified by $SERVICE_USER"
+fi
+if [[ -n "$_existing_untrusted" && "${ANETBBS_REINSTALL_TRUSTS_SERVICE_ACCOUNT:-}" != yes ]]; then
+    fail "Refusing to install as root: $_existing_untrusted."
+    echo "  To upgrade an existing installation, run the new release's update.sh as root."
+    echo "  To reinstall over it anyway, accepting that the service account could take"
+    echo "  over root through files it controls, re-run with:"
+    echo "    sudo ANETBBS_REINSTALL_TRUSTS_SERVICE_ACCOUNT=yes bash install.sh"
+    exit 1
+elif [[ -n "$_existing_untrusted" ]]; then
+    warn "Reinstalling over a tree the service account controls ($_existing_untrusted) -- operator override set."
+fi
+
 step "Step 4/9: Creating system user and directories"
 
 if id "$SERVICE_USER" &>/dev/null; then
@@ -1592,9 +1623,9 @@ chmod 664 "$APP_LOG_FILE" 2>/dev/null || true
 # the sysop who built the tarball can't leak their own BBS info to a
 # fresh installer. On re-runs the existing file is preserved.
 MRC_CONFIG_FILE="$INSTALL_DIR/mrc/bridge/config.json"
-if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
+if ! as_service test -e "$MRC_CONFIG_FILE" && ! as_service test -L "$MRC_CONFIG_FILE"; then
     info "Generating MRC bridge config from wizard inputs..."
-    mkdir -p "$INSTALL_DIR/mrc/bridge"
+    as_service mkdir -p -- "$INSTALL_DIR/mrc/bridge"
     # Build info_web: prefer https when SSL is on, http otherwise, and skip
     # the field entirely when the install is local-only (test mode).
     if [[ "$DOMAIN" == "localhost" ]]; then
@@ -1631,7 +1662,7 @@ if [[ ! -f "$MRC_CONFIG_FILE" ]]; then
     # it contains -- the same env-var-passing pattern (never string-
     # interpolated into source) already used for install.sh's own
     # admin-account-setup heredocs, for the identical reason.
-    MRC_BACKEND="$MRC_BACKEND" \
+    as_service env MRC_BACKEND="$MRC_BACKEND" \
         BBS_NAME="$BBS_NAME" \
         PLATFORM_INFO="ANETBBS/Linux.$(uname -m)/$MRC_CLIENT_COMPAT_VERSION" \
         INFO_WEB="$INFO_WEB" \
@@ -1697,12 +1728,13 @@ config = {
     "log_level": "INFO",
     "data_dir": os.environ['MRC_DATA_DIR'],
 }
-with open(os.environ['MRC_CONFIG_FILE'], 'w') as f:
+# O_EXCL: never write through anything that appeared at this path.
+fd = os.open(os.environ['MRC_CONFIG_FILE'], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
+with os.fdopen(fd, 'w') as f:
     json.dump(config, f, indent=2)
     f.write('\n')
 MRCPYEOF
-    chown "$SERVICE_USER":"$SERVICE_USER" "$MRC_CONFIG_FILE"
-    chmod 640 "$MRC_CONFIG_FILE"
+    as_service chmod 640 -- "$MRC_CONFIG_FILE"
     ok "MRC bridge config.json generated (sysop: $ADMIN_USER, BBS: $BBS_NAME)"
 else
     info "MRC bridge config.json already exists — preserving"
@@ -2609,15 +2641,8 @@ fi
 # Root-owned config the privileged helpers trust (audit H-1).
 anetbbs_write_install_conf "$INSTALL_DIR" "$SERVICE_USER" \
     || warn "Could not write /etc/anetbbs.install -- web upgrade/restore will refuse to run"
-anetbbs_install_release_signers "$SOURCE_DIR" \
-    || warn "Could not install /etc/anetbbs/release-signers -- signed releases will not be checked"
-
-# Tarballs built from FAT source trees lose the +x bit on these.
-for w in run_upgrade.sh run_restore.sh; do
-    if [[ -f "$INSTALL_DIR/deploy/$w" ]]; then
-        chmod 0755 "$INSTALL_DIR/deploy/$w"
-    fi
-done
+anetbbs_install_release_trust "$SOURCE_DIR" \
+    || warn "Could not install the release trust files in /etc/anetbbs -- web upgrades will refuse to run"
 
 # ─── terminal image gallery viewer ─────────────────────────────────────────────
 # Placed at the install ROOT (not under version control there — update.sh's
@@ -2630,10 +2655,12 @@ done
 GALLERY_SCRIPT_SRC="$SOURCE_DIR/deploy/anet-gallery.sh"
 GALLERY_SCRIPT_DST="$INSTALL_DIR/anet-gallery.sh"
 if [[ -f "$GALLERY_SCRIPT_SRC" ]]; then
-    sed "s|__INSTALL_DIR__|$INSTALL_DIR|g" "$GALLERY_SCRIPT_SRC" > "$GALLERY_SCRIPT_DST"
-    chmod 0755 "$GALLERY_SCRIPT_DST"
-    chown "$SERVICE_USER":"$SERVICE_USER" "$GALLERY_SCRIPT_DST" 2>/dev/null || true
-    ok "Terminal gallery viewer installed: $GALLERY_SCRIPT_DST"
+    # As the service user (the tree is theirs by now): replace any old copy,
+    # never following a link at that path.
+    as_service rm -f -- "$GALLERY_SCRIPT_DST"
+    sed "s|__INSTALL_DIR__|$INSTALL_DIR|g" "$GALLERY_SCRIPT_SRC" \
+        | as_service bash -c 'set -o noclobber; cat > "$1" && chmod 0755 -- "$1"' _ "$GALLERY_SCRIPT_DST" \
+        && ok "Terminal gallery viewer installed: $GALLERY_SCRIPT_DST"
 else
     warn "deploy/anet-gallery.sh not found — skipping terminal gallery viewer."
 fi
@@ -2985,6 +3012,14 @@ if [[ "$ENABLE_NGINX" == "y" ]] && command -v nginx &>/dev/null; then
             STATUS[nginx_cve]="ok"
         fi
     fi
+fi
+
+# Record the installed release (root-owned) for the web upgrade wrapper's
+# anti-rollback check.
+_INST_VERSION=$(tr -d '[:space:]' < "$SOURCE_DIR/VERSION" 2>/dev/null || true)
+if anetbbs_stable_version "$_INST_VERSION"; then
+    anetbbs_release_state_write "$_INST_VERSION" "" \
+        || warn "Could not record the installed release -- web upgrades will refuse until update.sh runs as root"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

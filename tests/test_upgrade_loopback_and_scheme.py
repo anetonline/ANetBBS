@@ -12,7 +12,6 @@ import http.server
 import os
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import threading
 import unittest
@@ -36,102 +35,44 @@ def _serve(directory):
 
 
 class WrapperTransport(unittest.TestCase):
-    """The real run_upgrade.sh, past detach, root-only paths swapped."""
+    """The real run_upgrade.sh (tests/_upgrade_harness.py), loopback http."""
 
     def setUp(self):
+        from tests._upgrade_harness import Wrapper
         self.tmp = tempfile.mkdtemp(prefix='lbk-')
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.inst = os.path.join(self.tmp, 'inst')
-        os.makedirs(os.path.join(self.inst, 'data'))
-        self.conf = os.path.join(self.tmp, 'anetbbs.install')
-        self.signers = os.path.join(self.tmp, 'release-signers')
-
-    def _script(self):
-        src = (DEPLOY / 'run_upgrade.sh').read_text()
-        uid = os.getuid()
-        for old, new in (
-                ('CONF=/etc/anetbbs.install', f'CONF={self.conf}'),
-                ('[ "$(stat -c %u "$CONF")" = 0 ]', f'[ "$(stat -c %u "$CONF")" = {uid} ]'),
-                ('SIGNERS=/etc/anetbbs/release-signers', f'SIGNERS={self.signers}'),
-                ('&& [ "$(stat -c %u "$SIGNERS")" = 0 ]', f'&& [ "$(stat -c %u "$SIGNERS")" = {uid} ]')):
-            self.assertEqual(src.count(old), 1, old)
-            src = src.replace(old, new)
-        p = os.path.join(self.tmp, 'run_upgrade.sh')
-        with open(p, 'w') as f:
-            f.write(src)
-        os.chmod(p, 0o755)
-        return p
-
-    def _run(self, *args, host, require='no'):
-        with open(self.conf, 'w') as f:
-            f.write(f'INSTALL_DIR={self.inst}\nSERVICE_USER=anetbbs\n'
-                    f'REGISTRY_HOST={host}\nREQUIRE_SIGNED_UPGRADES={require}\n')
-        os.chmod(self.conf, 0o644)
-        env = dict(os.environ, ANETBBS_UPGRADE_DETACHED='1', PATH='/usr/bin:/bin')
-        return subprocess.run([self._script(), *args], capture_output=True, text=True,
-                              timeout=60, env=env)
+        self.w = Wrapper(os.path.join(self.tmp, 'w'), require_signed='no',
+                         set_by='operator', registry_host='localhost:5000')
 
     def test_non_loopback_http_and_disguised_hosts_refused(self):
         sha = 'a' * 64
-        for url in ('http://bbs.a-net.fyi/ANetBBS-v9.9.9.tar.gz',
-                    'http://10.0.0.5:5000/ANetBBS-v9.9.9.tar.gz',
-                    'http://localhost.evil.example/ANetBBS-v9.9.9.tar.gz',
-                    'http://127.0.0.1:5000@evil.example/ANetBBS-v9.9.9.tar.gz',
-                    'http://localhost:5evil.example/ANetBBS-v9.9.9.tar.gz'):
-            r = self._run('v9.9.9', url, sha, host='localhost:5000')
+        for url in ('http://bbs.a-net.fyi/ANetBBS-v1.1.75.tar.gz',
+                    'http://10.0.0.5:5000/ANetBBS-v1.1.75.tar.gz',
+                    'http://localhost.evil.example/ANetBBS-v1.1.75.tar.gz',
+                    'http://127.0.0.1:5000@evil.example/ANetBBS-v1.1.75.tar.gz',
+                    'http://localhost:5evil.example/ANetBBS-v1.1.75.tar.gz'):
+            r = self.w.run('v1.1.75', url, sha)
             self.assertNotEqual(r.returncode, 0, url)
             self.assertNotIn('downloading', r.stdout + r.stderr, url)
 
-    def test_unsigned_loopback_http_downloads_when_host_trusted(self):
+    def test_unsigned_loopback_http_downloads_when_operator_allows_it(self):
         srv_dir = os.path.join(self.tmp, 'srv')
         os.makedirs(srv_dir)
-        with open(os.path.join(srv_dir, 'ANetBBS-v9.9.9.tar.gz'), 'wb') as f:
+        with open(os.path.join(srv_dir, 'ANetBBS-v1.1.75.tar.gz'), 'wb') as f:
             f.write(b'not the expected bytes')
         srv = _serve(srv_dir)
         self.addCleanup(srv.shutdown)
         host = f'127.0.0.1:{srv.server_address[1]}'
-        r = self._run('v9.9.9', f'http://{host}/ANetBBS-v9.9.9.tar.gz', 'a' * 64, host=host)
+        self.w.write_conf(require_signed='no', set_by='operator', registry_host=host)
+        r = self.w.run('v1.1.75', f'http://{host}/ANetBBS-v1.1.75.tar.gz', 'a' * 64)
         self.assertIn('sha256 mismatch', r.stderr)       # downloaded over loopback http
 
-    @unittest.skipUnless(shutil.which('ssh-keygen'), 'ssh-keygen not installed')
-    def test_hub_signed_release_over_loopback_http_completes(self):
-        # Hub arrangement: REGISTRY_URL=http://localhost:<port>/, signatures required.
-        srv_dir = os.path.join(self.tmp, 'srv')
-        top = os.path.join(self.tmp, 'build', 'ANetBBS-v9.9.9')
-        os.makedirs(top)
-        os.makedirs(srv_dir)
-        marker = os.path.join(self.tmp, 'update-ran')
-        with open(os.path.join(top, 'update.sh'), 'w') as f:
-            f.write(f'#!/bin/bash\necho "$@" > {marker}\n')
-        tb = os.path.join(srv_dir, 'ANetBBS-v9.9.9.tar.gz')
-        with tarfile.open(tb, 'w:gz') as t:
-            t.add(top, arcname='ANetBBS-v9.9.9')
-        key = os.path.join(self.tmp, 'k')
-        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', key,
-                        '-C', 'anetbbs-release'], check=True)
-        subprocess.run(['ssh-keygen', '-Y', 'sign', '-f', key, '-n', 'anetbbs-release', tb],
-                       check=True, capture_output=True)
-        with open(key + '.pub') as f, open(self.signers, 'w') as out:
-            out.write('anetbbs-release ' + f.read())
-        os.chmod(self.signers, 0o644)
-        sha = subprocess.run(['sha256sum', tb], capture_output=True, text=True,
-                             check=True).stdout.split()[0]
-        srv = _serve(srv_dir)
-        self.addCleanup(srv.shutdown)
-        host = f'localhost:{srv.server_address[1]}'
-        base = f'http://{host}/ANetBBS-v9.9.9.tar.gz'
-        r = self._run('v9.9.9', base, sha, base + '.sig', host=host, require='yes')
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn('release signature verified', r.stdout)
-        self.assertIn('upgrade to v9.9.9 complete', r.stdout)
-        self.assertTrue(os.path.exists(marker))
-        # Unsigned on the same hub is still refused.
-        r = self._run('v9.9.9', base, sha, host=host, require='yes')
-        self.assertIn('requires signed upgrades', r.stderr)
+    # The hub's signed loopback-http path, end to end, is covered by
+    # tests/test_upgrade_wrapper_policy.py (it serves over http://localhost).
 
 
 class HubInstallConf(unittest.TestCase):
-    def test_hub_localhost_registry_url_kept_as_trusted_host(self):
+    def test_hub_conf_requires_signatures_and_ignores_env_feed(self):
         tmp = tempfile.mkdtemp(prefix='hubconf-')
         self.addCleanup(shutil.rmtree, tmp, True)
         inst = os.path.join(tmp, 'inst')
@@ -146,8 +87,11 @@ class HubInstallConf(unittest.TestCase):
                                     ANETBBS_REQUIRE_SIGNED_UPGRADES=''))
         self.assertEqual(r.returncode, 0, r.stderr)
         text = open(conf).read()
-        self.assertIn('REGISTRY_HOST=localhost:5000\n', text)
+        # Signed releases install from any host, loopback http included, so
+        # the hub's own http://localhost:5000/ feed works without trusting
+        # anything from .env.
         self.assertIn('REQUIRE_SIGNED_UPGRADES=yes\n', text)
+        self.assertIn('REGISTRY_HOST=bbs.a-net.fyi\n', text)
         # .env is untouched.
         self.assertIn('REGISTRY_URL=http://localhost:5000/',
                       open(os.path.join(inst, '.env')).read())

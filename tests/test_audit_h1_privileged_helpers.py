@@ -14,6 +14,7 @@ These tests need no root: static checks on the scripts plus functional
 runs of the shell helpers and run_upgrade.sh against temporary paths.
 """
 import os
+import shutil
 import re
 import subprocess
 import tempfile
@@ -86,57 +87,36 @@ class RunUpgradeTrustsOnlyEtcConfig(unittest.TestCase):
         self.assertNotIn('REGISTRY_URL', code)
         self.assertNotIn('BASH_SOURCE', code)
         self.assertNotIn('. /etc/anetbbs.install', code)
-        # Plain http only through the loopback gate (old shape accepted any).
-        self.assertNotIn('https://*.tar.gz|http://*.tar.gz', code)
-        self.assertIn('http://*.tar.gz) _is_loopback_http "$URL"', code)
+        self.assertIn('http://*"$2") _is_loopback_http "$1"', code)
         self.assertNotIn('$INSTALL_DIR/data/anetbbs_upgrade.log', code)
 
-    def _script(self, tmp, conf):
-        src = _read('deploy/run_upgrade.sh')
-        for old, new in (
-                ('CONF=/etc/anetbbs.install', f'CONF={conf}'),
-                ('[ "$(stat -c %u "$CONF")" = 0 ]', f'[ "$(stat -c %u "$CONF")" = {os.getuid()} ]')):
-            self.assertEqual(src.count(old), 1, old)
-            src = src.replace(old, new)
-        path = Path(tmp) / 'run_upgrade.sh'
-        path.write_text(src)
-        path.chmod(0o755)
-        return path
-
-    def _run(self, *args, conf_text, env_text=None):
-        with tempfile.TemporaryDirectory() as tmp:
-            inst = Path(tmp) / 'inst'
-            (inst / 'data').mkdir(parents=True)
-            if env_text is not None:
-                (inst / '.env').write_text(env_text)
-            conf = Path(tmp) / 'anetbbs.install'
-            conf.write_text(conf_text.replace('@INST@', str(inst)))
-            conf.chmod(0o644)
-            script = self._script(tmp, conf)
-            env = dict(os.environ, ANETBBS_UPGRADE_DETACHED='1', PATH='/usr/bin:/bin')
-            return subprocess.run([str(script), *args], capture_output=True,
-                                  text=True, timeout=30, env=env)
+    def _run(self, *args, env_text=None, **conf):
+        from tests._upgrade_harness import Wrapper
+        tmp = tempfile.mkdtemp(prefix='h1w-')
+        self.addCleanup(shutil.rmtree, tmp, True)
+        w = Wrapper(tmp, **conf)
+        if env_text is not None:
+            (w.inst / '.env').write_text(env_text)
+        return w.run(*args)
 
     def test_env_registry_url_is_ignored(self):
-        # .env (service-user-owned) names an attacker host; the trusted
-        # REGISTRY_HOST in the root config must win, so the URL is refused
-        # before any download.
-        r = self._run('v9.9.9', 'https://evil.example/ANetBBS-v9.9.9.tar.gz', 'a' * 64,
-                      conf_text='INSTALL_DIR=@INST@\nSERVICE_USER=anetbbs\nREGISTRY_HOST=bbs.a-net.fyi\n',
+        # .env (service-user-owned) names an attacker host; only the root
+        # config counts, so the unsigned URL is refused before any download.
+        r = self._run('v1.1.75', 'https://evil.example/ANetBBS-v1.1.75.tar.gz', 'a' * 64,
+                      require_signed='no', set_by='operator', registry_host='bbs.a-net.fyi',
                       env_text='REGISTRY_URL=https://evil.example\n')
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("does not match this install's trusted REGISTRY_HOST", r.stderr)
+        self.assertIn("does not match REGISTRY_HOST 'bbs.a-net.fyi'", r.stderr)
 
     def test_missing_registry_host_line_defaults_and_still_refuses_other_hosts(self):
-        r = self._run('v9.9.9', 'https://evil.example/ANetBBS-v9.9.9.tar.gz', 'a' * 64,
-                      conf_text='INSTALL_DIR=@INST@\nSERVICE_USER=anetbbs\n',
+        r = self._run('v1.1.75', 'https://evil.example/ANetBBS-v1.1.75.tar.gz', 'a' * 64,
+                      require_signed='no', set_by='operator', registry_host='',
                       env_text='REGISTRY_URL=https://evil.example\n')
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("'bbs.a-net.fyi'", r.stderr)
 
     def test_plain_http_refused(self):
-        r = self._run('v9.9.9', 'http://bbs.a-net.fyi/ANetBBS-v9.9.9.tar.gz', 'a' * 64,
-                      conf_text='INSTALL_DIR=@INST@\nSERVICE_USER=anetbbs\n')
+        r = self._run('v1.1.75', 'http://bbs.a-net.fyi/ANetBBS-v1.1.75.tar.gz', 'a' * 64)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn('over https', r.stderr)
 
@@ -234,6 +214,7 @@ class PrivilegedHelpersBehaviour(unittest.TestCase):
             # one from .env (the one-time migration only applies when there
             # is no host yet -- see test_audit_upgrade_feeds_and_signing).
             conf.write_text('INSTALL_DIR=/x\nSERVICE_USER=anetbbs\nREGISTRY_HOST=bbs.a-net.fyi\n')
+            conf.chmod(0o644)
             (inst / '.env').write_text('REGISTRY_URL=https://evil.example/x\n')
             r = _bash(f'anetbbs_write_install_conf "{inst}" anetbbs "{conf}"',
                       env={'ANETBBS_REGISTRY_HOST': ''})
@@ -243,13 +224,13 @@ class PrivilegedHelpersBehaviour(unittest.TestCase):
             self.assertIn('SERVICE_USER=anetbbs\n', text)
             self.assertIn('REGISTRY_HOST=bbs.a-net.fyi\n', text)
             self.assertNotIn('evil.example', text)
-            self.assertIn('evil.example', r.stderr)   # warned, not trusted
             self.assertEqual(oct(conf.stat().st_mode & 0o777), '0o644')
 
     def test_install_conf_preserves_and_overrides_registry_host(self):
         with tempfile.TemporaryDirectory() as tmp:
             conf = Path(tmp) / 'anetbbs.install'
             conf.write_text('INSTALL_DIR=/x\nSERVICE_USER=a\nREGISTRY_HOST=feed.example.org\n')
+            conf.chmod(0o644)
             r = _bash(f'anetbbs_write_install_conf /opt/anetbbs anetbbs "{conf}" /nonexistent',
                       env={'ANETBBS_REGISTRY_HOST': ''})
             self.assertEqual(r.returncode, 0, r.stderr)

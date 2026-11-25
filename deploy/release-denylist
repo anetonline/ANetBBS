@@ -1,0 +1,6 @@
+# SHA-256 digests of release archives that must never be installed, one per
+# line (first 64 hex characters of each line; the rest is a comment).
+# update.sh installs this root-owned to /etc/anetbbs/release-denylist.
+a9a85305d24b8192998675a01a027c74e2ef13c8c2f2ece91009c3a1388d6aae rejected v1.1.74 candidate, signed 2026-11-25, never published
+bf7103283c1931edfd2cf6bf6621b9202724373874ff95e54fc436251f62c739 rejected v1.1.74 candidate (unsigned), never published
+fe9d64afb78ea1d1e5d05340851c0da1389a269b0c3c909d7adde5e31dd50a18 rejected v1.1.74 candidate (unsigned), never published

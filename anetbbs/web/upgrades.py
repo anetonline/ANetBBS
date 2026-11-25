@@ -378,7 +378,7 @@ def index():
                            upstream_url=_upstream_url(cfg),
                            upstream_error=err,
                            newer=newer,
-                           rollback_candidates=_local_releases(cfg))
+                           rollback_candidates=[])   # web rollback disabled (see rollback())
 
 
 @upgrades_admin_bp.route('/check', methods=['POST'])
@@ -571,6 +571,11 @@ def install():
         return jsonify({'ok': False,
                         'error': 'upstream url must be https '
                                  '(plain http only to this machine)'}), 502
+    # Every input is validated before the install state changes, so an
+    # early refusal can never leave "install already running" set.
+    sig_url = upstream.get('sig_url') or ''
+    if sig_url and not _valid_sig_url(sig_url):
+        return jsonify({'ok': False, 'error': 'upstream signature url invalid'}), 502
 
     with _INSTALL_LOCK:
         if _install_state['running']:
@@ -583,9 +588,6 @@ def install():
     # Truncate prior log, then spawn the wrapper detached so the HTTP
     # request doesn't get killed when update.sh restarts gunicorn.
     _reset_upgrade_log()
-    sig_url = upstream.get('sig_url') or ''
-    if sig_url and not _valid_sig_url(sig_url):
-        return jsonify({'ok': False, 'error': 'upstream signature url invalid'}), 502
     _spawn_upgrade(wrapper, target, url, sha256, label='upgrade', sig_url=sig_url)
     return jsonify({'ok': True,
                     'log_url': url_for('upgrades_admin.log_tail')})
@@ -743,76 +745,18 @@ def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
 @upgrades_admin_bp.route('/rollback', methods=['POST'])
 @login_required
 def rollback():
-    """Reinstall an older tarball that lives in our local data/releases/.
+    """Downgrades are not available from the web.
 
-    Unlike /install, this skips the upstream check entirely — the
-    "trust" comes from the file already being on disk (the sysop put
-    it there). Same privileged wrapper runs the actual upgrade, same
-    sha256 verification path (we compute the sha here and pass it).
+    The privileged wrapper only installs releases newer than the one
+    recorded as installed (audit H-1): a downgrade through it would let
+    the service account put back a release with known problems. A sysop
+    rolls back as root instead, by running the older release's update.sh.
     """
     _require_admin()
-    cfg = current_app.config
-    target = (request.form.get('version') or '').strip()
-    if not _parse_version(target):
-        return jsonify({'ok': False, 'error': 'bad version'}), 400
-
-    # Locate a matching tarball among the local releases.
-    rows = _scan_releases(cfg)
-    match = next((r for r in rows if r['version'] == target), None)
-    if not match:
-        return jsonify({'ok': False,
-                        'error': f'no local tarball for {target}'}), 404
-
-    # Rollback is intentionally a downgrade — guard against accidentally
-    # picking a NEWER one, which the caller would use /install for.
-    cur = _parse_version(VERSION)
-    if not cur:
-        return jsonify({'ok': False,
-                        'error': 'current version is unknown; rollback disabled'}), 409
-    if _parse_version(target) == cur:
-        return jsonify({'ok': False,
-                        'error': 'already on that version'}), 409
-    if _parse_version(target) > cur:
-        return jsonify({'ok': False,
-                        'error': 'rollback target must be older than current'}), 409
-
-    sha = _sha256_of(match['path']) or ''
-    if not re.fullmatch(r'[0-9a-fA-F]{64}', sha):
-        return jsonify({'ok': False, 'error': 'cannot compute sha256'}), 500
-    # Local URL routed through our own /downloads/ — the wrapper uses
-    # curl, which is happy with 127.0.0.1, and we don't have to grant
-    # the wrapper raw file-read access outside its sudoers.
-    url = (request.host_url.rstrip('/')
-           + url_for('downloads.serve', filename=match['name']))
-
-    wrapper = _wrapper_path(cfg)
-    if not os.path.isfile(wrapper):
-        return jsonify({'ok': False,
-                        'error': f'upgrade wrapper missing: {wrapper}'}), 500
-
-    sudo_check = _check_sudo_escalation(cfg)
-    if sudo_check['status'] == 'fail':
-        error = sudo_check['detail']
-        if sudo_check.get('fix'):
-            error += ' — ' + sudo_check['fix']
-        return jsonify({'ok': False, 'error': error}), 409
-
-    with _INSTALL_LOCK:
-        if _install_state['running']:
-            return jsonify({'ok': False,
-                            'error': 'install already running'}), 409
-        _install_state.update({'running': True,
-                               'started_at': time.time(),
-                               'version': target})
-    _reset_upgrade_log()
-    sig_url = ''
-    if os.path.isfile(match['path'] + '.sig'):
-        sig_url = (request.host_url.rstrip('/')
-                   + url_for('downloads.serve', filename=match['name'] + '.sig'))
-    _spawn_upgrade(wrapper, target, url, sha, label='rollback',
-                   sig_url=sig_url if _valid_sig_url(sig_url) else '')
-    return jsonify({'ok': True,
-                    'log_url': url_for('upgrades_admin.log_tail')})
+    return jsonify({'ok': False,
+                    'error': ('Rolling back from the web is disabled: web upgrades only move '
+                              'forward. To go back to an older release, extract it as root and '
+                              'run its update.sh (sudo bash update.sh).')}), 409
 
 
 # ANSI-escape stripper. update.sh's `info`/`ok`/`warn`/`fail` helpers

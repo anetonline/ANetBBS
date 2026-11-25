@@ -24,16 +24,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUN_UPGRADE_SH = REPO_ROOT / 'deploy' / 'run_upgrade.sh'
 
-_START_MARKER = "# ── Trusted configuration: /etc/anetbbs.install only"
-_END_MARKER = '# ── Argument validation'
+_START_MARKER = "# ── Detach "
+_END_MARKER = '# ── Detached phase'
 
 
 def _extract_detach_block():
-    """Extracts BOTH the install-dir-resolution section and the detach
-    section together -- the detach block (added after a THIRD real
-    live outage, see its own comment in the real file) needs
-    INSTALL_DIR already resolved to build the log path, so the two
-    sections must run as one unit, not independently."""
+    """The detach section (added after a THIRD real live outage). All
+    argument and policy checks run before it, so it only needs LOCK,
+    LOG_DIR and the log/fail helpers."""
     lines = RUN_UPGRADE_SH.read_text().splitlines()
     start = end = None
     for i, line in enumerate(lines):
@@ -66,12 +64,15 @@ def _systemd_user_available():
 _SCRIPT_TEMPLATE = """#!/usr/bin/env bash
 set -eu -o pipefail
 LOG_PREFIX="[upgrade]"
+RUN_ID="${ANETBBS_UPGRADE_RUN_ID:-}"
 log()  { printf '%s %s\\n' "$LOG_PREFIX" "$*"; }
 fail() { printf '%s FAIL: %s\\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
+LOCK="__LOCK__"
+LOG_DIR="__LOGDIR__"
 
 __DETACH_BLOCK__
 
-log "pid=$$ cgroup=$(cat /proc/self/cgroup)"
+log "pid=$$ run_id=$RUN_ID cgroup=$(cat /proc/self/cgroup)"
 printf 'pid=%s cgroup=%s\\n' "$$" "$(cat /proc/self/cgroup)" >> "__MARKER__"
 exit __EXITCODE__
 """
@@ -134,9 +135,6 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
         so the test stays tied to the real text)."""
         block = self.detach_block
         subs = [
-            ('CONF=/etc/anetbbs.install', f'CONF={self.conf}'),
-            ('[ "$(stat -c %u "$CONF")" = 0 ]', f'[ "$(stat -c %u "$CONF")" = {os.getuid()} ]'),
-            ('LOG_DIR=/var/log/anetbbs', f'LOG_DIR={self.log_dir}'),
             ('install -d -o root -g root -m 0755 "$LOG_DIR"', 'install -d -m 0755 "$LOG_DIR"'),
         ]
         for old, new in subs:
@@ -146,6 +144,8 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
 
     def _write_script(self, name, exit_code):
         body = (_SCRIPT_TEMPLATE
+                .replace('__LOCK__', str(self._script_dir / 'upgrade.lock'))
+                .replace('__LOGDIR__', str(self.log_dir))
                 .replace('__DETACH_BLOCK__', self._block_for_test())
                 .replace('__MARKER__', str(self.marker))
                 .replace('__EXITCODE__', str(exit_code)))
@@ -173,7 +173,7 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
         service user's INSTALL_DIR/data/ (audit H-1): systemd opens it as
         root, so a swapped-in symlink there would redirect a root write.
         It also must not be under /tmp (PrivateTmp outage, 2026-10-28)."""
-        self.assertIn('LOG_DIR=/var/log/anetbbs\n', self.detach_block)
+        self.assertIn('LOG_DIR=/var/log/anetbbs\n', RUN_UPGRADE_SH.read_text())
         self.assertIn('UPGRADE_LOG="$LOG_DIR/upgrade.log"', self.detach_block)
         self.assertNotIn('UPGRADE_LOG="$INSTALL_DIR', self.detach_block)
         script = self._write_script('probe-logpath.sh', 0)
@@ -182,26 +182,19 @@ class RunUpgradeShSelfDetachTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         upgrade_log = self.log_dir / 'upgrade.log'
         self.assertTrue(upgrade_log.exists())
-        self.assertIn('pid=', upgrade_log.read_text())
+        text = upgrade_log.read_text()
+        self.assertIn('pid=', text)
+        # The log starts fresh with this run's id, and the detached unit
+        # got the same id.
+        first = text.splitlines()[0]
+        self.assertRegex(first, r'^\[upgrade\] run_id=\S+$')
+        run_id = first.split('run_id=')[1]
+        self.assertIn(f'run_id={run_id} cgroup=', text)
         self.assertFalse((self._fake_install / 'data' / 'anetbbs_upgrade.log').exists())
-
-    def test_refuses_untrusted_or_missing_config(self):
-        script = self._write_script('probe-conf.sh', 0)
-        self.conf.chmod(0o666)
-        r = subprocess.run([str(script)], env=self.env, capture_output=True,
-                           text=True, timeout=30)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn('group/world writable', r.stderr)
-        self.assertFalse(self.marker.exists())
-        self.conf.unlink()
-        r = subprocess.run([str(script)], env=self.env, capture_output=True,
-                           text=True, timeout=30)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn('missing', r.stderr)
 
     def test_install_dir_never_comes_from_script_location_or_env(self):
         self.assertNotIn('BASH_SOURCE', self.detach_block)
-        self.assertNotIn('.env', self.detach_block.replace('# read from INSTALL_DIR (.env included)', ''))
+        self.assertNotIn('.env', self.detach_block)
         self.assertNotIn('. /etc/anetbbs.install', self.detach_block)
 
     def test_relays_a_real_failure_exit_code_too(self):

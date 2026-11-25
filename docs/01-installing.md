@@ -130,7 +130,10 @@ moment you `pip install -e .` (e.g. via the manual-install path in
   `logs/` to a timestamped directory, rsyncs the new code in, reinstalls
   Python deps, runs schema migrations, restarts services, probes
   `/healthz`, and offers automatic rollback to the backup if the health
-  check fails.
+  check fails. These tools run from the BBS's own venv, which the service
+  account can modify: on a systemd install, run them as that account, not
+  as root, and use `update.sh` from a root-owned copy of the release for
+  root-level upgrades.
 - **`anetbbs-symlinks`** / **`anetbbs-cleanup`** (`symlinks.py`,
   `cleanup.py`) — smaller helpers the two wizards above call
   internally; also runnable standalone.

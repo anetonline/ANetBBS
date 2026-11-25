@@ -4,4 +4,4 @@
 # With no key lines, release signatures are not checked and unsigned
 # upgrades are accepted only from the trusted REGISTRY_HOST.
 # The line below is the project's release key.
-anetbbs-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ64u8CbIDQTntoaUL3uliNMLqIFFaF4aNW2wXfGtyHH anetbbs-release
+anetbbs-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIJk4qVROXutsSpiziiv8FrM5X8fwnGrA0CgyIwfNJue anetbbs-release

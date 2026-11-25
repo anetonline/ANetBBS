@@ -103,24 +103,24 @@ class DeployWrapperTemplateTests(unittest.TestCase):
     carry the final regex -- fresh installs shouldn't need the
     self-heal patch at all."""
 
-    def test_shipped_template_accepts_stable_and_beta(self):
+    def test_shipped_template_accepts_only_stable(self):
+        """Web upgrades install stable releases only (audit H-1: the
+        anti-rollback order is defined for vX.Y.Z). Pre-releases still
+        parse on the web side and install via sudo bash update.sh."""
         repo_root = Path(__file__).resolve().parent.parent
-        wrapper = repo_root / 'deploy' / 'run_upgrade.sh'
-        with open(wrapper) as f:
-            content = f.read()
-        m = re.search(r'\$VERSION"\s*=~\s*(\S+)\s*\]\]', content)
-        self.assertIsNotNone(m, "couldn't find the version regex in run_upgrade.sh")
+        content = (repo_root / 'deploy' / 'run_upgrade.sh').read_text()
+        m = re.search(r'^_stable\(\) \{ \[\[ "\$1" =~ (\S+) \]\]; \}$', content, re.MULTILINE)
+        self.assertIsNotNone(m, "couldn't find _stable() in run_upgrade.sh")
         pattern = m.group(1)
         for version, should_match in [
-            ('v1.0.0', True), ('v1.0b2.208', True), ('v1.0a3.5', True),
-            ('v1.0', False),
+            ('v1.0.0', True), ('v1.1.74', True), ('v1.0b2.208', False), ('v1.0a3.5', False),
+            ('v1.0', False), ('v1.0.0; rm -rf /', False),
         ]:
             script = f'VERSION="{version}"\nif [[ "$VERSION" =~ {pattern} ]]; then echo Y; else echo N; fi\n'
             out = __import__('subprocess').run(['bash', '-c', script],
                                                 capture_output=True, text=True)
             got = out.stdout.strip() == 'Y'
             self.assertEqual(got, should_match, f'{version!r} -> {out.stdout.strip()!r}')
-
 
 if __name__ == '__main__':
     unittest.main()

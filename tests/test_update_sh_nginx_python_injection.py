@@ -16,10 +16,27 @@ This test runs the real patch blocks copied out of update.sh against
 synthetic nginx configs, in actual bash -- not a reimplementation --
 so it can't drift from what's actually shipped.
 """
-import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def _env_prelude(web_port, mrc_port):
+    """Ports now reach these blocks only through update.sh's own
+    _env_port() (validated digits from the parsed .env), so the harness
+    defines EXISTING_ENV and the REAL helper functions."""
+    content = (REPO / 'update.sh').read_text()
+    i = content.index('_env_port() {')
+    j = content.index('\n}\n', i) + 3
+    def q(v):
+        return "'" + str(v).replace("'", "'\\''") + "'"
+    return (f'. "{REPO}/deploy/privileged_helpers.sh"\n'
+            f'declare -A EXISTING_ENV=([WEB_PORT]={q(web_port)} [MRC_BRIDGE_PORT]={q(mrc_port)})\n'
+            + content[i:j])
 
 
 def _extract(content, start_marker, end_marker):
@@ -101,8 +118,8 @@ class UpdateShNginxMrcwsBlockInjectionTests(unittest.TestCase):
             'ok() { :; }\n'
             'warn() { :; }\n'
             'NGINX_CHANGED=false\n'
-            f'REAL_WEB_PORT={real_web_port!r}\n'
-            f'REAL_MRC_PORT={real_mrc_port!r}\n'
+            + _env_prelude(real_web_port, real_mrc_port) +
+            'REAL_MRC_PORT=""\n'
             f'{self.mrcws_block_code}\n'
             'cat "$NGINX_AVAIL"\n'
             'rm -f "$NGINX_AVAIL"\n'
@@ -127,6 +144,9 @@ class UpdateShNginxMrcwsBlockInjectionTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0, msg=out.stderr)
         self.assertFalse(Path('/tmp/pwned-update-sh-test2').exists(),
                          'the injected os.system() call must never run')
+        # Not a port number: the default is used, nothing of it reaches nginx.
+        self.assertIn('127.0.0.1:5000/mrc/auth-check', out.stdout)
+        self.assertNotIn('import os', out.stdout)
 
     def tearDown(self):
         Path('/tmp/pwned-update-sh-test2').unlink(missing_ok=True)
@@ -216,6 +236,8 @@ class UpdateShNginxFullSectionEndToEndTests(unittest.TestCase):
             f'cat > "$NGINX_AVAIL" <<\'CONF\'\n{nginx_config_body}\nCONF\n'
             f'INSTALL_DIR="{install_dir_path}"\n'
             f'BACKUP_DIR="{install_dir_path}"\n'
+            'ROLLBACK_SNAP=/nonexistent\n'
+            + _env_prelude(web_port, mrc_port) +
             f'{self.full_section}\n'
             'cat "$NGINX_AVAIL"\n'
             'rm -f "$NGINX_AVAIL"\n'
@@ -235,6 +257,23 @@ class UpdateShNginxFullSectionEndToEndTests(unittest.TestCase):
         self.assertIn('location /static/', out.stdout)
         self.assertIn('location /mrcws', out.stdout)
         self.assertIn('location = /mrc-auth-check', out.stdout)
+
+    def test_crafted_mrc_port_cannot_run_commands_through_sed(self):
+        """Found in the post-review pass: MRC_BRIDGE_PORT from the
+        service-writable .env used to be spliced into a root `sed` s///
+        expression. GNU sed's `e` flag runs the pattern space as a shell
+        command, so a value like `1|;s|.*|touch X|e;#` ran X as root."""
+        marker = Path(tempfile.gettempdir()) / f'.sed_e_pwned_{id(self)}'
+        payload = f'1|;s|.*|touch${{IFS}}{marker}|e;#'
+        existing = ('server {\n    listen 80;\n'
+                    '    location /mrcws {\n        proxy_pass         http://127.0.0.1:5001/ws;\n    }\n}\n')
+        try:
+            out = self._run(existing, mrc_port=payload)
+            self.assertFalse(marker.exists(), 'sed e-flag payload executed')
+            self.assertNotIn('IFS', out.stdout)
+            self.assertIn('127.0.0.1:5001/ws;', out.stdout)   # left alone
+        finally:
+            marker.unlink(missing_ok=True)
 
     def test_config_already_fully_configured_is_a_clean_noop(self):
         existing = (

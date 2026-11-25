@@ -38,14 +38,31 @@ REAL_KEYS = {'bbs_website', 'bbs_telnet', 'bbs_ssh', 'bbs_sysop', 'bbs_descripti
 STALE_KEYS = {'info_web', 'info_sysop', 'info_desc'}
 
 
+def _helpers():
+    # Ports reach the generation block through update.sh's own validated
+    # _env_port(); define it (and the helper library it uses) here too.
+    content = (REPO_ROOT / 'update.sh').read_text()
+    i = content.index('_env_port() {')
+    j = content.index('\n}\n', i) + 3
+    return f'. "{REPO_ROOT}/deploy/privileged_helpers.sh"\n' + content[i:j]
+
+
+_HELPERS = _helpers()
+
+
 def _run_block(block_text, extra_env_lines):
     """Run *block_text* (real bash extracted from install.sh/update.sh)
     in a real bash subprocess, after the given extra setup lines, and
     return the parsed config.json it wrote."""
     with tempfile.TemporaryDirectory() as tmp:
         config_path = Path(tmp) / 'config.json'
+        # The real blocks run python3 as the service user (as_service);
+        # here the current user stands in for it.
         script = (
             'set -e\n'
+            'as_service() { "$@"; }\n'
+            'warn() { :; }\n'
+            + _HELPERS
             + extra_env_lines
             + f'\nMRC_CONFIG_FILE="{config_path}"\n'
             f'MRC_BRIDGE_CONFIG="{config_path}"\n'

@@ -2,289 +2,233 @@
 # Privileged in-place upgrade for ANetBBS.
 #
 # Invoked by the sysop "Check for Updates" UI as:
-#   sudo -n /usr/local/libexec/anetbbs/run_upgrade.sh <version> <url> <sha256>
+#   sudo -n /usr/local/libexec/anetbbs/run_upgrade.sh <version> <url> <sha256> [<sig-url>]
 #
 # Installed root:root 0755 into a root-owned directory by install.sh /
 # update.sh (audit H-1). The copy under <INSTALL_DIR>/deploy/ is only the
 # source for that install: sudoers never grants it, because the service
 # user owns everything under INSTALL_DIR and could rewrite it.
 #
-# This is the ONLY command the sudoers grant for this feature ever
-# needs to know about -- see the detach block immediately below for
-# why that's deliberate. The script re-execs itself (as root, no
-# further sudo call) into a detached systemd unit before doing any
-# real work, then downloads the tarball from <url>, verifies its
-# SHA-256 against the value the admin UI fetched from the upstream
-# /api/releases/latest, and runs the new tarball's update.sh.
+# The sudoers grant is open to the service account, so every argument and
+# every policy decision is checked here BEFORE anything is written,
+# including the log. Policy, all from root-owned files:
+#   - release identity: the target must be a stable vX.Y.Z, newer than the
+#     installed release recorded in $STATE (never INSTALL_DIR/VERSION), and
+#     not older than MIN_VERSION. Reinstalls and downgrades need root
+#     (sudo bash update.sh from the extracted release).
+#   - signatures: required unless an operator set REQUIRE_SIGNED_UPGRADES=no
+#     in /etc/anetbbs.install. A required signature that is missing, made by
+#     an unknown or revoked key, or over an archive on the denylist is a
+#     refusal; there is no unsigned fallback.
+#   - the extracted archive must contain exactly ANetBBS-<version>/ with a
+#     VERSION file equal to <version> before its update.sh runs.
 #
-# All three args are validated against strict regexes here BEFORE doing
-# anything, since the sudoers grant is open to the service user — never
-# trust the args even though the calling code is also ours.
-#
-# Logging: everything goes to stdout / stderr, which systemd (after the
-# detach below) redirects to /var/log/anetbbs/upgrade.log (root-owned
-# directory, file 0644). The UI reads that file.
+# Logging: after the checks pass, the wrapper takes a root lock, starts a
+# fresh /var/log/anetbbs/upgrade.log with a run id, and re-execs itself in a
+# detached systemd unit whose output goes to that log. The last line is
+# always "result=ok run_id=..." or "result=fail run_id=...".
 
 set -eu -o pipefail
 
-LOG_PREFIX="[upgrade]"
-log()  { printf '%s %s\n' "$LOG_PREFIX" "$*"; }
-fail() { printf '%s FAIL: %s\n' "$LOG_PREFIX" "$*" >&2; exit 1; }
-
-# ── Trusted configuration: /etc/anetbbs.install only ─────────────────────
-# Everything this root script trusts comes from /etc/anetbbs.install, which
-# install.sh / update.sh write as root. It is PARSED (never sourced) and
-# only accepted if root owns it and nobody else can write it. Nothing is
-# read from INSTALL_DIR (.env included): the service user owns that tree
-# (audit H-1).
 CONF=/etc/anetbbs.install
-[ -f "$CONF" ] && [ ! -L "$CONF" ] || fail "$CONF missing -- re-run update.sh as root"
-[ "$(stat -c %u "$CONF")" = 0 ] || fail "$CONF is not owned by root"
-[ $(( 0$(stat -c %a "$CONF") & 022 )) -eq 0 ] || fail "$CONF is group/world writable"
-_conf() { { grep -m1 "^$1=" "$CONF" || true; } | cut -d= -f2- | tr -d '"'"'"; }
-INSTALL_DIR=$(_conf INSTALL_DIR)
-REGISTRY_HOST=$(_conf REGISTRY_HOST)
-REQUIRE_SIGNED=$(_conf REQUIRE_SIGNED_UPGRADES)
-SIGNERS=/etc/anetbbs/release-signers
-[ -n "$REGISTRY_HOST" ] || REGISTRY_HOST="bbs.a-net.fyi"
-[[ "$INSTALL_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "INSTALL_DIR in $CONF is missing or invalid"
-[[ "$REGISTRY_HOST" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || fail "REGISTRY_HOST in $CONF is invalid"
-[ -d "$INSTALL_DIR" ] || fail "install dir $INSTALL_DIR does not exist"
-
-# ── Detach from the caller's cgroup ────────────────────────────────────────
-# Real live outage (2026-10-27, three fix attempts), a SECOND real live
-# outage (2026-10-28, the sudoers-drift bug), and a THIRD real live
-# outage found the same day while verifying the second fix: once the
-# sudoers problem was fixed, this re-exec itself started failing with
-# systemd exit 209/STDOUT, "Failed to set up standard output: Permission
-# denied" -- root cause: anetbbs-web.service has PrivateTmp=yes, so the
-# /tmp/anetbbs_upgrade.log the WEB PROCESS creates/truncates lives in
-# that service's own PRIVATE /tmp mount namespace. The `sudo`/this
-# script's process tree inherits that same private namespace (sudo
-# changes UID, not mount namespaces), but systemd/PID1 (which actually
-# opens the StandardOutput target for the new unit) resolves the path
-# against the REAL, system-wide /tmp -- a different, inconsistent view
-# of "the same" path depending on which process looks at it. Rather
-# than chase the exact permission semantics of that mismatch further,
-# the log now lives under INSTALL_DIR/data/ -- a real, non-virtualized
-# directory already used for persistent app data, visible identically
-# to every process regardless of any unit's PrivateTmp setting.
-#
-# Earlier history, still relevant to why this is a re-exec and not a
-# sudo-command flag: the mechanism used to escape anetbbs-web's cgroup
-# (so update.sh's own restart of anetbbs-web, below, can't kill US as
-# collateral damage) used to be baked into the SUDO-GATED command
-# itself -- first `systemd-run --scope` (found not to actually detach:
-# systemd-run becomes the wrapper's own parent, not a real escape),
-# then `systemd-run --unit=... --wait --property=...` run directly by
-# the web process. Both put detachment flags inside the one thing
-# sudoers has to literally pattern-match against, so every change to
-# the mechanism meant every existing install's /etc/sudoers.d/anetbbs
-# had to change in lockstep via a successful update.sh run -- and when
-# that refresh silently failed on a live box once, the box was stuck
-# with no way to fix a sudoers problem via the one feature that needs
-# sudoers to work at all. Fixed by moving detachment OUT of the
-# sudo-gated command entirely: sudoers only ever grants plain
-# `run_upgrade.sh *`, and THIS script (already root by the time this
-# line runs) re-execs itself into a detached transient unit with no
-# second sudo call involved -- whatever this mechanism needs to become
-# in the future, it only ever touches this file.
-# The log lives in a root-owned directory: systemd opens it as root, so a
-# path under the service user's data/ could be swapped for a symlink to
-# any root-owned file (audit H-1).
+TRUST_DIR=/etc/anetbbs
+STATE=/var/lib/anetbbs/release-state
+LOCK=/run/anetbbs-upgrade.lock
 LOG_DIR=/var/log/anetbbs
-UPGRADE_LOG="$LOG_DIR/upgrade.log"
-if [ -z "${ANETBBS_UPGRADE_DETACHED:-}" ]; then
-    install -d -o root -g root -m 0755 "$LOG_DIR"
-    [ ! -L "$UPGRADE_LOG" ] || fail "$UPGRADE_LOG is a symlink"
-    : > "$UPGRADE_LOG"
-    chmod 0644 "$UPGRADE_LOG"
-    export ANETBBS_UPGRADE_DETACHED=1
-    exec systemd-run --unit=anetbbs-upgrade --collect --quiet --wait \
-        --property=StandardOutput=append:"$UPGRADE_LOG" \
-        --property=StandardError=append:"$UPGRADE_LOG" \
-        --setenv=ANETBBS_UPGRADE_DETACHED=1 \
-        "$0" "$@"
-fi
+ROOT_UID=0
+# First release with the privilege-boundary fixes. Nothing older is ever
+# installable through this wrapper.
+MIN_VERSION=v1.1.74
 
-# ── Argument validation ────────────────────────────────────────────────────
-# Use case-based pattern matching instead of `[[ =~ ]]` regex. Bash treats
-# `&` inside conditional regex expressions as a special token even when
-# it's inside a character class, blowing up with "syntax error in
-# conditional expression: unexpected token `&'". Patterns sidestep that.
-[ $# -eq 3 ] || [ $# -eq 4 ] || fail "usage: $0 <version> <url> <sha256> [<sig-url>]"
-VERSION="$1"
-URL="$2"
-SHA="$3"
-SIG_URL="${4:-}"
+LOG_PREFIX="[upgrade]"
+RUN_ID="${ANETBBS_UPGRADE_RUN_ID:-}"
+log()  { printf '%s %s\n' "$LOG_PREFIX" "$*"; }
+fail() {
+    printf '%s FAIL: %s\n' "$LOG_PREFIX" "$*" >&2
+    [ -z "$RUN_ID" ] || printf '%s result=fail run_id=%s\n' "$LOG_PREFIX" "$RUN_ID" >&2
+    exit 1
+}
 
-# Version: vX.Y[ab]Z.NN (alpha/beta build) or vX.Y.Z (stable release,
-# since the v1.0.0 milestone). Accept either form.
-if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+([ab][0-9]+\.[0-9]+|\.[0-9]+)$ ]]; then
-    fail "version $VERSION does not match expected vX.Y[ab]Z.NN or vX.Y.Z form"
-fi
-
-# URL: must be https and end with .tar.gz. Block shell metacharacters
-# that could lead to command injection if the URL were ever fed to a
-# subshell (we use it as an arg to curl/wget, but defensive layering
-# is cheap), and "@" so no userinfo can disguise the real host.
-# Plain http is accepted only to this machine's own loopback (a hub whose
-# REGISTRY_URL is http://localhost:<port>/): nothing on the network can
-# intercept it, and the sha256 / signature checks below still apply.
-_is_loopback_http() {   # _is_loopback_http URL
+_root_file() {   # regular file, not a symlink, root-owned, not group/world writable
+    [ -f "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %u "$1")" = "$ROOT_UID" ] \
+        && [ $(( 0$(stat -c %a "$1") & 022 )) -eq 0 ]
+}
+_kv() { { grep -m1 "^$2=" "$1" || true; } | cut -d= -f2- | tr -d '"'"'"; }
+_stable() { [[ "$1" =~ ^v[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]; }
+_vcmp() {   # prints -1/0/1 for two stable versions
+    local a b i x y
+    IFS=. read -r -a a <<<"${1#v}"; IFS=. read -r -a b <<<"${2#v}"
+    for i in 0 1 2; do
+        x=$((10#${a[$i]})); y=$((10#${b[$i]}))
+        if (( x < y )); then echo -1; return; fi
+        if (( x > y )); then echo 1; return; fi
+    done
+    echo 0
+}
+_is_loopback_http() {
+    # Plain http is allowed only to this machine's loopback: a registry
+    # hub whose REGISTRY_URL is http://localhost:<port>/ fetches its own
+    # releases that way. The shell-metacharacter check refuses '@', so
+    # userinfo can't disguise the host.
     case "$1" in
         http://localhost/*|http://localhost:[0-9]*/*|http://127.0.0.1/*|http://127.0.0.1:[0-9]*/*|http://\[::1\]/*|http://\[::1\]:[0-9]*/*) return 0 ;;
     esac
     return 1
 }
-case "$URL" in
-    *[\ \;\&\|\`\$\<\>\"\'\\@]*) fail "url contains shell metacharacters" ;;
-esac
-case "$URL" in
-    https://*.tar.gz) URL_SCHEME=https ;;
-    http://*.tar.gz) _is_loopback_http "$URL" && URL_SCHEME=http \
-        || fail "url $URL not a tar.gz over https (plain http is allowed only to this machine's loopback)" ;;
-    *) fail "url $URL not a tar.gz over https" ;;
-esac
+_url_scheme() {   # _url_scheme URL SUFFIX -> https|http, or fails
+    case "$1" in
+        *[\ \;\&\|\`\$\<\>\"\'\\@]*) return 1 ;;
+    esac
+    case "$1" in
+        https://*"$2") echo https ;;
+        http://*"$2") _is_loopback_http "$1" && echo http || return 1 ;;
+        *) return 1 ;;
+    esac
+}
+_url_host() { local s="${1#*://}"; printf '%s' "${s%%/*}"; }
 
-# sha256: 64 hex chars.
-if ! [[ "$SHA" =~ ^[0-9a-fA-F]{64}$ ]]; then
-    fail "sha256 $SHA is not 64 hex chars"
-fi
+# ── Trusted configuration ────────────────────────────────────────────────
+_root_file "$CONF" || fail "$CONF missing, not root-owned, or writable by others -- re-run update.sh as root"
+INSTALL_DIR=$(_kv "$CONF" INSTALL_DIR)
+REGISTRY_HOST=$(_kv "$CONF" REGISTRY_HOST)
+REQUIRE_SIGNED=$(_kv "$CONF" REQUIRE_SIGNED_UPGRADES)
+[ "$REQUIRE_SIGNED" = no ] || REQUIRE_SIGNED=yes
+[ -n "$REGISTRY_HOST" ] || REGISTRY_HOST="bbs.a-net.fyi"
+[[ "$INSTALL_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "INSTALL_DIR in $CONF is missing or invalid"
+[[ "$REGISTRY_HOST" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || fail "REGISTRY_HOST in $CONF is invalid"
+[ -d "$INSTALL_DIR" ] || fail "install dir $INSTALL_DIR does not exist"
+SIGNERS="$TRUST_DIR/release-signers"
+REVOKED="$TRUST_DIR/release-revoked-keys"
+DENYLIST="$TRUST_DIR/release-denylist"
+
+# ── Arguments ────────────────────────────────────────────────────────────
+[ $# -eq 3 ] || [ $# -eq 4 ] || fail "usage: $0 <version> <url> <sha256> [<sig-url>]"
+VERSION="$1"; URL="$2"; SHA="$3"; SIG_URL="${4:-}"
+_stable "$VERSION" || fail "version $VERSION is not a stable vX.Y.Z release (pre-releases install only via sudo bash update.sh)"
+URL_SCHEME=$(_url_scheme "$URL" .tar.gz) \
+    || fail "url $URL must be a .tar.gz over https (plain http only to this machine's loopback; no shell metacharacters or '@')"
+URL_HOST=$(_url_host "$URL")
+[[ "$URL_HOST" =~ ^([A-Za-z0-9.-]+|\[::1\])(:[0-9]+)?$ ]] || fail "url host '$URL_HOST' is not a plain host[:port]"
+[[ "$SHA" =~ ^[0-9a-fA-F]{64}$ ]] || fail "sha256 $SHA is not 64 hex chars"
 SHA_LC=$(printf '%s' "$SHA" | tr '[:upper:]' '[:lower:]')
+if [ -n "$SIG_URL" ]; then
+    SIG_SCHEME=$(_url_scheme "$SIG_URL" .tar.gz.sig) \
+        || fail "signature url $SIG_URL must be https (or loopback http), end in .tar.gz.sig, and contain no shell metacharacters or '@'"
+fi
+command -v curl >/dev/null 2>&1 || fail "curl is required for web upgrades"
 
-log "version=$VERSION  url=$URL  sha=${SHA_LC:0:16}…"
+# ── Release identity ─────────────────────────────────────────────────────
+_root_file "$STATE" || fail "no trusted record of the installed release ($STATE) -- run the update once as root: sudo bash update.sh"
+INSTALLED=$(_kv "$STATE" INSTALLED_VERSION)
+_stable "$INSTALLED" || fail "$STATE has no valid INSTALLED_VERSION -- run the update once as root"
+[ "$(_vcmp "$VERSION" "$MIN_VERSION")" != -1 ] || fail "version $VERSION is older than the minimum $MIN_VERSION"
+[ "$(_vcmp "$VERSION" "$INSTALLED")" = 1 ] \
+    || fail "version $VERSION is not newer than the installed $INSTALLED -- reinstalls and downgrades need root (sudo bash update.sh)"
+if [ -f "$DENYLIST" ] || [ -L "$DENYLIST" ]; then
+    _root_file "$DENYLIST" || fail "$DENYLIST is not root-owned -- refusing"
+    ! grep -qix "$SHA_LC" <(grep -oE '^[0-9a-fA-F]{64}' "$DENYLIST") \
+        || fail "release $SHA_LC is on the denylist"
+fi
+
+# ── Signature policy ─────────────────────────────────────────────────────
+HAVE_SIGNERS=no
+if _root_file "$SIGNERS" && grep -qv '^\s*\(#\|$\)' "$SIGNERS"; then HAVE_SIGNERS=yes; fi
+HAVE_REVOKED=no
+if [ -f "$REVOKED" ] || [ -L "$REVOKED" ]; then
+    _root_file "$REVOKED" || fail "$REVOKED is not root-owned -- refusing"
+    HAVE_REVOKED=yes
+fi
+if [ "$REQUIRE_SIGNED" = yes ]; then
+    [ "$HAVE_SIGNERS" = yes ] || fail "signed upgrades are required but $SIGNERS lists no trusted key"
+    [ -n "$SIG_URL" ] || fail "signed upgrades are required and no signature was offered"
+    command -v ssh-keygen >/dev/null 2>&1 || fail "ssh-keygen is required to verify release signatures"
+    MODE=signed
+elif [ -n "$SIG_URL" ] && [ "$HAVE_SIGNERS" = yes ]; then
+    MODE=signed
+else
+    [ "$URL_HOST" = "$REGISTRY_HOST" ] \
+        || fail "url host '$URL_HOST' does not match REGISTRY_HOST '$REGISTRY_HOST' -- refusing an unsigned download from an unexpected origin"
+    MODE=unsigned
+fi
+
+# ── Detach ───────────────────────────────────────────────────────────────
+# Everything above is read-only. From here on this run owns the log: take
+# the root lock first so a second invocation can't truncate a running
+# upgrade's log, then re-exec into a detached unit (it must survive
+# update.sh restarting anetbbs-web, whose cgroup the caller is in). The
+# waiting systemd-run keeps the lock fd open until the unit finishes.
+if [ -z "${ANETBBS_UPGRADE_DETACHED:-}" ]; then
+    exec 9>>"$LOCK"
+    flock -n 9 || fail "another upgrade is already running"
+    install -d -o root -g root -m 0755 "$LOG_DIR"
+    UPGRADE_LOG="$LOG_DIR/upgrade.log"
+    [ ! -L "$UPGRADE_LOG" ] || fail "$UPGRADE_LOG is a symlink"
+    RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$-$(od -An -N4 -tx4 /dev/urandom | tr -d ' ')"
+    : > "$UPGRADE_LOG"
+    chmod 0644 "$UPGRADE_LOG"
+    log "run_id=$RUN_ID" >> "$UPGRADE_LOG"
+    log "run_id=$RUN_ID detaching; progress in $UPGRADE_LOG"
+    exec systemd-run --unit=anetbbs-upgrade --collect --quiet --wait \
+        --property=StandardOutput=append:"$UPGRADE_LOG" \
+        --property=StandardError=append:"$UPGRADE_LOG" \
+        --setenv=ANETBBS_UPGRADE_DETACHED=1 \
+        --setenv=ANETBBS_UPGRADE_RUN_ID="$RUN_ID" \
+        "$0" "$@"
+fi
+
+# ── Detached phase ───────────────────────────────────────────────────────
+[ -n "$RUN_ID" ] || RUN_ID="detached-$$"
+log "version=$VERSION  installed=$INSTALLED  mode=$MODE  url=$URL  sha=${SHA_LC:0:16}…"
 log "install dir: $INSTALL_DIR"
 
-# ── Verify URL origin against the configured registry ─────────────────────
-# Real gap found in a security/performance audit: URL was only ever
-# validated by SHAPE (https + .tar.gz + no shell metacharacters), never
-# by ORIGIN -- since the caller supplies both the URL and the sha256
-# checked against it below, an attacker able to invoke this script
-# directly (the sudoers grant is to the service user, not gated behind
-# the admin web UI -- see deploy/sudoers.anetbbs) could host their own
-# tarball anywhere and compute a self-consistent hash, defeating the
-# sha256 check entirely. Bounded here by requiring the download host to
-# match the install's trusted REGISTRY_HOST, which is not taken from argv.
-# REGISTRY_HOST comes from root-owned /etc/anetbbs.install (parsed above),
-# never from the service-user-owned .env (audit H-1).
-
-_url_no_scheme="${URL#"$URL_SCHEME"://}"
-URL_HOST="${_url_no_scheme%%/*}"
-[[ "$URL_HOST" =~ ^([A-Za-z0-9.-]+|\[::1\])(:[0-9]+)?$ ]] || fail "url host '$URL_HOST' is not a plain host[:port]"
-
-# Release signatures (OpenSSH `ssh-keygen -Y`). A release signed by a key
-# in root-owned /etc/anetbbs/release-signers may come from ANY https
-# host -- mirrors and private feeds that redistribute signed releases
-# just work. An unsigned release is accepted only from the trusted
-# REGISTRY_HOST, and only when this install doesn't require signatures.
-HAVE_SIGNERS=no
-if [ -f "$SIGNERS" ] && [ ! -L "$SIGNERS" ] && [ -s "$SIGNERS" ] \
-        && [ "$(stat -c %u "$SIGNERS")" = 0 ] \
-        && [ $(( 0$(stat -c %a "$SIGNERS") & 022 )) -eq 0 ]; then
-    HAVE_SIGNERS=yes
-fi
-if [ -n "$SIG_URL" ]; then
-    case "$SIG_URL" in
-        *[\ \;\&\|\`\$\<\>\"\'\\@]*) fail "signature url contains shell metacharacters" ;;
-    esac
-    case "$SIG_URL" in
-        https://*.tar.gz.sig) SIG_SCHEME=https ;;
-        http://*.tar.gz.sig) _is_loopback_http "$SIG_URL" && SIG_SCHEME=http \
-            || fail "signature url $SIG_URL must be https (or loopback http) and end in .tar.gz.sig" ;;
-        *) fail "signature url $SIG_URL must be https (or loopback http) and end in .tar.gz.sig" ;;
-    esac
-fi
-if [ -z "$SIG_URL" ] || [ "$HAVE_SIGNERS" != yes ]; then
-    [ "$REQUIRE_SIGNED" != yes ] \
-        || fail "this install requires signed upgrades and no verifiable signature was offered"
-    [ "$URL_HOST" = "$REGISTRY_HOST" ] \
-        || fail "url host '$URL_HOST' does not match this install's trusted REGISTRY_HOST '$REGISTRY_HOST' -- refusing an unsigned download from an unexpected origin"
-    log "url origin verified against registry host: $REGISTRY_HOST (unsigned release)"
-fi
-
-# ── Download tarball to a unique tempdir we own ───────────────────────────
-TMP=$(mktemp -d -t anetbbs-upgrade-XXXXXX)
+TMP=$(mktemp -d /tmp/anetbbs-upgrade-XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
-
 TARBALL="$TMP/ANetBBS-$VERSION.tar.gz"
-log "downloading to $TARBALL"
-
-# Prefer curl, fall back to wget. --fail makes curl exit non-zero on 4xx/5xx
-# so a missing tarball doesn't write an HTML error page to disk.
-if command -v curl >/dev/null 2>&1; then
-    if [ "$URL_SCHEME" = https ]; then
-        CURL_PROTO=(--proto '=https' --proto-redir '=https' --location --max-redirs 3)
+_curl() {   # _curl SCHEME MAXTIME OUT URL [extra...]
+    local scheme="$1" maxt="$2" out="$3" url="$4"; shift 4
+    local -a p
+    if [ "$scheme" = https ]; then
+        p=(--proto '=https' --proto-redir '=https' --location --max-redirs 3)
     else
-        CURL_PROTO=(--proto '=http' --max-redirs 0)
+        p=(--proto '=http' --max-redirs 0)
     fi
-    curl --fail --silent --show-error "${CURL_PROTO[@]}" \
-         --connect-timeout 15 --max-time 600 \
-         -o "$TARBALL" "$URL" \
-      || fail "curl download failed"
-elif command -v wget >/dev/null 2>&1; then
-    WGET_REDIR=(); [ "$URL_SCHEME" = https ] || WGET_REDIR=(--max-redirect=0)
-    wget --quiet --timeout=600 ${WGET_REDIR[@]+"${WGET_REDIR[@]}"} -O "$TARBALL" "$URL" \
-      || fail "wget download failed"
-else
-    fail "neither curl nor wget is installed"
-fi
-
-# ── Verify sha256 ─────────────────────────────────────────────────────────
+    curl --fail --silent --show-error "${p[@]}" --connect-timeout 15 --max-time "$maxt" "$@" -o "$out" "$url"
+}
+log "downloading"
+_curl "$URL_SCHEME" 600 "$TARBALL" "$URL" || fail "download failed"
 ACTUAL=$(sha256sum "$TARBALL" | awk '{print $1}')
-if [ "$ACTUAL" != "$SHA_LC" ]; then
-    fail "sha256 mismatch — expected $SHA_LC, got $ACTUAL"
-fi
+[ "$ACTUAL" = "$SHA_LC" ] || fail "sha256 mismatch -- expected $SHA_LC, got $ACTUAL"
 log "sha256 verified"
 
-if [ -n "$SIG_URL" ] && [ "$HAVE_SIGNERS" = yes ]; then
+if [ "$MODE" = signed ]; then
     SIGFILE="$TMP/release.sig"
-    if [ "$SIG_SCHEME" = https ]; then
-        SIG_PROTO=(--proto '=https' --proto-redir '=https' --location --max-redirs 3)
-    else
-        SIG_PROTO=(--proto '=http' --max-redirs 0)
-    fi
-    curl --fail --silent --show-error "${SIG_PROTO[@]}" \
-         --connect-timeout 15 --max-time 60 --max-filesize 65536 \
-         -o "$SIGFILE" "$SIG_URL" || fail "signature download failed"
+    _curl "$SIG_SCHEME" 60 "$SIGFILE" "$SIG_URL" --max-filesize 65536 || fail "signature download failed"
+    REV_ARGS=(); [ "$HAVE_REVOKED" = no ] || REV_ARGS=(-r "$REVOKED")
     ssh-keygen -Y verify -f "$SIGNERS" -I anetbbs-release -n anetbbs-release \
-        -s "$SIGFILE" < "$TARBALL" >/dev/null 2>&1 \
-        || fail "release signature did NOT verify against $SIGNERS -- refusing to install"
-    log "release signature verified ($SIGNERS)"
+        -s "$SIGFILE" ${REV_ARGS[@]+"${REV_ARGS[@]}"} < "$TARBALL" >/dev/null 2>&1 \
+        || fail "release signature did NOT verify against $SIGNERS (unknown or revoked key, or tampered archive) -- refusing to install"
+    log "release signature verified"
 fi
 
-# ── Extract ───────────────────────────────────────────────────────────────
 EXTRACT="$TMP/ext"
-mkdir -p "$EXTRACT"
+mkdir -m 0700 "$EXTRACT"
 log "extracting"
 tar -xzf "$TARBALL" -C "$EXTRACT" --no-same-owner || fail "tar extract failed"
+TOP="ANetBBS-$VERSION"
+[ "$(find "$EXTRACT" -mindepth 1 -maxdepth 1 | wc -l)" = 1 ] || fail "archive must contain exactly one top-level entry"
+INNER="$EXTRACT/$TOP"
+[ -d "$INNER" ] && [ ! -L "$INNER" ] || fail "archive top-level directory is not $TOP"
+[ -f "$INNER/VERSION" ] && [ ! -L "$INNER/VERSION" ] || fail "archive has no VERSION file"
+INNER_VERSION=$(tr -d '[:space:]' < "$INNER/VERSION")
+[ "$INNER_VERSION" = "$VERSION" ] || fail "archive VERSION '$INNER_VERSION' does not match requested $VERSION"
+[ -f "$INNER/update.sh" ] && [ ! -L "$INNER/update.sh" ] || fail "archive missing update.sh"
+log "archive identity verified: $TOP"
 
-# The tarball contains a single top-level dir named ANetBBS-<version>/
-INNER=$(find "$EXTRACT" -maxdepth 1 -mindepth 1 -type d | head -n 1)
-[ -d "$INNER" ] || fail "tarball had no top-level directory"
-log "extracted to $INNER"
-
-[ -x "$INNER/update.sh" ] || chmod +x "$INNER/update.sh" 2>/dev/null || true
-[ -f "$INNER/update.sh" ] || fail "tarball missing update.sh"
-
-# ── Run update.sh ─────────────────────────────────────────────────────────
-# update.sh expects to be run as root with bash, and it operates on the
-# already-installed tree at INSTALL_DIR. update.sh restarts the web
-# service, which will kill the HTTP request that triggered us — but we
-# already re-exec'd into our own detached systemd unit above, so that
-# restart cannot touch us.
 log "running update.sh"
 cd "$INNER"
-# Real gap found in a full install/update re-verify audit: update.sh's
-# own argument parser unconditionally resets INSTALL_DIR="" before
-# reading --install-dir from argv, which silently discards the env var
-# this script used to pass instead -- update.sh then re-derived the
-# install dir itself (from the systemd unit's WorkingDirectory=, or a
-# bare /opt/anetbbs fallback), usually landing on the same path by
-# coincidence, but making the whole point of resolving INSTALL_DIR here
-# from /etc/anetbbs.install dead plumbing. Pass it as the real flag
-# update.sh actually parses.
-ANETBBS_UPGRADE_RUN=1 bash update.sh --install-dir "$INSTALL_DIR" \
-    || fail "update.sh exited non-zero"
-
+ANETBBS_UPGRADE_RUN=1 ANETBBS_EXPECTED_VERSION="$VERSION" ANETBBS_RELEASE_SHA256="$SHA_LC" \
+    bash update.sh --install-dir "$INSTALL_DIR" || fail "update.sh exited non-zero"
+_root_file "$STATE" && [ "$(_kv "$STATE" INSTALLED_VERSION)" = "$VERSION" ] \
+    || fail "update.sh finished but did not record $VERSION as installed"
 log "upgrade to $VERSION complete"
+log "result=ok run_id=$RUN_ID"

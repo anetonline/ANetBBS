@@ -45,7 +45,7 @@ sudo install -o root -g root -m 0755 /opt/anetbbs/deploy/run_upgrade.sh \
     /opt/anetbbs/deploy/run_restore.sh /usr/local/libexec/anetbbs/
 # The helpers' settings. Root-owned, not writable by anyone else.
 printf '%s\n' INSTALL_DIR=/opt/anetbbs SERVICE_USER=anetbbs \
-    REGISTRY_HOST=bbs.a-net.fyi REQUIRE_SIGNED_UPGRADES=no \
+    REGISTRY_HOST=bbs.a-net.fyi REQUIRE_SIGNED_UPGRADES=yes \
     | sudo tee /etc/anetbbs.install > /dev/null
 sudo chmod 0644 /etc/anetbbs.install
 sudo sed "s/^__SERVICE_USER__ /anetbbs /" /opt/anetbbs/deploy/sudoers.anetbbs \
@@ -56,26 +56,36 @@ sudo visudo -cf /etc/sudoers.d/anetbbs    # syntax check
 
 The helpers read their settings only from `/etc/anetbbs.install`, never
 from `.env`, because the BBS service account can edit `.env`. The file
-holds four settings:
+holds these settings:
 
 | Setting | Meaning |
 |---|---|
 | `INSTALL_DIR`, `SERVICE_USER` | where the BBS lives and which account runs it |
-| `REGISTRY_HOST` | the release feed that unsigned web upgrades may download from (default `bbs.a-net.fyi`) |
-| `REQUIRE_SIGNED_UPGRADES` | `yes` refuses every unsigned web upgrade. The default is `yes` on a registry hub (`REGISTRY_MODE_ENABLED=true`) and `no` elsewhere. |
+| `REQUIRE_SIGNED_UPGRADES` | `yes` (the default everywhere): web upgrades install only releases signed by a key in `/etc/anetbbs/release-signers`. |
+| `REGISTRY_HOST` | used only when an operator turned signatures off: the one host unsigned releases may come from (default `bbs.a-net.fyi`) |
+| `REQUIRE_SIGNED_SET_BY` | `operator` when a sysop chose the signing setting; `default` otherwise |
 
-**Private release feeds.**
-- The first time `update.sh` runs after this change, it carries the
-  feed host already set in `.env` `REGISTRY_URL` over into
-  `REGISTRY_HOST`. It prints a note when it does, so web auto-update
-  keeps working from the feed you already use.
-- After that, `REGISTRY_HOST` changes only when you choose: run
-  `sudo ANETBBS_REGISTRY_HOST=<host> bash update.sh`.
-- If `.env` later names a different host, `update.sh` warns and leaves
-  the trusted host alone.
+The installed release is recorded root-owned in
+`/var/lib/anetbbs/release-state`. Web upgrades only move forward from
+it: a release that is older than or the same as the installed one, or
+older than the first release with the current upgrade checks, is
+refused. Reinstalling or downgrading is done as root: extract the
+release you want to a root-owned directory and run its `update.sh`.
+**Roll back** is not offered on the web page for the same reason.
 
-To change the signing requirement, run update.sh with
-`ANETBBS_REQUIRE_SIGNED_UPGRADES=yes` or `=no`.
+**Private release feeds.** Nothing in `.env` is trusted for upgrades,
+`REGISTRY_URL` included. A private feed that redistributes official,
+signed releases needs no setup. A feed that serves its own unsigned
+releases needs the operator to allow it, once, as root:
+
+```
+sudo ANETBBS_REQUIRE_SIGNED_UPGRADES=no ANETBBS_REGISTRY_HOST=<feed host> bash update.sh
+```
+
+That choice is kept on later updates (`REQUIRE_SIGNED_SET_BY=operator`).
+Run `update.sh` with `ANETBBS_REQUIRE_SIGNED_UPGRADES=yes` to turn
+signatures back on. A feed that signs its own releases can instead add
+its key to `deploy/release-signers` in the tree it builds from.
 
 **Download URLs.**
 - Web upgrades download over https. Plain http is accepted only to
@@ -86,32 +96,47 @@ To change the signing requirement, run update.sh with
   `TRUST_PROXY_HEADERS=true`), the download uses https.
 
 **Registry hubs.** A hub's releases directory is writable by the BBS
-service account, so on a hub `REQUIRE_SIGNED_UPGRADES` defaults to
-`yes`. The hub's own **Admin → Upgrades** button then installs only
-releases signed by a key in `/etc/anetbbs/release-signers`. Official
-releases are signed with the project key that `update.sh` installs
-there, so keep the `.sig` file next to each tarball in the releases
-directory. A release without a valid signature has to be installed
-with `sudo bash update.sh` from the extracted release instead. You can
-also run `update.sh` once with `ANETBBS_REQUIRE_SIGNED_UPGRADES=no`,
-which accepts that the service account could then install a release of
-its own choosing as root. Peers that point at the hub are not
-affected: they default to `no`.
+service account, and a hub's own feed is `http://localhost:<port>/`.
+Signatures are what make that safe: keep the `.sig` file next to each
+tarball in the releases directory, and peers and the hub's own
+**Admin → Upgrades** button install it. A release without a valid
+signature has to be installed with `sudo bash update.sh` from the
+extracted release instead.
 
 **Signed releases.**
 - `/etc/anetbbs/release-signers` (root-owned) lists the keys whose
   release signatures web upgrades accept. A release signed by one of
-  them installs from any https host. Unsigned releases still install
-  only from `REGISTRY_HOST`.
+  them installs from any https host, or this machine's loopback.
+- `/etc/anetbbs/release-revoked-keys` lists withdrawn keys; a release
+  signed by one of them is refused even if the key is still in
+  `release-signers`. `/etc/anetbbs/release-denylist` lists the SHA-256
+  of individual archives that must never install. `update.sh` installs
+  all three from the release's `deploy/` directory; a release that
+  ships one of them empty removes the installed copy.
+- A missing, unknown or revoked signature is a refusal. There is no
+  fallback to unsigned.
 - The repository's `deploy/release-signers` ships the project's
   release key. To trust another key, add a line there in OpenSSH
   allowed-signers format with the principal `anetbbs-release`;
   `update.sh` installs the file to `/etc/anetbbs/`.
-- `build-release.sh` signs a release when the key
-  `~/.config/anetbbs/release_signing_key` exists (or the path in
-  `ANETBBS_SIGNING_KEY`), and writes `ANetBBS-vX.Y.Z.tar.gz.sig` next
-  to the tarball. Publish the `.sig` alongside the tarball and its
-  `.sha256`.
+- `build-release.sh` builds from the current commit, only from a clean
+  checkout, and the same commit always gives the same archive. It signs
+  the release when the key `~/.config/anetbbs/release_signing_key`
+  exists (or the path in `ANETBBS_SIGNING_KEY`), checks the signature
+  against the checkout's own `deploy/release-signers` and revocation
+  list, and writes `ANetBBS-vX.Y.Z.tar.gz.sig` next to the tarball. It
+  refuses to sign a version it already signed with different contents
+  (ledger: `~/.config/anetbbs/signed-releases`): bump the version
+  instead. Publish the `.sig` alongside the tarball and its `.sha256`.
+- **Key policy.** One release key, kept offline with a passphrase
+  (`ssh-keygen -p -f <key>`). If it leaks, or a signed archive must be
+  withdrawn: generate a new key, put the old public key in
+  `deploy/release-revoked-keys` and the archive's SHA-256 in
+  `deploy/release-denylist`, replace the line in
+  `deploy/release-signers`, and ship that as a new version. Installs
+  that update to it stop trusting the old key. Installs that never
+  update keep trusting it, so a leaked key also needs an announcement
+  asking sysops to run `sudo bash update.sh`.
 
 Web upgrade progress goes to `/var/log/anetbbs/upgrade.log`, which is
 root-owned. **Admin → Upgrades** shows it.

@@ -324,11 +324,28 @@ Read this whole file before exposing the BBS to the internet.
   service account's files, and they don't run any code the service
   account can modify as root. See
   [12 — Upgrading](12-upgrading.md#web-upgrades-and-the-trusted-release-feed).
-- **Signed releases.** When `/etc/anetbbs/release-signers` lists a key,
-  a web upgrade accepts a release signed by that key from any https
-  host (or this machine's loopback). An unsigned release is accepted
-  only from the trusted feed host, and never when
-  `REQUIRE_SIGNED_UPGRADES=yes`.
+- **Signed, forward-only web upgrades.** Web upgrades require a release
+  signed by a key in `/etc/anetbbs/release-signers` (an operator can
+  turn this off for a private feed), refuse revoked keys and denylisted
+  archives, and install only a stable release newer than the one
+  recorded root-owned in `/var/lib/anetbbs/release-state`. The archive's
+  own `VERSION` must match the requested version.
+- **Updates touch the service account's files as that account.**
+  `update.sh` reads and writes everything under the install directory
+  (`.env`, databases, backups, configuration it generates) as the
+  service user, so links or swapped directories there cannot redirect
+  root. Its rollback copies of systemd units and the nginx site are kept
+  in a root-only directory and checked before use. It refuses to run
+  from a directory the service account can modify. `install.sh` refuses
+  to reinstall over a tree the service account already controls unless
+  the operator overrides it.
+- **Known limits.** systemd reads each unit's `EnvironmentFile` (the
+  service account's `.env`) as root; `update.sh` refuses a symlinked
+  `.env`, but cannot stop it being swapped later. The `anetbbs-*`
+  commands in `/usr/local/bin` point into the service account's venv:
+  don't run them as root. A machine whose service account was already
+  compromised before this release can't be made trustworthy by an
+  update; reinstall it.
 - **`/healthz` is minimal for the public.** Anonymous remote callers get
   only `status` and `db_ok`. Version, host name and listener details go
   to admins and to local probes (127.0.0.1 with no `X-Forwarded-For`).

@@ -20,9 +20,8 @@
 # specifically added exclusions for those exact filenames before they
 # existed.
 #
-# This version inverts the default: it starts from git's OWN idea of
-# "safe to ship" (tracked files, plus untracked files that aren't
-# gitignored). Door-game trees (doors/) and DOS game bundles
+# This version inverts the default: it ships exactly the files of the
+# current commit (git archive of HEAD, from a clean checkout only). Door-game trees (doors/) and DOS game bundles
 # (data/dos-games/) are never shipped. Anything new and unexpected
 # that shows up in the working directory — a stray log file, a
 # leftover test database, an editor swap file — is excluded by construction, with zero need to update
@@ -32,19 +31,29 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')"
+cd "$SCRIPT_DIR"
+
+if ! git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "ERROR: $SCRIPT_DIR is not a git repository — this script builds from a commit." >&2
+  exit 1
+fi
+# Commit-bound and reproducible: the archive is built from HEAD, never from
+# the working tree, and only from a clean checkout (no modified or untracked
+# non-ignored files), so what ships is exactly one commit.
+if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain --untracked-files=normal)" ]]; then
+  echo "ERROR: the working tree is not clean -- commit or remove these first:" >&2
+  git -C "$SCRIPT_DIR" status --short >&2
+  exit 1
+fi
+COMMIT="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
+SOURCE_DATE_EPOCH="$(git -C "$SCRIPT_DIR" log -1 --format=%ct HEAD)"
+VERSION="$(git -C "$SCRIPT_DIR" show HEAD:VERSION | tr -d '[:space:]')"
 VERSION="${VERSION#v}"
 PACKAGE_VERSION="v${VERSION}"
 OUT="${ANETBBS_RELEASE_OUT_DIR:-/tmp}/ANetBBS-${PACKAGE_VERSION}.tar.gz"
 TOPDIR="ANetBBS-${PACKAGE_VERSION}"
 
-echo "Building $OUT (top-level dir: $TOPDIR) ..."
-
-if ! git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "ERROR: $SCRIPT_DIR is not a git repository — this script needs" >&2
-  echo "git's own tracked/ignored-file knowledge to build a safe release." >&2
-  exit 1
-fi
+echo "Building $OUT (top-level dir: $TOPDIR) from commit $COMMIT ..."
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -67,7 +76,7 @@ FILE_LIST="$WORKDIR/files.txt"
 # with every stock install, same as PETSCII's own always-present
 # support. Keep this list in sync with build_enhanced_client_addon.sh's
 # own FILES array if that one changes.
-( cd "$SCRIPT_DIR" && git ls-files --cached --others --exclude-standard ) \
+git -C "$SCRIPT_DIR" ls-tree -r --name-only HEAD \
   | grep -v '^build-release\.sh$' \
   | grep -v '^anetbbs/core/enhanced_server\.py$' \
   | grep -v '^anetbbs/features/enhanced_protocol\.py$' \
@@ -94,13 +103,19 @@ grep -v -E '^tests/test_enhanced_(server_deadconn|protocol|client_block_chars|cl
 grep -v -E '^(doors|data/dos-games)/' "$FILE_LIST" > "$FILE_LIST.tmp" \
   && mv "$FILE_LIST.tmp" "$FILE_LIST"
 
-sort -u "$FILE_LIST" -o "$FILE_LIST"
+LC_ALL=C sort -u "$FILE_LIST" -o "$FILE_LIST"
 
-tar czf "$OUT" \
+# Contents come from the commit (git archive), then a normalized tar:
+# sorted names, root:root numeric owners, commit-time mtimes, no group/world
+# write bits, gzip without a timestamp. Rebuilding the same commit gives the
+# same bytes, and no builder account name ends up in the archive.
+mkdir -p "$WORKDIR/tree"
+git -C "$SCRIPT_DIR" archive --format=tar HEAD | tar -x -C "$WORKDIR/tree"
+tar --create --format=gnu --sort=name --no-recursion \
+  --owner=0 --group=0 --numeric-owner --mtime="@$SOURCE_DATE_EPOCH" --mode='go-w' \
   --transform "s|^|${TOPDIR}/|" \
-  --no-recursion \
-  -C "$SCRIPT_DIR" \
-  --files-from="$FILE_LIST"
+  -C "$WORKDIR/tree" --files-from="$FILE_LIST" \
+  | gzip -n -9 > "$OUT"
 
 SIZE="$(du -h "$OUT" | cut -f1)"
 echo "Done: $OUT ($SIZE) — $(wc -l < "$FILE_LIST") files"
@@ -164,18 +179,43 @@ echo "Sanity check passed — ${TOPDIR}/update.sh present, no sensitive files."
 ( cd "$(dirname "$OUT")" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256" )
 chmod 0644 "$OUT" "$OUT.sha256"
 SIGNING_KEY="${ANETBBS_SIGNING_KEY:-$HOME/.config/anetbbs/release_signing_key}"
+SIGNERS_FILE="$SCRIPT_DIR/deploy/release-signers"
+REVOKED_FILE="$SCRIPT_DIR/deploy/release-revoked-keys"
+LEDGER="${ANETBBS_SIGNING_LEDGER:-$HOME/.config/anetbbs/signed-releases}"
+rm -f "$OUT.sig"
 if [[ -f "$SIGNING_KEY" ]]; then
-  rm -f "$OUT.sig"
+  # The signature must verify against the signer file this very commit
+  # ships, with its revocation list -- never skipped.
+  if ! [[ -f "$SIGNERS_FILE" ]] || ! grep -qv '^\s*\(#\|$\)' "$SIGNERS_FILE"; then
+    echo "ERROR: $SIGNERS_FILE lists no key -- refusing to sign"; rm -f "$OUT" "$OUT.sha256"; exit 1
+  fi
+  KEY_FP="$(ssh-keygen -lf "$SIGNING_KEY" | awk '{print $2}')"
+  if [[ -f "$REVOKED_FILE" ]] && while read -r l; do [[ "$l" =~ ^(ssh-|ecdsa-) ]] && printf '%s\n' "$l"; done < "$REVOKED_FILE" \
+        | ssh-keygen -lf - 2>/dev/null | awk '{print $2}' | grep -qxF "$KEY_FP"; then
+    echo "ERROR: signing key $KEY_FP is on deploy/release-revoked-keys -- refusing to sign"; rm -f "$OUT" "$OUT.sha256"; exit 1
+  fi
+  # One signed archive per version per key: re-signing different bytes
+  # under a version this key already signed would leave two valid,
+  # indistinguishable archives for it. Rebuilding the same commit gives
+  # the same digest and is fine.
+  DIGEST="$(cut -c1-64 "$OUT.sha256")"
+  if [[ -f "$LEDGER" ]] && awk -v v="$PACKAGE_VERSION" -v k="$KEY_FP" -v d="$DIGEST" \
+        '$1==v && $2==k && $3!=d {bad=1} END {exit !bad}' "$LEDGER"; then
+    echo "ERROR: $PACKAGE_VERSION was already signed by $KEY_FP with different contents ($LEDGER)."
+    echo "       Bump the version instead of re-signing."; rm -f "$OUT" "$OUT.sha256"; exit 1
+  fi
   ssh-keygen -Y sign -f "$SIGNING_KEY" -n anetbbs-release "$OUT" >/dev/null \
     || { echo "ERROR: signing failed"; exit 1; }
   chmod 0644 "$OUT.sig"
-  if [[ -s "deploy/release-signers" ]] && grep -qv '^\s*\(#\|$\)' deploy/release-signers; then
-    ssh-keygen -Y verify -f deploy/release-signers -I anetbbs-release -n anetbbs-release \
-      -s "$OUT.sig" < "$OUT" >/dev/null \
-      || { echo "ERROR: signature does not verify against deploy/release-signers"; exit 1; }
+  REV_ARGS=(); [[ -f "$REVOKED_FILE" ]] && REV_ARGS=(-r "$REVOKED_FILE")
+  ssh-keygen -Y verify -f "$SIGNERS_FILE" -I anetbbs-release -n anetbbs-release \
+    -s "$OUT.sig" "${REV_ARGS[@]}" < "$OUT" >/dev/null \
+    || { echo "ERROR: signature does not verify against $SIGNERS_FILE"; rm -f "$OUT.sig"; exit 1; }
+  if ! [[ -f "$LEDGER" ]] || ! awk -v v="$PACKAGE_VERSION" -v k="$KEY_FP" '$1==v && $2==k {f=1} END {exit !f}' "$LEDGER"; then
+    ( umask 077; printf '%s %s %s %s %s\n' "$PACKAGE_VERSION" "$KEY_FP" "$DIGEST" "$COMMIT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LEDGER" )
   fi
-  echo "Signed: $OUT.sig"
+  echo "Signed: $OUT.sig (key $KEY_FP, commit $COMMIT)"
 else
-  echo "NOTE: no signing key at $SIGNING_KEY -- release is unsigned."
+  echo "NOTE: no signing key at $SIGNING_KEY -- release is unsigned (installs require signed web upgrades by default)."
 fi
 if [[ -f "$OUT.sig" ]]; then echo "Upload together: $OUT  $OUT.sha256  $OUT.sig"; else echo "Upload together: $OUT  $OUT.sha256"; fi

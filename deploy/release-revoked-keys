@@ -1,0 +1,8 @@
+# Revoked ANetBBS release-signing public keys, one per line (the format
+# ssh-keygen -Y verify -r accepts). update.sh installs this root-owned to
+# /etc/anetbbs/release-revoked-keys; the upgrade wrapper refuses any release
+# signed by a key listed here, even when it is also in release-signers.
+#
+# 2026-11-25: key of a rejected, never-published v1.1.74 build candidate.
+# It was never shipped as trusted; listed so its signature can never verify.
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ64u8CbIDQTntoaUL3uliNMLqIFFaF4aNW2wXfGtyHH anetbbs-release

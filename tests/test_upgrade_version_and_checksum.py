@@ -165,8 +165,9 @@ class UpgradePageAndRoutesTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         html = r.get_data(as_text=True)
         self.assertIn('Download &amp; install v1.1.73', html)
-        self.assertNotIn('Roll back to v1.1.73', html)
-        self.assertIn('Roll back to v1.1.71', html)
+        # Web rollback is disabled (audit H-1: the wrapper only moves forward).
+        self.assertNotIn('Roll back to v1.1.71', html)
+        self.assertNotIn('previous releases on disk', html)
 
     def test_page_shows_same_and_no_install_when_current(self):
         with patch.object(self.u, 'VERSION', 'v1.1.73'), \
@@ -220,6 +221,32 @@ class UpgradePageAndRoutesTests(unittest.TestCase):
             with patch.object(self.u, 'VERSION', 'garbage'):
                 r = self._client().post('/admin/upgrades/rollback', data={'version': 'v1.1.71'})
             self.assertEqual(r.status_code, 409)
+            spawn.assert_not_called()
+
+    def test_rollback_route_always_refuses_and_never_spawns(self):
+        rows = self._rows('v1.1.71')
+        with patch.object(self.u, '_scan_releases', return_value=rows), \
+                patch.object(self.u, 'VERSION', 'v1.1.74'), \
+                patch.object(self.u, '_spawn_upgrade') as spawn:
+            r = self._client().post('/admin/upgrades/rollback', data={'version': 'v1.1.71'})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn('sudo bash update.sh', r.get_json()['error'])
+        spawn.assert_not_called()
+
+    def test_install_rejects_bad_sig_url_without_leaving_running_state(self):
+        payload = _payload()
+        payload['sig_url'] = 'http://evil.example/x.tar.gz.sig'
+        with patch.object(self.u, 'VERSION', 'v1.1.72'), \
+                patch.object(self.u, '_fetch_upstream', return_value=(payload, None)), \
+                patch.object(self.u, '_RUNTIME', 'systemd'), \
+                patch.object(self.u, '_wrapper_path', return_value=__file__), \
+                patch.object(self.u, '_check_sudo_escalation', return_value={'status': 'ok'}), \
+                patch.object(self.u, '_spawn_upgrade') as spawn:
+            self.u._install_state['running'] = False
+            r = self._client().post('/admin/upgrades/install', data={'version': 'v1.1.73'})
+            self.assertEqual(r.status_code, 502)
+            self.assertFalse(self.u._install_state['running'],
+                             'a refused install must not leave "install already running" set')
             spawn.assert_not_called()
 
     def test_rollback_list_empty_when_current_unknown(self):

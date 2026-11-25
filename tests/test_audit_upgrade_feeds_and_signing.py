@@ -44,33 +44,51 @@ class InstallConfMigration(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return open(self.conf).read(), r.stderr
 
-    def test_private_feed_host_carried_over_once(self):
-        self._env('REGISTRY_URL=https://feed.private.example/x\n')
-        text, err = self._write()
-        self.assertIn('REGISTRY_HOST=feed.private.example\n', text)
-        self.assertIn('one-time migration', err)
-        # Later edits to .env never change the trusted host.
-        self._env('REGISTRY_URL=https://evil.example\n')
-        text, err = self._write()
-        self.assertIn('REGISTRY_HOST=feed.private.example\n', text)
-        self.assertIn('evil.example', err)    # warned, not trusted
-
-    def test_default_feed_when_unset(self):
-        self._env('BBS_NAME=x\n')
+    def test_env_registry_url_never_becomes_trusted(self):
+        # .env belongs to the service account; nothing in it is trusted.
+        self._env('REGISTRY_URL=https://feed.private.example/x\nREGISTRY_MODE_ENABLED=false\n')
         text, _ = self._write()
         self.assertIn('REGISTRY_HOST=bbs.a-net.fyi\n', text)
-        self.assertIn('REQUIRE_SIGNED_UPGRADES=no\n', text)
+        self.assertNotIn('feed.private.example', text)
 
-    def test_hub_requires_signed_by_default_and_override_works(self):
-        self._env('REGISTRY_MODE_ENABLED=true\n')
-        text, _ = self._write()
-        self.assertIn('REQUIRE_SIGNED_UPGRADES=yes\n', text)
-        # Preserved even if .env later says otherwise.
-        self._env('REGISTRY_MODE_ENABLED=false\n')
-        text, _ = self._write()
-        self.assertIn('REQUIRE_SIGNED_UPGRADES=yes\n', text)
-        text, _ = self._write(ANETBBS_REQUIRE_SIGNED_UPGRADES='no')
+    def test_signatures_required_by_default_everywhere(self):
+        for env in ('BBS_NAME=x\n', 'REGISTRY_MODE_ENABLED=true\n', 'REGISTRY_MODE_ENABLED=false\n'):
+            self._env(env)
+            if os.path.exists(self.conf):
+                os.remove(self.conf)
+            text, _ = self._write()
+            self.assertIn('REQUIRE_SIGNED_UPGRADES=yes\n', text, env)
+            self.assertIn('REQUIRE_SIGNED_SET_BY=default\n', text, env)
+
+    def test_operator_opt_out_is_explicit_and_sticks(self):
+        text, _ = self._write(ANETBBS_REQUIRE_SIGNED_UPGRADES='no',
+                              ANETBBS_REGISTRY_HOST='feed.private.example')
         self.assertIn('REQUIRE_SIGNED_UPGRADES=no\n', text)
+        self.assertIn('REQUIRE_SIGNED_SET_BY=operator\n', text)
+        self.assertIn('REGISTRY_HOST=feed.private.example\n', text)
+        os.chmod(self.conf, 0o644)
+        text, _ = self._write()                      # later run, no override
+        self.assertIn('REQUIRE_SIGNED_UPGRADES=no\n', text)
+        self.assertIn('REGISTRY_HOST=feed.private.example\n', text)
+        text, _ = self._write(ANETBBS_REQUIRE_SIGNED_UPGRADES='yes')
+        self.assertIn('REQUIRE_SIGNED_UPGRADES=yes\n', text)
+
+    def test_unsigned_setting_not_set_by_an_operator_is_reset(self):
+        with open(self.conf, 'w') as f:
+            f.write('INSTALL_DIR=/x\nSERVICE_USER=anetbbs\nREGISTRY_HOST=bbs.a-net.fyi\n'
+                    'REQUIRE_SIGNED_UPGRADES=no\n')
+        os.chmod(self.conf, 0o644)
+        text, _ = self._write()
+        self.assertIn('REQUIRE_SIGNED_UPGRADES=yes\n', text)
+
+    def test_untrusted_existing_conf_is_not_read(self):
+        with open(self.conf, 'w') as f:
+            f.write('INSTALL_DIR=/x\nSERVICE_USER=anetbbs\nREGISTRY_HOST=evil.example\n'
+                    'REQUIRE_SIGNED_UPGRADES=no\nREQUIRE_SIGNED_SET_BY=operator\n')
+        os.chmod(self.conf, 0o666)
+        text, _ = self._write()
+        self.assertIn('REGISTRY_HOST=bbs.a-net.fyi\n', text)
+        self.assertIn('REQUIRE_SIGNED_UPGRADES=yes\n', text)
 
     def test_empty_signers_template_installs_nothing(self):
         fake = os.path.join(self.tmp, 'fakerepo')
@@ -83,7 +101,6 @@ class InstallConfMigration(unittest.TestCase):
         self.assertFalse(os.path.exists(dst))
 
     def test_shipped_signers_are_well_formed_and_install(self):
-        import re
         lines = [ln for ln in (DEPLOY / 'release-signers').read_text().splitlines()
                  if ln.strip() and not ln.lstrip().startswith('#')]
         self.assertTrue(lines, 'deploy/release-signers ships no key')
@@ -111,78 +128,7 @@ class InstallConfMigration(unittest.TestCase):
             self.assertNotRegex(v.stderr.lower(), r'line \d+|invalid|parse')
 
 
-@unittest.skipUnless(shutil.which('ssh-keygen'), 'ssh-keygen not installed')
-class WrapperSignaturePolicy(unittest.TestCase):
-    """Runs the real run_upgrade.sh, past detach, with its root-only paths
-    swapped for temp files. Network access is never reached for the
-    refusal cases; the signed-from-other-host case stops at download."""
-
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix='sig-')
-        self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.inst = os.path.join(self.tmp, 'inst')
-        os.makedirs(os.path.join(self.inst, 'data'))
-        self.conf = os.path.join(self.tmp, 'anetbbs.install')
-        self.signers = os.path.join(self.tmp, 'release-signers')
-
-    def _script(self):
-        src = (DEPLOY / 'run_upgrade.sh').read_text()
-        uid = os.getuid()
-        for old, new in (
-                ('CONF=/etc/anetbbs.install', f'CONF={self.conf}'),
-                ('[ "$(stat -c %u "$CONF")" = 0 ]', f'[ "$(stat -c %u "$CONF")" = {uid} ]'),
-                ('SIGNERS=/etc/anetbbs/release-signers', f'SIGNERS={self.signers}'),
-                ('&& [ "$(stat -c %u "$SIGNERS")" = 0 ]', f'&& [ "$(stat -c %u "$SIGNERS")" = {uid} ]')):
-            self.assertEqual(src.count(old), 1, old)
-            src = src.replace(old, new)
-        p = os.path.join(self.tmp, 'run_upgrade.sh')
-        with open(p, 'w') as f:
-            f.write(src)
-        os.chmod(p, 0o755)
-        return p
-
-    def _run(self, *args, require='no', signers=''):
-        with open(self.conf, 'w') as f:
-            f.write(f'INSTALL_DIR={self.inst}\nSERVICE_USER=anetbbs\n'
-                    f'REGISTRY_HOST=bbs.a-net.fyi\nREQUIRE_SIGNED_UPGRADES={require}\n')
-        os.chmod(self.conf, 0o644)
-        if signers:
-            with open(self.signers, 'w') as f:
-                f.write(signers)
-            os.chmod(self.signers, 0o644)
-        env = dict(os.environ, ANETBBS_UPGRADE_DETACHED='1', PATH='/usr/bin:/bin')
-        return subprocess.run([self._script(), *args], capture_output=True, text=True,
-                              timeout=60, env=env)
-
-    SHA = 'a' * 64
-
-    def test_unsigned_from_other_host_refused(self):
-        r = self._run('v9.9.9', 'https://mirror.example/ANetBBS-v9.9.9.tar.gz', self.SHA)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn('refusing an unsigned download', r.stderr)
-
-    def test_required_signature_missing_refused(self):
-        r = self._run('v9.9.9', 'https://bbs.a-net.fyi/ANetBBS-v9.9.9.tar.gz', self.SHA,
-                      require='yes')
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn('requires signed upgrades', r.stderr)
-
-    def test_signature_without_trusted_signers_does_not_bypass_host(self):
-        r = self._run('v9.9.9', 'https://mirror.example/ANetBBS-v9.9.9.tar.gz', self.SHA,
-                      'https://mirror.example/ANetBBS-v9.9.9.tar.gz.sig')
-        self.assertIn('refusing an unsigned download', r.stderr)
-
-    def test_signed_release_may_come_from_any_host(self):
-        r = self._run('v9.9.9', 'https://mirror.invalid/ANetBBS-v9.9.9.tar.gz', self.SHA,
-                      'https://mirror.invalid/ANetBBS-v9.9.9.tar.gz.sig',
-                      signers='anetbbs-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDummyKeyOnlyForPolicyTest x\n')
-        self.assertNotIn('REGISTRY_HOST', r.stderr)
-        self.assertIn('download failed', r.stderr)   # got past the origin policy
-
-    def test_bad_signature_url_shape_refused(self):
-        r = self._run('v9.9.9', 'https://bbs.a-net.fyi/ANetBBS-v9.9.9.tar.gz', self.SHA,
-                      'http://bbs.a-net.fyi/x.sig')
-        self.assertIn('must be https', r.stderr)
+# Wrapper signature policy: tests/test_upgrade_wrapper_policy.py.
 
 
 @unittest.skipUnless(shutil.which('ssh-keygen'), 'ssh-keygen not installed')
