@@ -58,8 +58,10 @@ def backup_env(tmp_path, monkeypatch):
 
     def client_as(user_id):
         client = app.test_client()
+        with app.app_context():
+            ident = db.session.get(User, user_id).get_id()   # "id:version" when set
         with client.session_transaction() as session:
-            session['_user_id'] = str(user_id)
+            session['_user_id'] = ident
             session['_fresh'] = True
         return client
 

@@ -120,7 +120,12 @@ def pm_visible(user, pm):
     uid = _uid(user)
     if pm is None or uid is None:
         return False
-    return uid in (pm.sender_id, pm.recipient_id)
+    # A side that deleted its copy no longer sees it (fix F-2).
+    if uid == pm.recipient_id and not pm.is_deleted_recipient:
+        return True
+    if uid == pm.sender_id and not pm.is_deleted_sender:
+        return True
+    return False
 
 
 # ------------------------------------------- private QWK (NETMAIL area)

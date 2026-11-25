@@ -150,16 +150,30 @@ def render(body, known_slugs=None):
         'table', 'thead', 'tbody', 'tr', 'th', 'td',
         'img', 'sup', 'sub', 'kbd', 'mark', 'ins', 'del',
     }
+    import re as _re
+    # class values limited to what the markdown extensions emit (code
+    # highlighting, TOC); arbitrary site/Bootstrap classes would let a
+    # page impersonate site UI (audit I-4).
+    _safe_class = _re.compile(r'^(language-[\w+-]+|codehilite|toc|hll|[a-z]{1,3}[0-9]?)$')
+
+    def _class_ok(_tag, name, value):
+        if name != 'class':
+            return True
+        return all(_safe_class.match(tok) for tok in value.split())
+
+    def _attr(*names):
+        return lambda tag, name, value: name in names and _class_ok(tag, name, value)
+
     allowed_attrs = {
-        'a': ['href', 'title', 'class', 'id', 'name'],
+        'a': _attr('href', 'title', 'class', 'id', 'name'),
         'img': ['src', 'alt', 'title', 'width', 'height'],
-        'span': ['class', 'id'],
-        'div': ['class', 'id'],
+        'span': _attr('class', 'id'),
+        'div': _attr('class', 'id'),
         'h1': ['id'], 'h2': ['id'], 'h3': ['id'],
         'h4': ['id'], 'h5': ['id'], 'h6': ['id'],
         'th': ['align', 'colspan', 'rowspan'],
         'td': ['align', 'colspan', 'rowspan'],
-        'code': ['class'],
+        'code': _attr('class'),
     }
     html = _bleach.clean(
         html, tags=allowed_tags, attributes=allowed_attrs,

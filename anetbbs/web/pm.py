@@ -86,8 +86,7 @@ def compose(username=None):
         if qid and qid.isdigit():
             try:
                 src = PrivateMessage.query.get(int(qid))
-                if src and (src.recipient_id == current_user.id
-                            or src.sender_id == current_user.id):
+                if src and pm_visible(current_user, src):
                     quoted = '\n'.join('> ' + ln
                                        for ln in (src.body or '').splitlines())
                     form.subject.data = ('Re: ' + (src.subject or '')).strip()
@@ -205,9 +204,11 @@ def read(message_id):
     conversation = (PrivateMessage.query
                     .filter(db.or_(
                         db.and_(PrivateMessage.sender_id == current_user.id,
-                                PrivateMessage.recipient_id == other_id),
+                                PrivateMessage.recipient_id == other_id,
+                                PrivateMessage.is_deleted_sender.isnot(True)),
                         db.and_(PrivateMessage.sender_id == other_id,
-                                PrivateMessage.recipient_id == current_user.id)))
+                                PrivateMessage.recipient_id == current_user.id,
+                                PrivateMessage.is_deleted_recipient.isnot(True))))
                     .order_by(PrivateMessage.created_at).all())
     other = User.query.get(other_id)
     return render_template('pm/read.html', message=message,
@@ -224,7 +225,7 @@ def read_markdown(message_id):
     if not pm_visible(current_user, message):
         abort(403)
     from .markdown_render import render_markdown
-    return jsonify({'html': str(render_markdown(message.body))})
+    return jsonify({'html': str(render_markdown(message.body, remote_images=False))})
 
 
 @pm_bp.route('/<int:message_id>/delete', methods=['POST'])
@@ -234,6 +235,8 @@ def delete(message_id):
 
     if message.recipient_id == current_user.id:
         message.is_deleted_recipient = True
+        if message.sender_id == current_user.id:   # note to self: both copies
+            message.is_deleted_sender = True
         db.session.commit()
         flash(_t('messages.deleted_inbox', 'Message deleted from inbox.'), 'success')
         return redirect(url_for('pm.inbox'))

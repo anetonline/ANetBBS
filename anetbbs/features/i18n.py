@@ -677,6 +677,7 @@ DEFAULT_TRANSLATIONS = {
         'nav.local_boards': 'Tablones locales',
         'nav.login': 'Iniciar sesión',
         'nav.logout': 'Cerrar sesión',
+        'nav.logout_everywhere': 'Cerrar sesión en todas partes',
         'nav.mess_with_the_best_die_like_the_rest': '«Métete con el mejor y morirás como los demás».',
         'nav.messages': 'Mensajes',
         'nav.messaging': 'Mensajería',

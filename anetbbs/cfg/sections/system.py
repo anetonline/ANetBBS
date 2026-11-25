@@ -204,8 +204,22 @@ def render_lines(lines):
 
 
 def write_env(lines, path=None):
+    """Atomic, owner-only .env write (audit N-11): a crash mid-write can't
+    truncate the file, and a newly created one is never umask-readable."""
+    import os
     path = path or ENV_PATH
-    path.write_text(render_lines(lines), encoding="utf-8")
+    for item in lines:
+        if item[0] == "kv" and any(c in str(item[2]) for c in ("\r", "\n", "\x00")):
+            raise ValueError(f"invalid characters in value for {item[1]}")
+    tmp = str(path) + ".tmp"
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(render_lines(lines))
+    os.replace(tmp, path)
 
 
 def _to_form_value(kind, raw):

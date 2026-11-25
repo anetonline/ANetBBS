@@ -352,7 +352,7 @@ def test_login_account_preference_wins_and_survives_logout(client, make_user, pr
     _language(client, anonymous)
     client.set_cookie('anetbbs_language', anonymous)
     assert _soup(client.get('/')).html['lang'] == preferred
-    logged_out = _soup(client.get('/auth/logout', follow_redirects=True))
+    logged_out = _soup(_logout(client))
     assert logged_out.html['lang'] == preferred
     with client.session_transaction() as session:
         assert '_user_id' not in session
@@ -596,7 +596,7 @@ def test_profile_preserves_existing_custom_language(localized_app, client, make_
     assert result.status_code == 302
     with localized_app.app_context():
         assert db.session.get(User, user_id).language == 'eo'
-    logged_out = _soup(client.get('/auth/logout', follow_redirects=True))
+    logged_out = _soup(_logout(client))
     assert logged_out.select_one('#site-language option[value=eo]').has_attr('selected')
     unchanged = _post(client, '/language', {'language': 'eo'}, token_path='/auth/login')
     assert unchanged.status_code == 302
@@ -714,3 +714,13 @@ def test_one_security_question_uses_count_neutral_wording(
         with localized_app.app_context():
             PasswordRecoverySettings.get().security_questions_enabled = previous
             db.session.commit()
+
+
+def _logout(client):
+    """Logout is a CSRF-protected POST (audit M-6): read the token from the
+    confirm page, then post it."""
+    import re as _re
+    page = client.get('/auth/logout').get_data(as_text=True)
+    m = _re.search(r'name="csrf_token" value="([^"]+)"', page)
+    return client.post('/auth/logout', data={'csrf_token': m.group(1) if m else ''},
+                       follow_redirects=True)

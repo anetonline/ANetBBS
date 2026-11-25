@@ -48,6 +48,9 @@
                         {{ form.email.label(class="form-label") }}
                         {{ form.email(class="form-control") }}
                         {% for e in form.email.errors %}<div class="text-danger">{{ e }}</div>{% endfor %}
+                        {{ form.current_password.label(class="form-label mt-2 small") }}
+                        {{ form.current_password(class="form-control", autocomplete="current-password") }}
+                        <div class="form-text">{{ t("profile.password_needed_for_email_hint", "Only needed if you change your email address.") }}</div>
                     </div>
                     {% if field_config.bio %}
                     <div class="mb-3">

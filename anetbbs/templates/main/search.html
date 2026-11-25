@@ -199,7 +199,7 @@
     inp.addEventListener('blur', () => setTimeout(() => sug.style.display = 'none', 200));
 
     // Persist + show recent searches.
-    const RKEY = 'anet:recentSearches';
+    const RKEY = 'anet:recentSearches:{{ current_user.id if current_user.is_authenticated else 0 }}';
     function pushRecent(q) {
         if (!q) return;
         try {

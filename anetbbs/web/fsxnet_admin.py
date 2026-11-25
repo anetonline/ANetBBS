@@ -9,7 +9,6 @@ Routes:
 """
 from __future__ import annotations
 
-import os
 
 from flask import (Blueprint, current_app, flash, redirect,
                    render_template, request, url_for)
@@ -25,8 +24,8 @@ PER_PAGE = 30
 
 
 def _env_path():
-    return os.path.abspath(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', '.env'))
+    from .env_file import env_path
+    return env_path()
 
 
 @fsxnet_admin_bp.route('/')

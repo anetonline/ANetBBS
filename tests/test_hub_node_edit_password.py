@@ -92,9 +92,9 @@ class HubNodeEditPasswordTests(unittest.TestCase):
                 admin.set_password('password123')
                 db.session.add(admin)
                 db.session.commit()
-            admin_id = admin.id
+            login_id = admin.get_id()   # accounts carry an auth_version (audit M-6)
         with client.session_transaction() as sess:
-            sess['_user_id'] = str(admin_id)
+            sess['_user_id'] = login_id
             sess['_fresh'] = True
 
     def test_qwk_node_edit_with_blank_password_keeps_current_password_and_saves_tag(self):

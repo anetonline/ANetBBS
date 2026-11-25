@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import queue
+from ..features.rate_limit import rate_limit
 from datetime import datetime
 
 from flask import Blueprint, render_template, request, current_app, send_from_directory, abort, make_response, jsonify
@@ -217,6 +218,12 @@ def dos_data(filename):
     # Only serve plain filenames — no path traversal.
     if os.sep in filename or filename.startswith('.'):
         abort(400)
+    # Same access rule as playing the game (audit I-8): the bundle is only
+    # served to users allowed to open a game that uses it.
+    url = f'/games/dos-data/{filename}'
+    users = Game.query.filter_by(web_game_url=url, is_active=True).all()
+    if not users or not any(_game_accessible(g) for g in users):
+        abort(404)
     install_root = current_app.config.get('INSTALL_DIR') or \
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     dos_games_dir = os.path.join(install_root, 'data', 'dos-games')
@@ -240,6 +247,7 @@ def dos_frame(slug):
 
 
 @games_bp.route('/<slug>/score', methods=['POST'])
+@rate_limit('game_score', limit=30, window=60)
 def submit_score(slug):
     """Accept a score submission from a web game (AJAX).
 
@@ -263,8 +271,15 @@ def submit_score(slug):
     # a crafted request can claim any score for any game -- a hard
     # ceiling at least blocks garbage/overflow values from landing
     # directly on the global leaderboard.
-    score_value = max(0, min(int(data.get('score', 0)), 100_000_000))
+    try:
+        score_value = max(0, min(int(data.get('score', 0)), 100_000_000))
+    except (TypeError, ValueError):
+        return {'status': 'error', 'message': 'score must be a number'}, 400
     details = data.get('details', {})
+    # Bounded free-form blob (audit L-6): it is stored and fanned out to
+    # InterBBS/social posts.
+    if details and len(json.dumps(details, default=str)) > 2048:
+        return {'status': 'error', 'message': 'details too large'}, 400
 
     entry = GameScore(
         game_id=game.id,
@@ -521,6 +536,9 @@ def handle_start_game(data):
         emit('game_error', {'message': f'Cannot start: {exc}'})
         return
 
+    if game.game_type == 'door_dosemu':
+        from ..games.dosemu_launch_slot import take_slot
+        take_slot(game)          # audit N-9; eventlet sleep yields while waiting
     session_id = launch_door_game(game, current_user, _emit_output, bbs_name)
     sid_box[0] = session_id
 

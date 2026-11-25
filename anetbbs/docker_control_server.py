@@ -228,7 +228,7 @@ def serve(path=SOCKET_PATH):
         pass
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(path)
-    os.chmod(path, 0o660)
+    os.chmod(path, 0o600)   # web and control both run as the anetbbs user
     srv.listen(8)
     logger.info('docker control service listening on %s', path)
     while True:

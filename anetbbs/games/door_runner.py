@@ -254,10 +254,18 @@ def _mods_dir():
     an override survives a package update with no extra deploy-script
     changes. Same directory synchronet_compat.py's own js.mods_dir
     (used by the compat shim's internal load() resolver) points at --
-    one central place for a sysop to look, not one per door."""
-    base = os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(base, 'data', 'mods')
+    one central place for a sysop to look, not one per door.
+    Resolved through the configured DATA_DIR (<install>/data in
+    production; a temp tree in tests), like core mods_override."""
+    try:
+        from ..config import get_config
+        data_dir = getattr(get_config(), 'DATA_DIR', None)
+    except Exception:
+        data_dir = None
+    if not data_dir:
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))), 'data')
+    return os.path.join(str(data_dir), 'mods')
 
 
 def _apply_mods_override(path):
@@ -2458,6 +2466,11 @@ async def play_door_game_telnet(game, user, session, bbs_name='ANetBBS',
                 except OSError:
                     pass
 
+        if live_game.game_type == 'door_dosemu':
+            # One launch of this game at a time reads the shared drop file
+            # (audit N-9); waits without blocking other sessions.
+            from .dosemu_launch_slot import take_slot_async
+            await take_slot_async(live_game)
         sid = launch_door_game(live_game, live_user, _emit_to_queue,
                                bbs_name=bbs_name,
                                minutes_remaining=minutes_remaining,

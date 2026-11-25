@@ -71,7 +71,7 @@ def posts_rss():
     items = []
     try:
         rows = (Post.query.order_by(Post.created_at.desc()).limit(200).all())
-        rows = [p for p in rows if p.board and evaluate_access(
+        rows = [p for p in rows if p.board and p.board.is_active and evaluate_access(
             current_user, p.board.min_access_level, bypass_admin=True)][:50]
         for p in rows:
             items.append({
@@ -92,7 +92,10 @@ def bulletins_rss():
     base = request.host_url.rstrip('/')
     items = []
     try:
-        rows = (Message.query.order_by(Message.created_at.desc())
+        from datetime import datetime as _dt
+        rows = (Message.query.filter(db.or_(Message.expires_at.is_(None),
+                                            Message.expires_at > _dt.utcnow()))
+                .order_by(Message.created_at.desc())
                 .limit(20).all())
         for b in rows:
             items.append({
@@ -132,7 +135,8 @@ def echomail_rss():
         # all. NETMAIL-tagged messages are excluded from this broadcast
         # feed entirely -- there is no authenticated-per-viewer concept
         # for a public feed to scope them to their actual owner.
-        rows = [e for e in rows if e.area and e.area.tag != 'NETMAIL'
+        from ..messaging.recipients import is_private_area
+        rows = [e for e in rows if e.area and not is_private_area(e.area)
                 and evaluate_access(
                     current_user, e.area.min_access_level,
                     is_sysop_only=e.area.is_sysop_only, bypass_admin=True)][:50]

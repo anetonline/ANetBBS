@@ -266,6 +266,7 @@ class UserManager:
                 created_at=datetime.utcnow(),
                 login_count=0,
             )
+            user.ensure_auth_version()  # revocable sessions (audit M-6)
             s.add(user)
             try:
                 s.commit()

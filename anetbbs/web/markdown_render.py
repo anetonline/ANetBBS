@@ -8,7 +8,7 @@ bleach-sanitization behavior instead of drifting apart.
 from markupsafe import Markup, escape
 
 
-def render_markdown(value) -> Markup:
+def render_markdown(value, remote_images=True) -> Markup:
     """Render Markdown to safe HTML.
 
     Uses the `markdown` package if available, with sane defaults: hard line
@@ -60,8 +60,20 @@ def render_markdown(value) -> Markup:
     allowed = _bleach.sanitizer.ALLOWED_TAGS | {
         'p', 'pre', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img'}
+    def _img_attr(_tag, name, val):
+        if name in ('alt', 'title'):
+            return True
+        if name != 'src':
+            return False
+        if remote_images:
+            return True
+        # Private mail (audit L-14): a remote image is a read receipt that
+        # also leaks the reader's IP, so only same-site paths load.
+        v = (val or '').strip()
+        return v.startswith('/') and not v.startswith('//') and '\\' not in v
+
     html = _bleach.clean(html, tags=allowed,
                          attributes={'a': ['href', 'title'],
-                                     'img': ['src', 'alt', 'title']},
+                                     'img': _img_attr},
                          strip=True)
     return Markup(html)  # nosec B704 -- bleach.clean() output, allowlisted tags/attrs

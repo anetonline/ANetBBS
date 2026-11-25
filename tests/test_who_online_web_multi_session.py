@@ -114,7 +114,7 @@ class WhoOnlineWebMultiSessionTests(unittest.TestCase):
             before = UserSession.query.filter_by(user_id=self.user_id).count()
         self.assertGreaterEqual(before, 2)
 
-        browser_a.get('/auth/logout', follow_redirects=True)
+        browser_a.post('/auth/logout', follow_redirects=True)
 
         with self.app.app_context():
             after = UserSession.query.filter_by(user_id=self.user_id).count()

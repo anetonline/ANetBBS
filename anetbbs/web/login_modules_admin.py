@@ -59,8 +59,8 @@ def _params_help(module_type: str) -> str:
 
 
 def _env_path():
-    return os.path.abspath(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', '.env'))
+    from .env_file import env_path
+    return env_path()
 
 
 def _write_env_key(key: str, value: str) -> None:

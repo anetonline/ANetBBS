@@ -55,6 +55,15 @@ _ADDR_ANGLE_RE = re.compile(r'<([^<>]*)>')
 # in flight at once.
 MAX_CONCURRENT_SESSIONS = int(os.environ.get('SMTP_MAX_CONNECTIONS', '50'))
 MAX_SESSIONS_PER_IP = 10
+# Hard ceiling on one message regardless of the admin setting, and on the
+# DATA bytes held in memory across ALL sessions at once (audit M-9).
+HARD_MAX_MESSAGE_SIZE = 50 * 1024 * 1024
+MAX_INFLIGHT_DATA_BYTES = int(os.environ.get('SMTP_MAX_INFLIGHT_BYTES', str(200 * 1024 * 1024)))
+_inflight = {'bytes': 0}
+# Failed RCPTs per session before the session is slowed, then closed
+# (recipient enumeration, A-10).
+RCPT_FAILURES_BEFORE_DELAY = 5
+RCPT_FAILURES_BEFORE_CLOSE = 20
 MAX_SESSION_SECONDS = 30 * 60
 # Commands per session (audit F-11): NOOP resets the 120 s idle timer, so
 # without a cap one client can hold a slot for the whole session lifetime.
@@ -248,8 +257,8 @@ def _claims_local_sender(mail_from, raw_bytes, cfg):
         return True
 
 
-DATA_OK, DATA_TOO_BIG, DATA_EOF, DATA_TIMEOUT, DATA_LINE_TOO_LONG = (
-    'ok', 'too_big', 'eof', 'timeout', 'line_too_long')
+DATA_OK, DATA_TOO_BIG, DATA_EOF, DATA_TIMEOUT, DATA_LINE_TOO_LONG, DATA_BUSY = (
+    'ok', 'too_big', 'eof', 'timeout', 'line_too_long', 'busy')
 
 
 async def _read_data(reader, max_size):
@@ -268,8 +277,17 @@ async def _read_data(reader, max_size):
           raises ValueError): caller answers 500 and closes (audit F-17).
     """
     lines = []
+    max_size = min(max_size or HARD_MAX_MESSAGE_SIZE, HARD_MAX_MESSAGE_SIZE)
+    try:
+        return await _read_data_inner(reader, max_size, lines)
+    finally:
+        _inflight['bytes'] -= sum(len(l) for l in lines)
+
+
+async def _read_data_inner(reader, max_size, lines):
     total = 0
     too_big = False
+    busy = False
     while True:
         try:
             raw_line = await asyncio.wait_for(reader.readline(), timeout=120)
@@ -287,8 +305,20 @@ async def _read_data(reader, max_size):
         if max_size and total > max_size:
             too_big = True
             continue
+        if too_big or busy:
+            continue
+        if _inflight['bytes'] + len(raw_line) > MAX_INFLIGHT_DATA_BYTES:
+            # Server-wide memory budget exhausted: drain to the terminator
+            # and answer with a temporary failure (audit M-9).
+            busy = True
+            continue
+        _inflight['bytes'] += len(raw_line)
         lines.append(raw_line)
-    return b''.join(lines), DATA_TOO_BIG if too_big else DATA_OK
+    if too_big:
+        return b'', DATA_TOO_BIG
+    if busy:
+        return b'', DATA_BUSY
+    return b''.join(lines), DATA_OK
 
 
 def _html_to_text(html):
@@ -434,7 +464,10 @@ def _persist(mail_from, rcpt_tos, raw_bytes, recipient_ids=None):
                 User.id.in_([uid for uid, _ in recipient_ids])).all()}
             targets = [(uid, addr) for uid, addr in recipient_ids if uid in live]
             if not targets:
-                raise RuntimeError('no accepted recipient still exists')
+                # Permanent (fix F-4): retrying can't help once the
+                # account is gone; 451 made the sender retry for days.
+                raise limits.DeliveryRefused('550 5.1.1 Recipient no longer exists',
+                                             'no accepted recipient still exists')
         else:
             limits.lock_mailboxes(uid for uid, _ in resolved)
             targets = resolved
@@ -521,6 +554,7 @@ async def _handle(reader, writer):
             from ..models import MailConfig
             cfg = MailConfig.get()
             # Sysop limit (default 5), never above the hard ceiling (F-05).
+            rcpt_failures = 0
             max_rcpts = max(1, min(getattr(cfg, 'max_recipients', None) or 5,
                                    MAX_RECIPIENTS_PER_TRANSACTION))
             zones = [z for z in
@@ -574,8 +608,14 @@ async def _handle(reader, writer):
                         await _send('501 Syntax error in RCPT TO command')
                         continue
                     local, _, domain = addr.partition('@')
-                    recipient = _lookup_user(local, domain)
+                    recipient = await asyncio.to_thread(_lookup_user, local, domain)
                     if recipient is None:
+                        rcpt_failures += 1
+                        if rcpt_failures >= RCPT_FAILURES_BEFORE_CLOSE:
+                            await _send(f'421 {hostname} too many invalid recipients, closing connection')
+                            return
+                        if rcpt_failures >= RCPT_FAILURES_BEFORE_DELAY:
+                            await asyncio.sleep(2)
                         await _send(f'550 No such user: {addr}')
                         continue
                     if recipient.id not in rcpt_tos:
@@ -585,7 +625,7 @@ async def _handle(reader, writer):
                         # Advisory early refusal (RFC 3463 4.2.2) when not
                         # even one more byte fits; the binding, locked
                         # check runs again at end of DATA.
-                        if limits.mailbox_is_full(recipient.id, cfg):
+                        if await asyncio.to_thread(limits.mailbox_is_full, recipient.id, cfg):
                             await _send(limits.MAILBOX_FULL_RCPT_REPLY.format(addr=addr))
                             continue
                         rcpt_tos[recipient.id] = addr
@@ -611,9 +651,15 @@ async def _handle(reader, writer):
                     if outcome == DATA_TOO_BIG:
                         await _send('552 Message size exceeds fixed limit')
                         continue
+                    if outcome == DATA_BUSY:
+                        await _send('452 4.3.1 Insufficient system storage, try again later')
+                        continue
                     try:
-                        _persist(mail_from_for_log, [a for _, a in accepted], raw,
-                                 recipient_ids=accepted)
+                        # Off the event loop (audit M-9): MIME parsing and the
+                        # DB write must not stall every other session.
+                        await asyncio.to_thread(
+                            _persist, mail_from_for_log, [a for _, a in accepted], raw,
+                            recipient_ids=accepted)
                     except limits.DeliveryRefused as refused:
                         logger.info('SMTP: refused %d byte(s) for %d recipient(s): %s',
                                     len(raw), len(accepted), refused.reason)

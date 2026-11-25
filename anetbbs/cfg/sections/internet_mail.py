@@ -46,7 +46,8 @@ def run(stdscr):
     # Mirror the web admin's floors/ceilings and SMTP's hard safety cap.
     data["domain"] = (data.get("domain") or "").strip()[:255]
     data["min_access_level"] = min(255, max(0, data["min_access_level"]))
-    data["max_message_size"] = max(1, data["max_message_size"])
+    # 50 MB hard ceiling, matching the SMTP listener (audit M-9).
+    data["max_message_size"] = max(1, min(data["max_message_size"], 50 * 1024 * 1024))
     data["max_recipients"] = min(MAX_RECIPIENTS_PER_TRANSACTION,
                                   max(1, data["max_recipients"]))
     data["outbound_per_hour"] = max(0, data["outbound_per_hour"])

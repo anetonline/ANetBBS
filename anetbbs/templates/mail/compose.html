@@ -37,7 +37,7 @@
 (function() {
     const form = document.querySelector('form[data-draft-key]');
     if (!form) return;
-    const key = 'draft:' + form.dataset.draftKey;
+    const key = 'draft:{{ current_user.id }}:' + form.dataset.draftKey;   // per account (audit L-16)
     const status = document.getElementById('draftStatus');
     const fields = form.querySelectorAll('input[type=text], textarea');
     function load() {

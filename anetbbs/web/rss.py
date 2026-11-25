@@ -36,11 +36,12 @@ _ALLOWED_TAGS = list(bleach.sanitizer.ALLOWED_TAGS) + [
 _ALLOWED_ATTRS = {
     **bleach.sanitizer.ALLOWED_ATTRIBUTES,
     'a':      ['href', 'title', 'rel', 'target'],
-    'img':    ['src', 'alt', 'title', 'width', 'height', 'loading', 'class', 'style'],
+    # No class/style from third-party feeds (audit I-4): either can restyle
+    # feed content into fake site UI (e.g. a fixed full-page overlay).
+    'img':    ['src', 'alt', 'title', 'width', 'height', 'loading'],
     'source': ['src', 'srcset', 'type', 'media'],
     'td':     ['colspan', 'rowspan', 'align'],
     'th':     ['colspan', 'rowspan', 'align', 'scope'],
-    '*':      ['class'],
 }
 
 

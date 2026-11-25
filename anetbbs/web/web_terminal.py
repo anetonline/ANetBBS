@@ -55,6 +55,22 @@ def _own_service_ports():
     return ports
 
 
+_DEFAULT_BLOCKED_PORTS = {25, 465, 587, 110, 143, 993, 995, 53, 111, 135, 137, 138,
+                          139, 445, 1433, 1521, 2049, 3306, 5432, 6379, 11211, 27017}
+
+
+def _blocked_ports():
+    raw = os.environ.get('WEB_TERMINAL_BLOCKED_PORTS')
+    if raw is None:
+        return _DEFAULT_BLOCKED_PORTS
+    out = set()
+    for part in raw.split(','):
+        part = part.strip()
+        if part.isdigit():
+            out.add(int(part))
+    return out
+
+
 def _resolve_safe_destination(host, port):
     """SSRF guard: this feature (see module docstring) deliberately lets
     a logged-in user connect to ANY *external* host:port -- that's the
@@ -254,7 +270,16 @@ def register_socketio_handlers(socketio):
             return False
         sid = request.sid
         host = (data.get('host') or 'localhost').strip()
-        port = int(data.get('port') or 23)
+        try:
+            port = int(data.get('port') or 23)
+        except (TypeError, ValueError):
+            return False
+        # A BBS terminal, not a general TCP relay (audit L-7): refuse mail,
+        # database, and other well-known service ports. Sysops can widen or
+        # narrow this with WEB_TERMINAL_BLOCKED_PORTS.
+        if not (1 <= port <= 65535) or port in _blocked_ports():
+            emit('term_error', {'message': f'Port {port} is not allowed for the web terminal.'})
+            return False
         use_ssl = bool(data.get('use_ssl'))
         with _lock:
             existing = _sessions.get(sid)

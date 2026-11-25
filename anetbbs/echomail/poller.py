@@ -1128,8 +1128,8 @@ def _import_message(network, msg_data: dict) -> int:
     # Deduplicate by msg_id if present
     msg_id = msg_data.get('msg_id')
     if msg_id:
-        existing = EchomailMessage.query.filter_by(msg_id=msg_id, area_id=area.id).first()
-        if existing:
+        from .dedupe import is_duplicate_echomail
+        if is_duplicate_echomail(msg_id, area.id, msg_data.get('subject'), msg_data.get('body')):
             return 0
     else:
         # Real gap found in a security/performance audit: _import_netmail()

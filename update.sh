@@ -612,11 +612,7 @@ if [[ "$SOURCE_DIR" == "$INSTALL_DIR" ]]; then
         info "Updating via git pull..."
         cd "$INSTALL_DIR"
         # Never as root: .git/config and hooks belong to the service user (audit H-1).
-        if as_service git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null; then
-            ok "git pull succeeded"
-        else
-            warn "git pull failed — files may already be up to date or have local changes"
-        fi
+        anetbbs_git_update "$INSTALL_DIR" as_service || true   # warned; carry on as before
     else
         skip "No .git directory; files are already in place"
     fi

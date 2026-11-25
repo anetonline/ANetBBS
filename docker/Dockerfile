@@ -110,7 +110,8 @@ COPY docker/single/entrypoint-single.sh /usr/local/bin/entrypoint-single.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint-web.sh \
                 /usr/local/bin/entrypoint-single.sh \
                 /app/docker/updater/upgrade.sh \
-    && mkdir -p /app/data \
+    && mkdir -p /app/data /run/anetbbs-control \
+    && chown anetbbs:anetbbs /run/anetbbs-control \
     && chown -R anetbbs:anetbbs /app /home/anetbbs
 
 ENV PYTHONUNBUFFERED=1 \

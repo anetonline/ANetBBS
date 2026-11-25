@@ -1860,6 +1860,7 @@ def _create_default_data():
                 is_admin=True
             )
             admin.set_password(gen_pw)
+            admin.ensure_auth_version()  # revocable sessions (audit M-6)
             db.session.add(admin)
             _ca.logger.warning(
                 '=' * 60 + '\n'
@@ -2873,7 +2874,7 @@ def _create_default_data():
             # Synkroban — 6th door on the Synchronet JSON-RPC interbbs
             # client, a real Sokoban warehouse-puzzle clone (real ART
             # @ FATCATS BBS door, source unmodified from Jerry's own
-            # curated /home/jerry/Desktop/xtrn/ upload; source header
+            # curated xtrn/ upload; source header
             # carries a copyright notice permitting unmodified use plus
             # configuration-only edits — this project's usual "never
             # edit the door's own file, patch at load time instead"
@@ -2980,7 +2981,7 @@ def _create_default_data():
             # on their own — not random luck) and a live cross-BBS
             # leaderboard. Real "Art @ Fatcats BBS" door (same author
             # as Synkroban), source unmodified from Jerry's own curated
-            # /home/jerry/Desktop/xtrn/ upload; source header carries a
+            # curated xtrn/ upload; source header carries a
             # copyright notice restricting modification, so — same as
             # Synkroban — no direct file edits, only load-time
             # door-patches if any bugs are ever found.

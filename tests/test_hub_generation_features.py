@@ -137,12 +137,12 @@ class HubGenerationFeatureTests(unittest.TestCase):
             db.session.commit()
             area_id = area.id
             admin = User.query.filter_by(username='admin').first()
-            admin_id = admin.id
+            admin_id = admin.get_id()  # "id:version" session identity
 
         self.app.config['WTF_CSRF_ENABLED'] = False
         client = self.app.test_client()
         with client.session_transaction() as sess:
-            sess['_user_id'] = str(admin_id)
+            sess['_user_id'] = admin_id
             sess['_fresh'] = True
 
         resp = client.post(
@@ -182,13 +182,13 @@ class HubGenerationFeatureTests(unittest.TestCase):
             db.session.commit()
             node_id = node.id
             admin = User.query.filter_by(username='admin').first()
-            admin_id = admin.id
+            admin_id = admin.get_id()  # "id:version" session identity
             hwm_before = QWKNodeLastSent.query.filter_by(
                 node_id=node_id, echo_area_id=area.id).first().last_message_id
 
         client = self.app.test_client()
         with client.session_transaction() as sess:
-            sess['_user_id'] = str(admin_id)
+            sess['_user_id'] = admin_id
             sess['_fresh'] = True
 
         resp = client.get(f'/admin/echomail/hub/qwk/{node_id}/preview')

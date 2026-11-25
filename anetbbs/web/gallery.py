@@ -251,4 +251,8 @@ def image(slug, filename):
         resp.cache_control.private = True
         resp.cache_control.max_age = 86400
         return resp
+    # Only gallery media types are ever served (audit L-2) -- never an
+    # .html/.svg/.txt that happens to sit in the gallery directory.
+    if Path(filename).suffix.lower() not in (IMAGE_EXTS | ARCHIVE_EXTS):
+        abort(404)
     return send_from_directory(str(root), filename)

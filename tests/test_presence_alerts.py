@@ -134,7 +134,7 @@ class PresenceAlertsTests(unittest.TestCase):
         client.post('/auth/login', data={
             'username': 'bob', 'password': 'password12345'})
         self._clear_events()  # isolate the logout event from the login one
-        resp = client.get('/auth/logout', follow_redirects=False)
+        resp = client.post('/auth/logout', follow_redirects=False)
         self.assertIn(resp.status_code, (302, 303))
         with self.app.app_context():
             from anetbbs.models import PresenceEvent

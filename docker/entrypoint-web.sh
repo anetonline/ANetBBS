@@ -23,6 +23,13 @@ export DATABASE_URL="${DATABASE_URL:-$ANETBBS_DB_URL}"
 
 mkdir -p /app/data
 chown anetbbs:anetbbs /app/data 2>/dev/null || true
+# Shared with the control service (docker-compose): it creates its socket
+# here as the anetbbs user, and a named volume created before this
+# directory existed in the image is root-owned.
+if [ -d /run/anetbbs-control ]; then
+    chown anetbbs:anetbbs /run/anetbbs-control 2>/dev/null || true
+    chmod 0770 /run/anetbbs-control 2>/dev/null || true
+fi
 
 if [ -S /var/run/docker.sock ]; then
     SOCK_GID="$(stat -c '%g' /var/run/docker.sock)"

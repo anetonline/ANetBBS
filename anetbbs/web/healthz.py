@@ -83,6 +83,9 @@ def _listener_states(cfg) -> dict:
     return out
 
 
+_LISTENER_CACHE = {'ts': -1e9, 'value': {}}
+
+
 @healthz_bp.route('/healthz')
 def healthz():
     """Return JSON describing the running BBS.
@@ -103,7 +106,19 @@ def healthz():
     """
     cfg = current_app.config
     db_ok = _db_ok()
-    listeners = _listener_states(cfg)
+    # Details (version, host, listener map) only for local probes and
+    # admins; everyone else gets status (audit L-5).
+    from flask import request
+    from flask_login import current_user
+    local = ((request.remote_addr or '') in ('127.0.0.1', '::1')
+             and not request.headers.get('X-Forwarded-For'))
+    if not local and not getattr(current_user, 'is_admin', False):
+        return jsonify({'status': 'ok' if db_ok else 'degraded', 'db_ok': db_ok}), \
+            (200 if db_ok else 503)
+    now = time.monotonic()
+    if now - _LISTENER_CACHE['ts'] > 10:
+        _LISTENER_CACHE.update(ts=now, value=_listener_states(cfg))
+    listeners = _LISTENER_CACHE['value']
     body = {
         'status': 'ok' if db_ok else 'degraded',
         'version': VERSION,

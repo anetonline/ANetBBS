@@ -155,7 +155,7 @@ def read_markdown(msg_id):
     if not _user_owns(m):
         abort(403)
     from .markdown_render import render_markdown
-    return jsonify({'html': str(render_markdown(m.body))})
+    return jsonify({'html': str(render_markdown(m.body, remote_images=False))})
 
 
 @netmail_bp.route('/compose', methods=['GET', 'POST'])

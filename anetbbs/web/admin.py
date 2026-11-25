@@ -565,6 +565,7 @@ def add_user():
             is_admin=form.is_admin.data
         )
         user.set_password(form.password.data)
+        user.ensure_auth_version()  # revocable sessions (audit M-6)
         db.session.add(user)
         db.session.commit()
         flash(f'User {user.username} created successfully!', 'success')
@@ -1413,6 +1414,20 @@ def _read_env_file(env_path):
     return out
 
 
+def _coerce_like(current, raw):
+    """Live-config value for a settings-page string (audit N-5): the form
+    posts text, and a raw 'false' left in config is truthy everywhere the
+    setting is read as a bool. Match the type the running config uses."""
+    if isinstance(current, bool):
+        return str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
+    if isinstance(current, int):
+        try:
+            return int(str(raw).strip())
+        except (TypeError, ValueError):
+            return current
+    return raw
+
+
 def _write_env_keys(env_path, updates):
     """Update specific KEY=VALUE pairs in an .env file, preserving existing
     lines (comments + blanks + unrelated keys) and order. Adds missing keys
@@ -1459,8 +1474,8 @@ def _write_env_keys(env_path, updates):
 
 
 def _env_path():
-    """Locate the install dir's .env (one level up from the package)."""
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', '.env')
+    from .env_file import env_path
+    return env_path()
 
 
 def _tail_lines(path, count, window_bytes=262144):
@@ -1538,7 +1553,7 @@ def settings():
                 # Update live config too (for non-restart-required keys)
                 for k, v in updates.items():
                     if k in current_app.config:
-                        current_app.config[k] = v
+                        current_app.config[k] = _coerce_like(current_app.config[k], v)
                 if casino_fairness_broken:
                     # GAMES_INTERBBS_ENABLED is a real boolean everywhere
                     # else it's read (games_interbbs_admin.py sets it
@@ -4464,7 +4479,7 @@ def mail_settings():
             cfg.min_access_level = 100
         try:
             mb = float(request.form.get('max_message_size_mb', 25))
-            cfg.max_message_size = max(1, int(mb * 1024 * 1024))
+            cfg.max_message_size = max(1, min(int(mb * 1024 * 1024), 50 * 1024 * 1024))  # 50 MB ceiling (audit M-9)
         except ValueError:
             cfg.max_message_size = 25 * 1024 * 1024
         # Abuse limits (F-05): recipients >= 1; outbound limits >= 0

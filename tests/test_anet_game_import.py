@@ -7,7 +7,7 @@ categories of those games where you want on your local setup").
 
 anetbbs/features/anet_game_import.py's scrape_games() intentionally
 mirrors Jerry's own reference scraper script (extracted from
-/home/jerry/Desktop/anet_games.zip) selector-for-selector -- same
+anet_games.zip) selector-for-selector -- same
 '.code-category' / 'h3' / 'ul.flex-list > li' / 'span.door-code' /
 'span.-tag' structure -- so these tests build a synthetic HTML fixture
 matching that exact shape rather than hitting the real live site.

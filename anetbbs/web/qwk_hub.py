@@ -37,6 +37,26 @@ logger = logging.getLogger(__name__)
 qwk_hub_bp = Blueprint('qwk_hub', __name__, url_prefix='/qwkhub')
 
 
+def _require_hub_mode():
+    """Strict: the designated hub only (node applications, status)."""
+    from flask import abort, current_app
+    if not current_app.config.get('REGISTRY_MODE_ENABLED'):
+        abort(404)
+
+
+@qwk_hub_bp.before_request
+def _qwk_endpoints_enabled():
+    # Audit I-7: an install that isn't a hub and serves no QWK node has no
+    # reason to answer these endpoints at all. Nodes created before the
+    # hub-only admin gate existed keep working.
+    from flask import abort, current_app
+    if current_app.config.get('REGISTRY_MODE_ENABLED'):
+        return
+    from ..models import QWKNode
+    if QWKNode.query.filter_by(is_active=True).first() is None:
+        abort(404)
+
+
 # ---------------------------------------------------------------------------
 # Auth helper
 # ---------------------------------------------------------------------------
@@ -327,8 +347,8 @@ def import_rep_packet(node: QWKNode, rep_bytes: bytes) -> int:
         # client resubmission after a timed-out ack) duplicated every
         # message in it.
         msg_id = m.get('msg_id')
-        if msg_id and EchomailMessage.query.filter_by(
-                msg_id=msg_id, area_id=area.id).first():
+        from ..echomail.dedupe import is_duplicate_echomail
+        if is_duplicate_echomail(msg_id, area.id, m.get('subject'), m.get('body')):
             continue
 
         # SAVEPOINT-isolated per message, same pattern already used in
@@ -463,11 +483,6 @@ def upload_rep(packet_id_rep: str):
 # hub_admin.py's blueprint-wide gate for the human-facing review UI --
 # this is the machine-facing counterpart for the same underlying data).
 # ---------------------------------------------------------------------------
-
-def _require_hub_mode():
-    if not current_app.config.get('REGISTRY_MODE_ENABLED'):
-        abort(404)
-
 
 @qwk_hub_bp.route('/apply', methods=['POST'])
 def apply_for_node():

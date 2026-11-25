@@ -990,11 +990,14 @@ def install_fonts():
 
     import zipfile
 
-    from ._addon_download import DownloadError, download_zip_to_tempfile
+    from ._addon_download import AddonRefused, DownloadError, pinned_download
     from ..echomail.zip_safety import ZipBombError, MAX_MEMBER_UNCOMPRESSED
 
     try:
-        tmp_path = download_zip_to_tempfile(pack_url, user_agent='ANetBBS/ansi_editor')
+        tmp_path = pinned_download(pack_url, 'TDF_FONTS_PACK_URL', current_app.config,
+                                   user_agent='ANetBBS/ansi_editor')
+    except AddonRefused as exc:
+        return jsonify({'error': str(exc)}), exc.status
     except DownloadError as exc:
         return jsonify({'error': str(exc)}), 502
 

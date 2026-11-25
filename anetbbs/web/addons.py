@@ -30,7 +30,7 @@ from flask import Blueprint, current_app, jsonify, render_template
 from flask_login import login_required
 
 from .access_control import require_admin_or_403
-from ._addon_download import DownloadError, download_zip_to_tempfile
+from ._addon_download import AddonRefused, DownloadError, pinned_download
 from ..echomail.zip_safety import (
     MAX_ARCHIVE_UNCOMPRESSED, MAX_MEMBER_UNCOMPRESSED, ZipBombError,
     iter_safe_members,
@@ -248,7 +248,10 @@ def install_addon(addon_id):
                                   "set it in your environment/config first"}), 400
 
     try:
-        tmp_path = download_zip_to_tempfile(url, user_agent='ANetBBS/addons')
+        tmp_path = pinned_download(url, entry['url_config_key'], current_app.config,
+                                   user_agent='ANetBBS/addons')
+    except AddonRefused as exc:
+        return jsonify({'error': str(exc)}), exc.status
     except DownloadError as exc:
         return jsonify({'error': str(exc)}), 502
 

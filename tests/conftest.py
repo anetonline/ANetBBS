@@ -92,7 +92,7 @@ def _restore_testing_db_uri_after_module(_pristine_testing_db_uri):
 # Repo runtime-path write guard (audit L-18).
 #
 # The test suite must never write into the source tree's runtime locations
-# (data/, logs/, instance/, bbs.log*). A developer's checkout keeps real
+# (data/, logs/, instance/, bbs.log*, .env*). A developer's checkout keeps real
 # files there -- e.g. data/admin_password.txt, the dev database, the dev
 # log -- and a test that falls back to the repo default silently overwrites
 # them. Snapshot (path, mtime, size) for those locations when the session
@@ -123,7 +123,9 @@ def _runtime_snapshot():
                 except OSError:
                     continue
                 snap[p] = (st.st_mtime_ns, st.st_size)
-    for p in _REPO_ROOT.glob('bbs.log*'):
+    # .env too: settings-page tests used to write the checkout's own .env.
+    env_files = [p for p in _REPO_ROOT.glob('.env*') if not p.name.endswith('.example')]
+    for p in list(_REPO_ROOT.glob('bbs.log*')) + env_files:
         try:
             st = _os.lstat(p)
         except OSError:
@@ -138,7 +140,10 @@ def _runtime_snapshot():
 _RUNTIME_PATH_KEYS = ('DATA_DIR', 'LOG_FILE', 'DOWNLOADS_DIR', 'FILE_BULLETINS_DIR',
                       'ANSI_EDITOR_BROWSE_DIRS', 'TDF_FONTS_DIR', 'UPLOADS_DIR',
                       'AVATARS_DIR', 'NETWORK_JOIN_DIR', 'GAMES_DATA_DIR',
-                      'ECHOMAIL_DATA_DIR')
+                      'ECHOMAIL_DATA_DIR',
+                      # Tests that switch FLASK_ENV (e.g. to 'development' for a
+                      # subprocess) still resolve install-root paths to scratch.
+                      'INSTALL_DIR')
 
 
 def _redirect_base_config_runtime_paths():

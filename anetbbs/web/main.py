@@ -7,7 +7,7 @@ import time
 
 import requests
 from flask import Blueprint, render_template, request, abort, current_app, jsonify
-from flask_login import current_user
+from flask_login import current_user, login_required
 from datetime import datetime, timedelta
 
 from ..models import (db, Board, Post, Message, UserSession, User,
@@ -371,7 +371,13 @@ _BOOT_AT = datetime.utcnow()
 # _BOOT_AT above in case other endpoints reference it.
 
 
+def _like_escape(text):
+    """Literal text for a LIKE/ILIKE pattern (audit L-4)."""
+    return text.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+
 @main_bp.route('/users/suggest')
+@login_required
 def users_suggest():
     """JSON: usernames matching prefix `q`. Used for @-mention autocomplete."""
     from flask import jsonify
@@ -379,7 +385,7 @@ def users_suggest():
     out = []
     if len(q) >= 1:
         try:
-            rows = (User.query.filter(User.username.ilike(q + '%'))
+            rows = (User.query.filter(User.username.ilike(_like_escape(q) + '%', escape='\\'))
                     .order_by(User.username).limit(8).all())
             out = [{'username': u.username} for u in rows]
         except Exception:
@@ -388,25 +394,31 @@ def users_suggest():
 
 
 @main_bp.route('/search/suggest')
+@login_required
 def search_suggest():
     """JSON suggestions for the search bar — usernames + board names."""
     from flask import jsonify
     q = (request.args.get('q') or '').strip()
     out = []
     if len(q) >= 2:
-        like = f'%{q}%'
+        like = f'%{_like_escape(q)}%'
         try:
-            for u in User.query.filter(User.username.ilike(like)).limit(5).all():
+            for u in User.query.filter(User.username.ilike(like, escape='\\')).limit(5).all():
                 out.append({'kind': 'user', 'label': u.username,
                             'url': f'/profile/{u.username}'})
         except Exception:
             db.session.rollback()
         try:
             from ..models import Board as _B
-            for b in (_B.query.filter(_B.name.ilike(like))
-                      .filter_by(is_active=True).limit(5).all()):
+            from ..features.access_control import evaluate_access
+            for b in (_B.query.filter(_B.name.ilike(like, escape='\\'))
+                      .filter_by(is_active=True).limit(20).all()):
+                if not evaluate_access(current_user, b.min_access_level):
+                    continue   # never leak restricted board names (audit L-4)
                 out.append({'kind': 'board', 'label': b.name,
                             'url': f'/boards/{b.id}'})
+                if sum(1 for o in out if o['kind'] == 'board') >= 5:
+                    break
         except Exception:
             db.session.rollback()
     return jsonify(out)

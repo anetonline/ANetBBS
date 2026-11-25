@@ -166,6 +166,19 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f /etc/nginx/sites-available/anetbbs
     systemctl reload nginx 2>/dev/null || true
 
+    # Privileged helpers, their root-owned config and the sudoers grant,
+    # but only when they belong to the install being removed.
+    info "Removing sudo grant and privileged helpers..."
+    if [ -f /etc/anetbbs.install ] && grep -qxF "INSTALL_DIR=$REAL_UNI_DIR" /etc/anetbbs.install; then
+        rm -f /etc/sudoers.d/anetbbs /etc/anetbbs.install
+        rm -rf /usr/local/libexec/anetbbs /etc/anetbbs /var/log/anetbbs
+    elif [ ! -f /etc/anetbbs.install ] && [ -f /etc/sudoers.d/anetbbs ] \
+            && grep -qF "$REAL_UNI_DIR/deploy/" /etc/sudoers.d/anetbbs; then
+        rm -f /etc/sudoers.d/anetbbs      # grant from a release before v1.1.74
+    else
+        warn "/etc/anetbbs.install and the sudoers grant belong to another install (or are absent); left in place"
+    fi
+
     info "Removing install directory..."
     rm -rf -- "$REAL_UNI_DIR"
 

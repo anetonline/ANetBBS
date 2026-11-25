@@ -2191,8 +2191,8 @@ def _import_pkt_payload(pkt_bytes: bytes, network_id: int, filename: str,
             # packet re-"received" on repeat inbound connections a few
             # minutes apart, each one counted as newly imported.
             msgid = find_kludge(kludges, 'MSGID')
-            if msgid and EchomailMessage.query.filter_by(
-                    msg_id=msgid, area_id=area.id).first():
+            from .dedupe import is_duplicate_echomail
+            if is_duplicate_echomail(msgid, area.id, m.get('subject'), m.get('body')):
                 continue
 
             em = EchomailMessage(

@@ -61,6 +61,12 @@ def _find_area(tag):
         func.upper(EchoArea.tag) == (tag or '').strip().upper()).first()
     if is_private_area(area):
         return None
+    # Sysop-only areas aren't exposed to door scripts either (audit L-11).
+    # (The From name of a door's post stays door-controlled on purpose:
+    # InterBBS score doors rely on it, and door code already runs with the
+    # BBS's own rights.)
+    if area is not None and area.is_sysop_only:
+        return None
     return area
 
 

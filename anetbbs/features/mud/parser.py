@@ -314,7 +314,9 @@ async def _chat(ctx, kind, text):
     if not text:
         await ctx.write(f"\r\n{kind.capitalize()} what?\r\n")
         return
-    ctx.chat.send(ctx.character_username(), kind, text)
+    room = ctx.current_room()
+    ctx.chat.send(ctx.character_username(), kind, text,
+                  room_slug=room.slug if room is not None else '')
     if kind == 'emote':
         await ctx.write(f"\r\n{ctx.character.name} {text}\r\n")
     else:

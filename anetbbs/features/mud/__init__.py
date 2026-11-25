@@ -16,6 +16,7 @@ shim has no access to `session.mud_protocol_negotiate_start()`/
 A sysop who wires it in that way anyway still gets a fully playable
 MUD, just without MSSP/MCCP2/GMCP -- see docs/40-mud.md.
 """
+import asyncio
 from .parser import GameContext, dispatch, _look
 from . import mp as _mp
 from . import classes as _classes
@@ -67,6 +68,7 @@ async def launch_mud(session, username):
             f"\r\n\x1b[1;35mWelcome back to The Shattered Realm, "
             f"{character.name}.\x1b[0m\r\n")
         await _look(ctx)
+        chat_task = asyncio.create_task(_chat_pump(ctx))
         while True:
             line = await session.read_line("\r\n> ")
             if line is None:
@@ -76,6 +78,10 @@ async def launch_mud(session, username):
                 break
             ctx.refresh_presence()
     finally:
+        try:
+            chat_task.cancel()
+        except NameError:
+            pass
         _mp.remove_presence(username)
         try:
             await session.mud_protocol_negotiate_stop()
@@ -128,3 +134,25 @@ async def _create_character(session, user_id):
     label = _classes.class_info(char_class)['label']
     await session.write(f"\r\nWelcome, {name} the {label}. Your adventure begins...\r\n")
     return character
+
+
+async def _chat_pump(ctx, interval=1.0):
+    """Deliver other players' say/emote (same room), yell, and tells to
+    this player while they're at the prompt (fix F-1)."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            entries = ctx.chat.poll()
+            if not entries:
+                continue
+            room = ctx.current_room()
+            my_room = room.slug if room is not None else ''
+            me = ctx.character_username()
+            for entry in entries:
+                text = _mp.deliverable(entry, me, my_room)
+                if text:
+                    await ctx.write(f"\r\n\x1b[1;36m{text}\x1b[0m\r\n> ")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            continue

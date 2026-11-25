@@ -3599,7 +3599,7 @@ class BBSSession:
                     areas = [area for area in EchoArea.query.filter_by(
                                 is_active=True, is_subscribed=True).all()
                              if area.network_id in active_network_ids
-                             and (area.tag or '').upper() != 'NETMAIL'
+                             and (area.tag or '').strip().upper() != 'NETMAIL'
                              and evaluate_access(
                                  scan_identity, area.min_access_level,
                                  is_sysop_only=bool(area.is_sysop_only))]

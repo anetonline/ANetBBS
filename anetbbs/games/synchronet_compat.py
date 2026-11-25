@@ -3875,7 +3875,8 @@ def write_compat_script(game, user, node_number, bbs_name='ANetBBS'):
     # inside the existing data/ tree that update.sh's rsync already
     # excludes wholesale, so a dropped-in override survives a package
     # update with zero extra deploy-script changes needed.
-    mods_dir = os.path.join(_bbs_root, 'data', 'mods')
+    from .door_runner import _mods_dir as _resolve_mods_dir
+    mods_dir = _resolve_mods_dir()
     # Stubs dir ships with anetbbs (provides sbbsdefs.js etc) so doors
     # `load("sbbsdefs.js")` works without a full Synchronet install.
     stubs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sbbs_stubs')

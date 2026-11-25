@@ -406,8 +406,9 @@ def process_rep_upload(node_id: int, rep_path: str, app) -> int:
                 # FTP connection, a resubmission after a timed-out ack)
                 # duplicated every message in it.
                 msg_id = msg_dict.get('msg_id')
-                if msg_id and EchomailMessage.query.filter_by(
-                        msg_id=msg_id, area_id=area.id).first():
+                from .dedupe import is_duplicate_echomail
+                if is_duplicate_echomail(msg_id, area.id, msg_dict.get('subject', ''),
+                                         msg_dict.get('body', '')):
                     continue
 
                 # Real bug found in a full echomail-subsystem audit: a

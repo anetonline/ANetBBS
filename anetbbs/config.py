@@ -4,6 +4,7 @@ Configuration management for ANetBBS
 Supports different environments (development, production)
 """
 import os
+from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -277,6 +278,8 @@ class Config:
     REMEMBER_COOKIE_SECURE = SESSION_COOKIE_SECURE
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SAMESITE = 'Lax'
+    # 30 days instead of Flask-Login's 365 (audit M-6).
+    REMEMBER_COOKIE_DURATION = timedelta(days=int(os.environ.get('REMEMBER_COOKIE_DAYS', '30')))
     
     # Application
     BBS_NAME = os.environ.get('BBS_NAME', 'ANetBBS')

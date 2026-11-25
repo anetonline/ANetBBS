@@ -5,6 +5,7 @@ Authentication blueprint for user login, registration, and logout
 from copy import copy
 import random
 import ipaddress
+import hmac
 import secrets
 import threading
 import time
@@ -523,7 +524,9 @@ class RegisterForm(AuthForm):
 
     def validate_invite_code(self, field):
         required = current_app.config.get('REGISTRATION_INVITE_CODE', '')
-        if required and field.data != required:
+        if required and not hmac.compare_digest(
+                (field.data or '').encode('utf-8', 'replace'),
+                required.encode('utf-8', 'replace')):   # constant time (audit L-17)
             raise ValidationError(_t('validation.invite_code', 'Incorrect invite code.'))
 
     def validate_question_2(self, field):
@@ -772,6 +775,7 @@ def register():
             is_verified=(not start_unverified),
         )
         user.set_password(form.password.data)
+        user.ensure_auth_version()  # revocable sessions (audit M-6)
         db.session.add(user)
         db.session.add(RegistrationAttempt(
             ip_address=ip,
@@ -966,10 +970,24 @@ def register():
     return render_template('auth/register.html', form=form)
 
 
-@auth_bp.route('/logout')
+@auth_bp.route('/logout', methods=['GET', 'POST'])
 @login_required
 def logout():
-    """Logout the current user"""
+    """Logout the current user. Only a POST (CSRF-protected) logs out;
+    a GET -- an old bookmark, or another site's <img> -- just shows a
+    confirm button (audit M-6/A-14)."""
+    if request.method == 'GET':
+        from flask import render_template_string
+        return render_template_string(
+            '{% extends "base.html" %}{% block content %}'
+            '<div class="container py-4"><form method="post" action="{{ url_for(\'auth.logout\') }}" data-logout-form>'
+            '<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">'
+            '<button class="btn btn-primary" type="submit">{{ t("nav.logout", "Logout") }}</button>'
+            '</form></div>{% endblock %}')
+    if request.form.get('everywhere'):
+        # "Log out everywhere": revoke every session and remember cookie.
+        current_user.revoke_sessions()
+        db.session.commit()
     uid = current_user.id
     uname = current_user.username
     flask_session['language'] = current_language()
@@ -1118,8 +1136,14 @@ def forgot_password():
             flask_session['sq_nonce'] = nonce
             flask_session['sq_attempts'] = 0
             if real_answers:
-                import random
-                chosen = random.choice(real_answers)
+                # Deterministic per account (audit M-7): re-submitting
+                # /forgot always shows the same question, exactly like the
+                # decoy below, so the two can't be told apart.
+                import hashlib
+                ordered = sorted(real_answers, key=lambda a: a.id)
+                key = (current_app.config.get('SECRET_KEY') or '').encode()
+                digest = hmac.new(key, f'sq:{user.id}'.encode(), hashlib.sha256).hexdigest()
+                chosen = ordered[int(digest, 16) % len(ordered)]
                 flask_session['sq_user_id'] = user.id
                 flask_session['sq_answer_id'] = chosen.id
                 flask_session.pop('sq_decoy_question', None)
@@ -1407,8 +1431,16 @@ def _strict_verification_origin():
 
 
 def _email_verification_url(token, origin):
+    # Configured origin first (audit L-13): a forged Host header must not
+    # pick where the emailed link points. The request host is used only
+    # when the sysop has configured neither PUBLIC_BASE_URL nor BBS_DOMAIN.
+    if not origin:
+        try:
+            origin = _password_recovery_origin()
+        except ValueError:
+            origin = None
     if origin:
-        return origin + url_for('auth.verify_email', token=token, _external=False)
+        return origin.rstrip('/') + url_for('auth.verify_email', token=token, _external=False)
     return url_for('auth.verify_email', token=token, _external=True)
 
 

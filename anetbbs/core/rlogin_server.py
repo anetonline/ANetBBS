@@ -26,6 +26,7 @@ falls through to an interactive password prompt, the same fallback
 ssh_server.py already relies on for SSH.
 """
 import asyncio
+import os
 import logging
 
 from .session import BBSSession
@@ -46,6 +47,9 @@ _RLOGIN_WARNING = (
     'Only enable on trusted, firewalled networks.'
 )
 
+
+_MAX_CONNECTIONS = int(os.environ.get('RLOGIN_MAX_CONNECTIONS', '64'))
+_MAX_PER_IP = int(os.environ.get('RLOGIN_MAX_CONNECTIONS_PER_IP', '8'))
 
 class RloginServer:
     """Asyncio-based rlogin BBS server."""
@@ -70,6 +74,19 @@ class RloginServer:
         # activity still gets its own INFO line once the handshake
         # actually completes below.
         logger.debug('rlogin connection from %s', addr)
+        # Connection caps (audit N-10): every accepted connection holds a
+        # session and gets a password attempt.
+        ip = addr[0] if isinstance(addr, tuple) and addr else ''
+        per_ip = sum(1 for w in self.active_connections
+                     if (w.get_extra_info('peername') or ('',))[0] == ip)
+        if (len(self.active_connections) >= _MAX_CONNECTIONS
+                or (ip and per_ip >= _MAX_PER_IP)):
+            logger.warning('rlogin connection from %s refused: connection cap', ip)
+            try:
+                writer.close()
+            except Exception:
+                pass
+            return
         self.active_connections.add(writer)
         handshake_ok = False
 

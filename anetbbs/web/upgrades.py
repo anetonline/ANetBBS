@@ -570,6 +570,8 @@ def _install_container(target, upstream):
         }), 501
 
     docker_tag = upstream.get('docker_tag') or target
+    if not _parse_version(docker_tag):   # never pass an unvalidated tag on (audit L-8)
+        return jsonify({'ok': False, 'error': 'upstream docker tag invalid'}), 502
     with _INSTALL_LOCK:
         if _install_state['running']:
             return jsonify({'ok': False,

@@ -195,3 +195,52 @@ anetbbs_link_console_scripts() {
         ln -sfn "$src" "$bin/$n"
     done
 }
+
+# anetbbs_git_update DIR [RUNNER...]
+# Update a git-clone install. RUNNER (e.g. as_service) prefixes every git
+# command so it never runs as root. Besides a normal fast-forward, this
+# handles an upstream history rewrite (a file removed from old commits):
+# --ff-only refuses that even with no local changes, which used to leave
+# git installs silently stuck. It moves to the new history only when the
+# tree is clean and the current commit's content is identical to a commit
+# on the new upstream branch. Returns 0 if the code is current.
+anetbbs_git_update() {
+    local dir=$1; shift
+    if "$@" git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
+        ok "git pull succeeded"
+        return 0
+    fi
+    if ! "$@" git -C "$dir" fetch --quiet 2>/dev/null; then
+        warn "git fetch failed (network or remote problem); code not updated"
+        return 1
+    fi
+    local upstream head_tree dirty match
+    upstream=$("$@" git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+    head_tree=$("$@" git -C "$dir" rev-parse 'HEAD^{tree}' 2>/dev/null || true)
+    dirty=$("$@" git -C "$dir" status --porcelain --untracked-files=no 2>/dev/null || echo dirty)
+    match=""
+    if [[ -n "$upstream" && -n "$head_tree" && -z "$dirty" ]]; then
+        match=$("$@" git -C "$dir" log --format='%H %T' "$upstream" 2>/dev/null \
+                | awk -v t="$head_tree" '$2 == t { print $1; exit }')
+    fi
+    if [[ -n "$match" ]]; then
+        info "Upstream history was rewritten; this checkout matches upstream commit ${match:0:12}"
+        if "$@" git -C "$dir" reset --hard --quiet "$match" \
+                && "$@" git -C "$dir" merge --ff-only --quiet "$upstream"; then
+            ok "git checkout moved to the rewritten upstream history and updated"
+            return 0
+        fi
+        warn "could not move to the rewritten upstream history; code not updated"
+        return 1
+    fi
+    if [[ -n "$dirty" ]]; then
+        warn "git pull refused: this checkout has local changes to tracked files; code not updated"
+        warn "  review them with: git -C $dir status"
+    elif [[ -z "$upstream" ]]; then
+        warn "git pull refused: this checkout has no upstream branch; code not updated"
+    else
+        warn "git pull refused: local commits are not on $upstream; code not updated"
+        warn "  inspect with: git -C $dir log --oneline $upstream..HEAD"
+    fi
+    return 1
+}

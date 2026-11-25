@@ -88,21 +88,22 @@ class MudMpFileProtocolTests(unittest.TestCase):
         self.assertEqual(mp_mod.live_player_count(), 2)
 
     def test_chat_tail_sees_only_new_messages_since_last_poll(self):
+        # A session starts at end-of-log: no history replay (fix F-1).
         tail1 = mp_mod.ChatTail()
-        tail1.send('alice', 'say', 'hello')
         tail2 = mp_mod.ChatTail()
+        tail1.send('alice', 'say', 'hello')
         msgs = tail2.poll()
-        self.assertEqual(msgs, [('alice', 'say', 'hello', '')])
+        self.assertEqual(msgs, [('alice', 'say', 'hello', '', '')])
         self.assertEqual(tail2.poll(), [])  # nothing new on a second poll
         tail1.send('bob', 'yell', 'anyone there?')
-        self.assertEqual(tail2.poll(), [('bob', 'yell', 'anyone there?', '')])
+        self.assertEqual(tail2.poll(), [('bob', 'yell', 'anyone there?', '', '')])
 
     def test_chat_tell_carries_a_target(self):
         tail1 = mp_mod.ChatTail()
-        tail1.send('alice', 'tell', 'psst', target='bob')
         tail2 = mp_mod.ChatTail()
+        tail1.send('alice', 'tell', 'psst', target='bob')
         msgs = tail2.poll()
-        self.assertEqual(msgs, [('alice', 'tell', 'psst', 'bob')])
+        self.assertEqual(msgs, [('alice', 'tell', 'psst', 'bob', '')])
 
     def test_chat_tail_handles_log_truncation_gracefully(self):
         """Mirrors anetcraft.py's own _mp_tail_chat() truncation-
@@ -114,7 +115,7 @@ class MudMpFileProtocolTests(unittest.TestCase):
         mp_mod._chat_path().write_text('')  # simulate rotation
         tail.send('bob', 'say', 'short')
         msgs = tail.poll()
-        self.assertEqual(msgs, [('bob', 'say', 'short', '')])
+        self.assertEqual(msgs, [('bob', 'say', 'short', '', '')])
 
 
 def _mp_worker(save_dir: str, username: str, other_username: str, out_q):

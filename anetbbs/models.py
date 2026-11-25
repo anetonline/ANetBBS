@@ -191,10 +191,23 @@ class User(UserMixin, db.Model):
     theme = db.relationship('Theme', backref='theme_users', lazy=True, foreign_keys=[theme_id])
     
     def set_password(self, password):
-        """Hash and set user password"""
+        """Hash and set user password (changing it rotates auth_version)."""
         if self.password_hash:
             self.auth_version = secrets.token_urlsafe(32)
         self.password_hash = generate_password_hash(password)
+
+    def ensure_auth_version(self):
+        """Give a new account its revocable session generation (audit M-6).
+        Account-creation paths call this. Existing accounts keep NULL until
+        their first password change, lock or deactivation, so upgrading
+        doesn't log everyone out."""
+        if not self.auth_version:
+            self.auth_version = secrets.token_urlsafe(32)
+
+    def revoke_sessions(self):
+        """Invalidate every web session and remember cookie for this
+        account (and FTP/Socket.IO sessions, which recheck it)."""
+        self.auth_version = secrets.token_urlsafe(32)
 
     def get_id(self):
         """Bind Flask-Login cookies to the current authentication generation."""
@@ -216,6 +229,22 @@ class User(UserMixin, db.Model):
     def __repr__(self):
         return f'<User {self.username}>'
 
+
+
+
+# Audit M-6: deactivating or locking an account revokes its sessions. The
+# old value is often "not loaded" (attributes expire after a commit), so
+# revoke unless it is known to be unchanged.
+@event.listens_for(User.is_active, 'set')
+def _revoke_sessions_on_deactivate(target, value, oldvalue, _initiator):
+    if value is False and oldvalue is not False:
+        target.auth_version = secrets.token_urlsafe(32)
+
+
+@event.listens_for(User.is_locked, 'set')
+def _revoke_sessions_on_lock(target, value, oldvalue, _initiator):
+    if value is True and oldvalue is not True:
+        target.auth_version = secrets.token_urlsafe(32)
 
 class Board(db.Model):
     """Message board/forum model"""

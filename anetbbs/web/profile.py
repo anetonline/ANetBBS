@@ -105,6 +105,10 @@ class UpdateProfileForm(FlaskForm):
         "available to you. Optional otherwise."))
     date_of_birth = DateField('Date of Birth', validators=[Optional()])
     show_email = BooleanField('Show Email Publicly')
+    # Required only when the email address changes (audit M-8): a hijacked
+    # session must not be able to redirect password recovery.
+    current_password = PasswordField('Current Password (needed to change email)',
+                                     validators=[Optional()])
     email_enabled = BooleanField('Enable Internet Mail')
     email_local_part = StringField(
         'Mailbox name (optional)', validators=[Optional(), Length(max=64)],
@@ -220,8 +224,8 @@ class UpdateProfileForm(FlaskForm):
 
     def validate_email(self, field):
         """Check if email is already taken by another user"""
-        if field.data != self.original_email:
-            if User.query.filter_by(email=field.data).first():
+        if (field.data or '').lower() != (self.original_email or '').lower():
+            if User.query.filter(db.func.lower(User.email) == (field.data or '').lower()).first():
                 raise ValidationError(_t('profile.email_registered', 'Email already registered.'))
 
 
@@ -391,15 +395,46 @@ def view_user(username):
                          field_config=get_builtin_field_config())
 
 
+def _notify_email_change(old, new, username):
+    """Tell both addresses about an email change (audit M-8)."""
+    import threading
+    app = current_app._get_current_object()
+
+    def _send():
+        try:
+            with app.app_context():
+                from ..mailer import smtp_enabled, send_email
+                if not smtp_enabled():
+                    return
+                body = (f'The email address on the account {username} was changed '
+                        f'from {old} to {new}. If you did not do this, contact the '
+                        f'sysop and change your password.')
+                for addr in {old, new} - {None, ''}:
+                    send_email(addr, 'Your account email address was changed', body)
+        except Exception:
+            app.logger.exception('email-change notice failed')
+    threading.Thread(target=_send, daemon=True).start()
+
+
 @profile_bp.route('/edit', methods=['GET', 'POST'])
 @login_required
 def edit():
     """Edit current user's profile"""
     form = UpdateProfileForm(current_user.email)
 
-    if form.validate_on_submit():
+    submitted = form.validate_on_submit()
+    old_email = current_user.email
+    email_changing = submitted and (form.email.data or '').lower() != (old_email or '').lower()
+    if email_changing and not current_user.check_password(form.current_password.data or ''):
+        # Re-show the form as posted, through the normal render below.
+        flash(_t('profile.password_needed_for_email',
+                 'Enter your current password to change your email address.'), 'danger')
+        submitted = False
+    if submitted:
         current_user.display_name = form.display_name.data or None
         current_user.email = form.email.data
+        if email_changing:
+            _notify_email_change(old_email, form.email.data, current_user.username)
         current_user.bio = form.bio.data or None
         current_user.location = form.location.data or None
         current_user.website = form.website.data or None
@@ -657,6 +692,10 @@ def security_questions():
     q_choices = [(q, q) for q in active_questions]
 
     if request.method == 'POST':
+        # Changing recovery answers needs the current password (audit M-8).
+        if not current_user.check_password(request.form.get('current_password', '')):
+            flash(_t('profile.current_password_incorrect', 'Current password is incorrect.'), 'danger')
+            return redirect(url_for('profile.security_questions'))
         # Collect up to 3 question/answer pairs from the form
         saved = 0
         for i in range(1, 4):

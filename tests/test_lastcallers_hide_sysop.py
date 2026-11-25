@@ -165,9 +165,9 @@ class LastCallersAdminSettingsTests(unittest.TestCase):
                 admin.set_password('password123')
                 db.session.add(admin)
                 db.session.commit()
-            admin_id = admin.id
+            admin_id = admin.get_id()  # "id:version" session identity
         with client.session_transaction() as sess:
-            sess['_user_id'] = str(admin_id)
+            sess['_user_id'] = admin_id
             sess['_fresh'] = True
 
     def test_settings_persists_hide_sysop(self):

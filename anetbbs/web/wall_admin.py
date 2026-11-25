@@ -7,7 +7,6 @@ Routes:
 """
 from __future__ import annotations
 
-import os
 
 from flask import (Blueprint, current_app, flash, redirect,
                    render_template, request, url_for)
@@ -26,8 +25,8 @@ from .access_control import require_admin_or_403 as _admin_required
 
 
 def _env_path():
-    return os.path.abspath(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '..', '.env'))
+    from .env_file import env_path
+    return env_path()
 
 
 @wall_admin_bp.route('/')

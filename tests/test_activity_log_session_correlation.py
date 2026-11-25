@@ -80,7 +80,7 @@ class ActivityLogSessionCorrelationTests(unittest.TestCase):
                              "CallerLog row created in the same request")
 
         time.sleep(1.1)  # duration_seconds must be > 0, not just non-null
-        resp = client.get('/auth/logout', follow_redirects=True)
+        resp = client.post('/auth/logout', follow_redirects=True)
         self.assertEqual(resp.status_code, 200)
 
         with self.app.app_context():

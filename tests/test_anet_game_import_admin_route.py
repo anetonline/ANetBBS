@@ -79,9 +79,9 @@ class AnetImportAdminRouteTests(unittest.TestCase):
                 admin.set_password('password123')
                 db.session.add(admin)
                 db.session.commit()
-            admin_id = admin.id
+            admin_ident = admin.get_id()
         with client.session_transaction() as sess:
-            sess['_user_id'] = str(admin_id)
+            sess['_user_id'] = admin_ident
             sess['_fresh'] = True
 
     def _ensure_base_server(self, app):

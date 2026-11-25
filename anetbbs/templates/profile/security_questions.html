@@ -51,6 +51,10 @@
                         </div>
                     </div>
                     {% endfor %}
+                    <div class="mb-3">
+                        <label class="form-label">{{ t("profile.current_password", "Current password") }}</label>
+                        <input type="password" name="current_password" class="form-control" autocomplete="current-password" required>
+                    </div>
                     <button class="btn btn-primary">{{ t('profile.save_questions', 'Save Security Questions') }}</button>
                     <a href="{{ url_for('profile.edit') }}" class="btn btn-secondary ms-2">{{ t('profile.cancel', 'Cancel') }}</a>
                 </form>

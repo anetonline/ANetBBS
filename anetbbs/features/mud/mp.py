@@ -115,45 +115,90 @@ def live_player_count() -> int:
     return len(list_players())
 
 
+CHAT_LOG_MAX_BYTES = 256 * 1024
+
+
 class ChatTail:
-    """Tails chat.jsonl from wherever this instance last left off --
-    one instance per player session, same incremental-read pattern as
-    anetcraft.py's own _mp_tail_chat()/_mp_send_chat()."""
+    """Shared MUD chat log (data/doors/mud/mp/chat.jsonl), tailed
+    incrementally by every player session (fix F-1: earlier versions
+    appended but nothing ever read it).
+
+    Each line is [username, kind, text, target, room_slug]. A new session
+    starts at end-of-file (no history replay). A partial trailing line is
+    kept for the next poll. The log is truncated once it passes
+    CHAT_LOG_MAX_BYTES; readers notice the shrink and restart at 0."""
 
     def __init__(self):
-        self._pos = 0
-
-    def send(self, username: str, kind: str, text: str, target: str = ''):
-        """kind: 'say' (room-scoped by the reader, not here -- this
-        log has no room concept, callers filter by checking the
-        sender's room themselves), 'yell' (whole-MUD), 'tell'
-        (private, `target` is the recipient), 'emote'."""
         try:
-            with open(_chat_path(), 'a') as f:
-                f.write(json.dumps([username, kind, text, target]) + '\n')
+            self._pos = _chat_path().stat().st_size
+        except OSError:
+            self._pos = 0
+
+    def send(self, username: str, kind: str, text: str, target: str = '',
+             room_slug: str = ''):
+        """kind: 'say'/'emote' (room-scoped), 'yell' (whole MUD), 'tell'
+        (only `target`)."""
+        try:
+            path = _chat_path()
+            if path.exists() and path.stat().st_size > CHAT_LOG_MAX_BYTES:
+                path.write_text('')
+            with open(path, 'a') as f:
+                f.write(json.dumps([username, kind, text, target, room_slug]) + '\n')
         except OSError:
             pass
 
     def poll(self):
-        """Returns new (username, kind, text, target) tuples published
-        since the last poll() call on this instance."""
+        """New (username, kind, text, target, room_slug) entries since the
+        last poll on this instance."""
+        path = _chat_path()
         try:
-            raw = _chat_path().read_bytes()
-        except FileNotFoundError:
+            size = path.stat().st_size
+        except OSError:
             return []
-        if self._pos > len(raw):
+        if self._pos > size:
             self._pos = 0  # log was rotated/truncated
-        chunk = raw[self._pos:]
-        self._pos = len(raw)
+        if size == self._pos:
+            return []
+        try:
+            with open(path, 'rb') as f:
+                f.seek(self._pos)
+                chunk = f.read(min(size - self._pos, 1024 * 1024))
+        except OSError:
+            return []
+        end = chunk.rfind(b'\n')
+        if end < 0:
+            return []
+        self._pos += end + 1
         out = []
-        for line in chunk.split(b'\n'):
+        for line in chunk[:end].split(b'\n'):
             line = line.strip()
             if not line:
                 continue
             try:
                 parsed = json.loads(line)
-                username, kind, text, target = parsed
-            except (ValueError, TypeError):
+            except ValueError:
                 continue
-            out.append((username, kind, text, target))
+            if not isinstance(parsed, list) or len(parsed) < 4:
+                continue
+            username, kind, text, target = parsed[:4]
+            room = parsed[4] if len(parsed) > 4 else ''
+            out.append((str(username), str(kind), str(text), str(target), str(room)))
         return out
+
+
+def deliverable(entry, me: str, my_room: str):
+    """Text to show `me` for one chat entry, or None if it isn't for them."""
+    from ...core.text_safety import strip_untrusted_escapes as _clean
+    username, kind, text, target, room = entry
+    if username.lower() == (me or '').lower():
+        return None
+    who, msg = _clean(username), _clean(text)
+    if kind == 'yell':
+        return f"{who} yells, \"{msg}\""
+    if kind == 'tell':
+        if target.lower() != (me or '').lower():
+            return None
+        return f"{who} tells you, \"{msg}\""
+    if kind in ('say', 'emote') and room and room == my_room:
+        return f"{who} {msg}" if kind == 'emote' else f"{who} says, \"{msg}\""
+    return None
