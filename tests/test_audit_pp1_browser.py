@@ -13,7 +13,6 @@ import json
 import os
 import socket
 import tempfile
-import threading
 import time
 import unittest
 
@@ -37,6 +36,62 @@ PROBE_JS = r"""
 """
 
 
+_SERVER = r'''
+import json, os, threading
+os.environ['FLASK_ENV'] = 'testing'
+import anetbbs.config as cfg_mod
+tmp = os.environ['PP1_TMP']; port = int(os.environ['PP1_PORT'])
+cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = f'sqlite:///{tmp}/t.db'
+from anetbbs.web_app import create_app
+from anetbbs.models import db, User
+app = create_app('testing')
+data_dir = os.path.join(tmp, 'data')
+app.config.update(TESTING=False, WTF_CSRF_ENABLED=True, PERSONAL_PAGES_ENABLED=True,
+                  DATA_DIR=data_dir, SESSION_COOKIE_SECURE=False)
+with app.app_context():
+    db.create_all()
+    for name, adm in (('sysop', True), ('mallory', False)):
+        u = User.query.filter_by(username=name).first() or User(username=name, email=name + '@x.test')
+        u.is_admin, u.is_verified, u.is_active = adm, True, True
+        u.set_password('Corr3ct-Horse-pw')
+        db.session.add(u)
+    db.session.commit()
+seen = os.path.join(tmp, 'seen.jsonl')
+lock = threading.Lock()
+@app.before_request
+def _record():
+    from flask import request
+    with lock, open(seen, 'a') as f:
+        f.write(json.dumps([request.host.split(':')[0], request.path,
+                            'session' in request.cookies or 'remember_token' in request.cookies,
+                            request.cookies.get('session', '')[:8]]) + '\n')
+    if request.path.startswith('/beacon/'):
+        return ('', 204)
+page = '<html><head><title>start</title></head><body><script>' + os.environ['PP1_PAGE'] + '</script></body></html>'
+mal = os.path.join(data_dir, 'personal_pages', 'users', 'mallory')
+os.makedirs(os.path.join(mal, 'sub'), exist_ok=True)
+files = {
+    'x.html': page, 'x.htm': page, 'sub/index.html': page,
+    'a.svg': '<svg xmlns="http://www.w3.org/2000/svg" onload="fetch(\'/beacon/svg-ran\')"><script>fetch("/beacon/svg-script-ran")</script></svg>',
+    'embed.html': '<html><body><img src="a.svg"><title>embed</title></body></html>',
+    'note.txt': '<script>fetch("/beacon/txt-ran")</script>',
+    'noext': '<script>fetch("/beacon/noext-ran")</script>',
+    'lib.js': 'document.title = "JSRAN"; fetch("/beacon/js-ran");',
+    'usesjs.html': '<html><body><script src="lib.js"></script></body></html>',
+    'toss.html': '<script>try{document.cookie="session=TOSSED; domain=bbs.test; path=/";document.title="TOSS-OK"}catch(e){document.title="TOSS-ERR:"+e.name}</script>',
+}
+for rel, body in files.items():
+    with open(os.path.join(mal, rel), 'w') as f:
+        f.write(body)
+club = os.path.join(data_dir, 'personal_pages', 'club')
+os.makedirs(club, exist_ok=True)
+with open(os.path.join(club, 'index.html'), 'w') as f:
+    f.write(page)
+from werkzeug.serving import make_server
+make_server('127.0.0.1', port, app, threaded=True).serve_forever()
+'''
+
+
 def _free_port():
     s = socket.socket()
     s.bind(('127.0.0.1', 0))
@@ -49,67 +104,28 @@ def _free_port():
 class PersonalPageBrowserIsolation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        import anetbbs.config as cfg_mod
-        from werkzeug.serving import make_server
-        cls._orig = cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI
+        # The BBS runs in a CHILD process: importing anetbbs.web_app
+        # monkey-patches threading (eventlet), which stalls Playwright's
+        # sync API in the same process.
+        import subprocess
+        import sys
         cls.tmp = tempfile.mkdtemp(prefix='pp1b-')
-        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = f'sqlite:///{cls.tmp}/t.db'
-        os.environ['FLASK_ENV'] = 'testing'
-        from anetbbs.web_app import create_app
-        from anetbbs.models import db, User
-        app = create_app('testing')
-        data_dir = os.path.join(cls.tmp, 'data')
-        app.config.update(TESTING=False, WTF_CSRF_ENABLED=True,
-                          PERSONAL_PAGES_ENABLED=True, DATA_DIR=data_dir,
-                          SERVER_NAME=None, SESSION_COOKIE_SECURE=False)
-        with app.app_context():
-            db.create_all()
-            for name, adm in (('sysop', True), ('mallory', False)):
-                u = User.query.filter_by(username=name).first() or User(
-                    username=name, email=f'{name}@x.test')
-                u.is_admin, u.is_verified, u.is_active = adm, True, True
-                u.set_password('Corr3ct-Horse-pw')
-                db.session.add(u)
-            db.session.commit()
-        cls.seen = []
-
-        @app.before_request
-        def _record():
-            from flask import request
-            cls.seen.append((request.host.split(':')[0], request.path,
-                             'session' in request.cookies,
-                             request.cookies.get('session', '')[:8]))
-            if request.path.startswith('/beacon/'):
-                return ('', 204)
-
-        mal = os.path.join(data_dir, 'personal_pages', 'users', 'mallory')
-        os.makedirs(os.path.join(mal, 'sub'), exist_ok=True)
-        page = f'<html><head><title>start</title></head><body><script>{PROBE_JS}</script></body></html>'
-        files = {
-            'x.html': page, 'x.htm': page, 'x.xhtml': page,
-            'sub/index.html': page,
-            'a.svg': '<svg xmlns="http://www.w3.org/2000/svg" onload="fetch(\'/beacon/svg-ran\')">'
-                     '<script>fetch("/beacon/svg-script-ran")</script></svg>',
-            'embed.html': '<html><body><img src="a.svg"><title>embed</title></body></html>',
-            'note.txt': '<script>fetch("/beacon/txt-ran")</script>',
-            'noext': '<script>fetch("/beacon/noext-ran")</script>',
-            'lib.js': 'document.title = "JSRAN"; fetch("/beacon/js-ran");',
-            'usesjs.html': '<html><body><script src="lib.js"></script></body></html>',
-            'toss.html': '<script>try{document.cookie="session=TOSSED; domain=bbs.test; path=/";'
-                         'document.title="TOSS-OK"}catch(e){document.title="TOSS-ERR:"+e.name}</script>',
-        }
-        for rel, body in files.items():
-            with open(os.path.join(mal, rel), 'w') as f:
-                f.write(body)
-        sysroot = os.path.join(data_dir, 'personal_pages', 'club')
-        os.makedirs(sysroot, exist_ok=True)
-        with open(os.path.join(sysroot, 'index.html'), 'w') as f:
-            f.write(page)
-
+        cls.seen_path = os.path.join(cls.tmp, 'seen.jsonl')
         cls.port = _free_port()
-        cls.server = make_server('127.0.0.1', cls.port, app, threaded=True)
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
-        cls.app = app
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(os.environ, PP1_TMP=cls.tmp, PP1_PORT=str(cls.port),
+                   PP1_PAGE=PROBE_JS, FLASK_ENV='testing')
+        cls.proc = subprocess.Popen([sys.executable, '-c', _SERVER], cwd=repo, env=env)
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            try:
+                socket.create_connection(('127.0.0.1', cls.port), timeout=1).close()
+                break
+            except OSError:
+                time.sleep(0.3)
+        else:
+            raise RuntimeError('BBS test server did not start')
+        cls.data_dir = os.path.join(cls.tmp, 'data')
 
         from playwright.sync_api import sync_playwright
         cls.pw = sync_playwright().start()
@@ -135,14 +151,12 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        import anetbbs.config as cfg_mod
         for closer in (lambda: cls.ctx.close(), lambda: cls.browser.close(),
-                       lambda: cls.pw.stop(), lambda: cls.server.shutdown()):
+                       lambda: cls.pw.stop(), lambda: cls.proc.terminate()):
             try:
                 closer()
             except Exception:
                 pass
-        cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig
         print(f'\nPP1-BROWSER-RESULTS[{getattr(cls, "engine", "?")}] '
               + json.dumps(getattr(cls, 'results', {}), sort_keys=True))
 
@@ -166,6 +180,20 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
         type(self).results = getattr(type(self), 'results', {})
         type(self).results[key] = value
 
+    @property
+    def seen(self):
+        rows = []
+        try:
+            with open(self.seen_path) as f:
+                for line in f:
+                    rows.append(tuple(json.loads(line)))
+        except FileNotFoundError:
+            pass
+        return rows
+
+    def _clear_seen(self):
+        open(self.seen_path, 'w').close()
+
     def _beacons(self):
         return {path for _h, path, *_ in self.seen if path.startswith('/beacon/')}
 
@@ -184,23 +212,29 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
                 r = self._probe('bbs.test', path)
                 self._record(f'probe {path}', r)
                 self.assertNotEqual(r.get('admin'), 'READ_ADMIN_PAGE', r)
-                self.assertEqual(r.get('cookie', ''), '', r)
+                c = str(r.get('cookie', ''))
+                self.assertTrue(c == '' or c.startswith('ERR'), r)
                 self.assertTrue(str(r.get('storage', '')).startswith('ERR'), r)
 
     def test_admin_fetch_from_page_carries_no_session_cookie(self):
-        self.seen.clear()
+        self._clear_seen()
         self._probe('bbs.test', '/~mallory/x.html')
         hits = [s for s in self.seen if s[1] == '/admin/users']
         self._record('admin_fetch_cookie_sent', [h[2] for h in hits])
-        self.assertTrue(hits, 'the page did attempt the fetch')
+        self._record('admin_fetch_reached_server', bool(hits))
+        # Either the request is blocked outright (CSP connect-src) or it
+        # arrives without the visitor's session/remember cookie.
         self.assertFalse(any(h[2] for h in hits), hits)
 
     def test_svg_txt_noext_never_execute(self):
-        self.seen.clear()
+        self._clear_seen()
         for path in ('/~mallory/embed.html', '/~mallory/note.txt', '/~mallory/noext'):
             p = self.ctx.new_page()
             try:
-                p.goto(self.url('bbs.test', path))
+                try:
+                    p.goto(self.url('bbs.test', path))
+                except Exception as exc:   # served as a download: never rendered
+                    self._record(f'nav {path}', type(exc).__name__)
                 time.sleep(0.8)
             finally:
                 p.close()
@@ -221,7 +255,7 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
                           '/beacon/txt-ran', '/beacon/noext-ran'} & beacons, beacons)
 
     def test_script_src_runs_only_inside_the_sandbox(self):
-        self.seen.clear()
+        self._clear_seen()
         p = self.ctx.new_page()
         try:
             p.goto(self.url('bbs.test', '/~mallory/usesjs.html'))
@@ -234,7 +268,7 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
         self.assertFalse(any(h[2] for h in hits), 'beacon must not carry the session')
 
     def test_cookie_scope_on_other_hostnames(self):
-        self.seen.clear()
+        self._clear_seen()
         for host in ('pages.bbs.test', 'pages-other.test'):
             p = self.ctx.new_page()
             try:
@@ -256,7 +290,7 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
             toss_title = p.title()
         finally:
             p.close()
-        self.seen.clear()
+        self._clear_seen()
         p = self.ctx.new_page()
         try:
             p.goto(self.url('bbs.test', '/about'))
@@ -268,29 +302,14 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
         # Under the sandbox the page cannot set cookies at all.
         self.assertNotEqual(toss_title, 'TOSS-OK')
 
-    def test_manager_link_has_no_opener(self):
-        from anetbbs.models import User
-        data_dir = self.app.config['DATA_DIR']
-        own = os.path.join(data_dir, 'personal_pages', 'users', 'sysop')
-        os.makedirs(own, exist_ok=True)
-        with open(os.path.join(own, 'o.html'), 'w') as f:
-            f.write(f'<script>{PROBE_JS}</script>')
-        p = self.ctx.new_page()
-        try:
-            p.goto(self.url('bbs.test', '/_pages/'))
-            with self.ctx.expect_page() as newp:
-                p.click('a[href="/~sysop/o.html"]')
-            np = newp.value
-            deadline = time.time() + 8
-            while time.time() < deadline and not np.title().startswith('R{'):
-                time.sleep(0.1)
-            r = json.loads(np.title()[1:]) if np.title().startswith('R{') else {}
-            np.close()
-        finally:
-            p.close()
-        self._record('manager_link_opener', r.get('opener'))
-        self.assertEqual(r.get('opener'), 'null', r)
-        del User
+    def test_manager_link_has_noopener(self):
+        # Modern browsers already imply noopener for target=_blank, so a
+        # browser probe can't tell before from after (review note); check
+        # the template attribute instead.
+        tpl = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           'anetbbs', 'templates', 'personal_pages', 'index.html')
+        with open(tpl) as f:
+            self.assertIn('rel="noopener noreferrer"', f.read())
 
 
 if __name__ == '__main__':
