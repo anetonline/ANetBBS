@@ -124,16 +124,27 @@ if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+([ab][0-9]+\.[0-9]+|\.[0-9]+)$ ]]; then
     fail "version $VERSION does not match expected vX.Y[ab]Z.NN or vX.Y.Z form"
 fi
 
-# URL: must be http(s) and end with .tar.gz. Block shell metacharacters
+# URL: must be https and end with .tar.gz. Block shell metacharacters
 # that could lead to command injection if the URL were ever fed to a
 # subshell (we use it as an arg to curl/wget, but defensive layering
-# is cheap).
+# is cheap), and "@" so no userinfo can disguise the real host.
+# Plain http is accepted only to this machine's own loopback (a hub whose
+# REGISTRY_URL is http://localhost:<port>/): nothing on the network can
+# intercept it, and the sha256 / signature checks below still apply.
+_is_loopback_http() {   # _is_loopback_http URL
+    case "$1" in
+        http://localhost/*|http://localhost:[0-9]*/*|http://127.0.0.1/*|http://127.0.0.1:[0-9]*/*|http://\[::1\]/*|http://\[::1\]:[0-9]*/*) return 0 ;;
+    esac
+    return 1
+}
 case "$URL" in
-    https://*.tar.gz) ;;
-    *) fail "url $URL not a tar.gz over https" ;;
+    *[\ \;\&\|\`\$\<\>\"\'\\@]*) fail "url contains shell metacharacters" ;;
 esac
 case "$URL" in
-    *[\ \;\&\|\`\$\<\>\"\'\\]*) fail "url contains shell metacharacters" ;;
+    https://*.tar.gz) URL_SCHEME=https ;;
+    http://*.tar.gz) _is_loopback_http "$URL" && URL_SCHEME=http \
+        || fail "url $URL not a tar.gz over https (plain http is allowed only to this machine's loopback)" ;;
+    *) fail "url $URL not a tar.gz over https" ;;
 esac
 
 # sha256: 64 hex chars.
@@ -158,8 +169,9 @@ log "install dir: $INSTALL_DIR"
 # REGISTRY_HOST comes from root-owned /etc/anetbbs.install (parsed above),
 # never from the service-user-owned .env (audit H-1).
 
-_url_no_scheme="${URL#https://}"
+_url_no_scheme="${URL#"$URL_SCHEME"://}"
 URL_HOST="${_url_no_scheme%%/*}"
+[[ "$URL_HOST" =~ ^([A-Za-z0-9.-]+|\[::1\])(:[0-9]+)?$ ]] || fail "url host '$URL_HOST' is not a plain host[:port]"
 
 # Release signatures (OpenSSH `ssh-keygen -Y`). A release signed by a key
 # in root-owned /etc/anetbbs/release-signers may come from ANY https
@@ -174,11 +186,13 @@ if [ -f "$SIGNERS" ] && [ ! -L "$SIGNERS" ] && [ -s "$SIGNERS" ] \
 fi
 if [ -n "$SIG_URL" ]; then
     case "$SIG_URL" in
-        https://*.tar.gz.sig) ;;
-        *) fail "signature url $SIG_URL must be https and end in .tar.gz.sig" ;;
+        *[\ \;\&\|\`\$\<\>\"\'\\@]*) fail "signature url contains shell metacharacters" ;;
     esac
     case "$SIG_URL" in
-        *[\ \;\&\|\`\$\<\>\"\'\\]*) fail "signature url contains shell metacharacters" ;;
+        https://*.tar.gz.sig) SIG_SCHEME=https ;;
+        http://*.tar.gz.sig) _is_loopback_http "$SIG_URL" && SIG_SCHEME=http \
+            || fail "signature url $SIG_URL must be https (or loopback http) and end in .tar.gz.sig" ;;
+        *) fail "signature url $SIG_URL must be https (or loopback http) and end in .tar.gz.sig" ;;
     esac
 fi
 if [ -z "$SIG_URL" ] || [ "$HAVE_SIGNERS" != yes ]; then
@@ -199,12 +213,18 @@ log "downloading to $TARBALL"
 # Prefer curl, fall back to wget. --fail makes curl exit non-zero on 4xx/5xx
 # so a missing tarball doesn't write an HTML error page to disk.
 if command -v curl >/dev/null 2>&1; then
-    curl --fail --location --silent --show-error \
+    if [ "$URL_SCHEME" = https ]; then
+        CURL_PROTO=(--proto '=https' --proto-redir '=https' --location --max-redirs 3)
+    else
+        CURL_PROTO=(--proto '=http' --max-redirs 0)
+    fi
+    curl --fail --silent --show-error "${CURL_PROTO[@]}" \
          --connect-timeout 15 --max-time 600 \
          -o "$TARBALL" "$URL" \
       || fail "curl download failed"
 elif command -v wget >/dev/null 2>&1; then
-    wget --quiet --timeout=600 -O "$TARBALL" "$URL" \
+    WGET_REDIR=(); [ "$URL_SCHEME" = https ] || WGET_REDIR=(--max-redirect=0)
+    wget --quiet --timeout=600 ${WGET_REDIR[@]+"${WGET_REDIR[@]}"} -O "$TARBALL" "$URL" \
       || fail "wget download failed"
 else
     fail "neither curl nor wget is installed"
@@ -219,7 +239,12 @@ log "sha256 verified"
 
 if [ -n "$SIG_URL" ] && [ "$HAVE_SIGNERS" = yes ]; then
     SIGFILE="$TMP/release.sig"
-    curl --fail --silent --show-error --proto '=https' --max-redirs 3 \
+    if [ "$SIG_SCHEME" = https ]; then
+        SIG_PROTO=(--proto '=https' --proto-redir '=https' --location --max-redirs 3)
+    else
+        SIG_PROTO=(--proto '=http' --max-redirs 0)
+    fi
+    curl --fail --silent --show-error "${SIG_PROTO[@]}" \
          --connect-timeout 15 --max-time 60 --max-filesize 65536 \
          -o "$SIGFILE" "$SIG_URL" || fail "signature download failed"
     ssh-keygen -Y verify -f "$SIGNERS" -I anetbbs-release -n anetbbs-release \

@@ -35,6 +35,7 @@ import threading
 import time
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlsplit
 
 import requests
 from flask import (Blueprint, current_app, jsonify,
@@ -321,6 +322,11 @@ def _fetch_upstream(cfg, force: bool = False):
             problem = _release_metadata_problem(data)
             if problem:
                 data, err = None, f'upstream release metadata rejected: {problem}'
+            else:
+                reg = cfg.get('REGISTRY_URL') or ''
+                data = dict(data, url=_align_scheme(data.get('url'), reg))
+                if data.get('sig_url'):
+                    data['sig_url'] = _align_scheme(data['sig_url'], reg)
     except requests.RequestException as exc:
         data, err = None, f'upstream unreachable: {exc.__class__.__name__}'
     except ValueError as exc:
@@ -476,10 +482,44 @@ def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str,
     return cmd
 
 
+_LOOPBACK_HOSTS = ('localhost', '127.0.0.1', '[::1]')
+
+
+def _transport_ok(value: str, suffix: str) -> bool:
+    """A download URL the root wrapper will accept: https, or plain http to
+    this machine's own loopback (a hub whose REGISTRY_URL is
+    http://localhost:<port>/). Mirrors deploy/run_upgrade.sh."""
+    if not (isinstance(value, str) and value.endswith(suffix)):
+        return False
+    if re.search(r'[\s;&|`$<>"\'\\@]', value):
+        return False
+    if value.startswith('https://'):
+        return True
+    if not value.startswith('http://'):
+        return False
+    host = value[len('http://'):].split('/', 1)[0]
+    if not re.fullmatch(r'(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?', host):
+        return False
+    return True
+
+
 def _valid_sig_url(value) -> bool:
-    return bool(isinstance(value, str) and value.startswith('https://')
-                and value.endswith('.tar.gz.sig')
-                and not re.search(r'[\s;&|`$<>"\'\\]', value))
+    return _transport_ok(value, '.tar.gz.sig')
+
+
+def _align_scheme(url, registry_url: str):
+    """The registry advertises URLs built from its own request, so a hub
+    behind a reverse proxy without TRUST_PROXY_HEADERS says http:// for its
+    public https host. When the advertised host is exactly the configured
+    REGISTRY_URL host, use the scheme the sysop configured for it."""
+    if not isinstance(url, str) or not url.startswith('http://'):
+        return url
+    reg = urlsplit(registry_url or '')
+    if reg.scheme != 'https' or not reg.netloc:
+        return url
+    if urlsplit(url).netloc.lower() == reg.netloc.lower():
+        return 'https://' + url[len('http://'):]
+    return url
 
 
 def _wrapper_path(cfg) -> str:
@@ -527,8 +567,10 @@ def install():
     url = upstream.get('url') or ''
     if not re.fullmatch(r'[0-9a-fA-F]{64}', sha256):
         return jsonify({'ok': False, 'error': 'upstream sha256 invalid'}), 502
-    if not url.startswith('https://'):
-        return jsonify({'ok': False, 'error': 'upstream url must be https'}), 502
+    if not _transport_ok(url, '.tar.gz'):
+        return jsonify({'ok': False,
+                        'error': 'upstream url must be https '
+                                 '(plain http only to this machine)'}), 502
 
     with _INSTALL_LOCK:
         if _install_state['running']:

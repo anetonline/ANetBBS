@@ -65,7 +65,8 @@ restarting. The helper:
 
 1. Takes its settings from root-owned `/etc/anetbbs.install`, never from
    `.env`.
-2. Requires an https download.
+2. Requires an https download (plain http only to this machine's loopback,
+   for a hub whose `REGISTRY_URL` is `http://localhost:<port>/`).
 3. Checks the release's origin. A release signed by a key in
    `/etc/anetbbs/release-signers` may come from any host. An unsigned
    release must come from `REGISTRY_HOST`, and is refused entirely when
@@ -130,8 +131,8 @@ actually running them before.
 - `venv/` — kept; only `pip install -e .` runs to pick up new/changed
   dependencies.
 - `logs/` — excluded from rsync; never touched.
-- `doors/` — vendor door-game trees; excluded from rsync so any local
-  changes/saves survive.
+- `doors/` — local door-game trees (not part of the release archive);
+  excluded from rsync so any local changes/saves survive.
 - The SQLite database(s) — kept; schema is migrated forward only
   (new columns/tables added, nothing dropped).
 

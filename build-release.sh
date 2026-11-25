@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a release tarball for ANetBBS.
-# Output: /tmp/ANetBBS-v<version>.tar.gz
+# Output: /tmp/ANetBBS-v<version>.tar.gz (directory: ANETBBS_RELEASE_OUT_DIR)
 #
 # The tarball wraps everything inside a single top-level directory
 # ANetBBS-v<version>/ — required by run_upgrade.sh which looks for
@@ -22,12 +22,10 @@
 #
 # This version inverts the default: it starts from git's OWN idea of
 # "safe to ship" (tracked files, plus untracked files that aren't
-# gitignored) and only adds back a short, deliberate allowlist of
-# binary bundles that are intentionally kept out of git history for
-# size reasons (doors/, data/dos-games/) but ARE part of the shipped
-# product. Anything new and unexpected that shows up in the working
-# directory — a stray log file, a leftover test database, an editor
-# swap file — is excluded by construction, with zero need to update
+# gitignored). Door-game trees (doors/) and DOS game bundles
+# (data/dos-games/) are never shipped. Anything new and unexpected
+# that shows up in the working directory — a stray log file, a
+# leftover test database, an editor swap file — is excluded by construction, with zero need to update
 # this script, as long as .gitignore covers it (which is the same file
 # that already needs to be correct for git itself, so there's one
 # source of truth instead of two that can drift apart).
@@ -37,7 +35,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION="$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')"
 VERSION="${VERSION#v}"
 PACKAGE_VERSION="v${VERSION}"
-OUT="/tmp/ANetBBS-${PACKAGE_VERSION}.tar.gz"
+OUT="${ANETBBS_RELEASE_OUT_DIR:-/tmp}/ANetBBS-${PACKAGE_VERSION}.tar.gz"
 TOPDIR="ANetBBS-${PACKAGE_VERSION}"
 
 echo "Building $OUT (top-level dir: $TOPDIR) ..."
@@ -89,27 +87,12 @@ FILE_LIST="$WORKDIR/files.txt"
 grep -v -E '^tests/test_enhanced_(server_deadconn|protocol|client_block_chars|client_hex_to_rgb)\.py$' \
   "$FILE_LIST" > "$FILE_LIST.tmp" && mv "$FILE_LIST.tmp" "$FILE_LIST"
 
-# Deliberate allowlist: binary bundles kept out of git history for size
-# reasons, but still part of the shipped product. Each gets the same
-# runtime-state carve-outs the old --exclude list had, since these
-# directories are NOT git-tracked at all (so .gitignore can't help here
-# — there's nothing for it to ignore INSIDE an untracked tree). Also
-# excludes any nested .git/.svn/.hg dirs some vendored door happens to
-# still have from however it was originally obtained (found one under
-# doors/synch/botwars/ the hard way).
-( cd "$SCRIPT_DIR" && find doors -type f 2>/dev/null \
-    ! -path '*/.git/*' \
-    ! -path '*/.svn/*' \
-    ! -path '*/.hg/*' \
-    ! -path 'doors/mystic/rdq3/saves/*' \
-    ! -path 'doors/mystic/rdq3/data/*' \
-    ! -path 'doors/synch/botwars/botwars_saves/*' \
-    ! -path 'doors/synch/botwars/botwars_data/*' \
-    ! -path 'doors/synch/botwars/scores.ans' \
-) >> "$FILE_LIST"
-( cd "$SCRIPT_DIR" && find data/dos-games -type f 2>/dev/null \
-    ! -path '*/.git/*' ! -path '*/.svn/*' ! -path '*/.hg/*' \
-) >> "$FILE_LIST"
+# Door-game trees and DOS game bundles are NOT part of the release.
+# doors/ and data/dos-games/ are untracked local trees (gitignored), so
+# the git listing above already leaves them out; this filter is a second
+# guard in case either is ever tracked or un-ignored by mistake.
+grep -v -E '^(doors|data/dos-games)/' "$FILE_LIST" > "$FILE_LIST.tmp" \
+  && mv "$FILE_LIST.tmp" "$FILE_LIST"
 
 sort -u "$FILE_LIST" -o "$FILE_LIST"
 
@@ -161,12 +144,11 @@ if [[ -n "$LEAKED" ]]; then
   rm -f "$OUT"; exit 1
 fi
 
-# Confirm dos-games are present
-if ! tar tf "$OUT" "${TOPDIR}/data/dos-games/doom.zip" >/dev/null 2>&1; then
-  echo "WARNING: ${TOPDIR}/data/dos-games/doom.zip missing from tarball"
-fi
-if ! tar tf "$OUT" "${TOPDIR}/data/dos-games/duke3d.zip" >/dev/null 2>&1; then
-  echo "WARNING: ${TOPDIR}/data/dos-games/duke3d.zip missing from tarball"
+# Excluded content must not be present (fail, do not warn).
+EXCLUDED=$(tar tzf "$OUT" | grep -E "^${TOPDIR}/(doors|data/dos-games)/|/(doom|duke3d)\.zip$" || true)
+if [[ -n "$EXCLUDED" ]]; then
+  echo "ERROR: excluded content in tarball:"; echo "$EXCLUDED"
+  rm -f "$OUT" "$OUT.sha256" "$OUT.sig"; exit 1
 fi
 
 echo "Sanity check passed — ${TOPDIR}/update.sh present, no sensitive files."

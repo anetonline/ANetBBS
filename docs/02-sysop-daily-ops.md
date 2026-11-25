@@ -77,6 +77,24 @@ holds four settings:
 To change the signing requirement, run update.sh with
 `ANETBBS_REQUIRE_SIGNED_UPGRADES=yes` or `=no`.
 
+**Download URLs.**
+- Web upgrades download over https. Plain http is accepted only to
+  this machine's own loopback (`localhost`, `127.0.0.1`, `[::1]`), for
+  a hub whose `REGISTRY_URL` is `http://localhost:<port>/`.
+- If the feed advertises an `http://` link for the same host as your
+  `https://` `REGISTRY_URL` (a hub behind a reverse proxy without
+  `TRUST_PROXY_HEADERS=true`), the download uses https.
+
+**Registry hubs.** A hub's releases directory is writable by the BBS
+service account, so on a hub `REQUIRE_SIGNED_UPGRADES` defaults to
+`yes`. The hub's own **Admin → Upgrades** button then installs only
+releases signed by a key in `/etc/anetbbs/release-signers`. Until you
+add a signing key, upgrade the hub with `sudo bash update.sh` from the
+extracted release. You can also run `update.sh` once with
+`ANETBBS_REQUIRE_SIGNED_UPGRADES=no`, which accepts that the service
+account could then install a release of its own choosing as root.
+Peers that point at the hub are not affected: they default to `no`.
+
 **Signed releases.**
 - `/etc/anetbbs/release-signers` (root-owned) lists the keys whose
   release signatures web upgrades accept. A release signed by one of

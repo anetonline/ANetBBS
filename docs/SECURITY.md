@@ -326,8 +326,9 @@ Read this whole file before exposing the BBS to the internet.
   [12 — Upgrading](12-upgrading.md#web-upgrades-and-the-trusted-release-feed).
 - **Signed releases.** When `/etc/anetbbs/release-signers` lists a key,
   a web upgrade accepts a release signed by that key from any https
-  host. An unsigned release is accepted only from the trusted feed host,
-  and never when `REQUIRE_SIGNED_UPGRADES=yes`.
+  host (or this machine's loopback). An unsigned release is accepted
+  only from the trusted feed host, and never when
+  `REQUIRE_SIGNED_UPGRADES=yes`.
 - **`/healthz` is minimal for the public.** Anonymous remote callers get
   only `status` and `db_ok`. Version, host name and listener details go
   to admins and to local probes (127.0.0.1 with no `X-Forwarded-For`).

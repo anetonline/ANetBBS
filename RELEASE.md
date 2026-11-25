@@ -10,7 +10,10 @@ Fixes and improvements:
 
 - **Web auto-update keeps working for private release feeds.** Your
   first `update.sh` run after this version carries your release-feed host
-  over automatically.
+  over automatically. It also keeps working when the feed advertises
+  `http://` links for its `https://` address, and for a hub whose
+  `REGISTRY_URL` points at itself on `localhost`. A hub's own one-click
+  update needs a signed release; see docs/02-sysop-daily-ops.md.
 - **Signed releases.** Releases can carry an OpenSSH signature, and an
   install that trusts the signing key accepts a signed release from any
   https mirror. See docs/02-sysop-daily-ops.md.
@@ -29,6 +32,10 @@ Fixes and improvements:
 
 Upgrade notes:
 
+- **Release archives no longer include door-game trees (`doors/`) or the
+  DOOM / Duke Nukem 3D ZIPs.** Existing installs keep theirs; updating
+  never removes them. New installs can build the ZIPs with
+  `tools/prepare_dos_games.py` (see docs/14-door-games.md).
 - **Docker (compose):** use the `docker-compose.yml` from this release,
   which adds a small `control` service, then run `docker compose up -d`.
   See docs/22-containers.md.

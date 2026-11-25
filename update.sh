@@ -678,8 +678,9 @@ else
 
     # Sync bundled door subdirectories from the release tarball.
     # /doors/ is excluded from the main rsync above to protect sysop-customized
-    # installs (DSR, BotWars, etc.) from being overwritten.  For doors that ARE
-    # bundled in the release (currently only anetirc), we do a file-by-file
+    # installs (DSR, BotWars, etc.) from being overwritten.  Release archives
+    # carry no doors/ tree; when a source tree does (a git checkout with local
+    # door trees), we do a file-by-file
     # comparison and update anything that changed — so new binaries, build
     # scripts, and config templates always arrive on update.
     #
@@ -790,9 +791,9 @@ else
         done
     fi
 
-    # Copy pre-bundled game ZIPs — these are static assets, not user data,
-    # so they're safe to update alongside the code even though /data/ is
-    # otherwise excluded.
+    # Release archives carry no DOS game ZIPs. When a source tree does have
+    # data/dos-games/ (a git checkout with local bundles), copy them: they're
+    # static assets, not user data, even though /data/ is otherwise excluded.
     if [[ -d "$SOURCE_DIR/data/dos-games" ]]; then
         mkdir -p "$INSTALL_DIR/data/dos-games"
         rsync -a "$SOURCE_DIR/data/dos-games/" "$INSTALL_DIR/data/dos-games/"

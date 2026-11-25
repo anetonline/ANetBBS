@@ -707,18 +707,18 @@ press any key to restart or close the tab to quit. A pointer-lock
 overlay in the browser also shows a "Close Tab" button when the
 emulator releases the mouse cursor.
 
-### Pre-installed games
+### DOOM and Duke Nukem 3D (shareware)
 
-Two classic shareware titles ship bundled with ANetBBS as of v1.0a2.60:
+The release archive doesn't include any DOS game ZIPs. To offer the
+DOOM or Duke Nukem 3D shareware episodes, build the ZIP yourself with
+`tools/prepare_dos_games.py` (the commands are under
+[Bundling DOOM and Duke Nukem 3D](#bundling-doom-and-duke-nukem-3d) below)
+and place it at `<install>/data/dos-games/doom.zip` or
+`<install>/data/dos-games/duke3d.zip`.
 
-| Game | Slug | Notes |
-|------|------|-------|
-| DOOM (Shareware) | `doom` | id Software shareware — freely distributable |
-| Duke Nukem 3D (Shareware) | `duke3d` | 3D Realms shareware — freely distributable |
-
-Both are seeded as `door_dos_browser` Game rows on first install. If
-the rows are missing (e.g. you upgraded from an earlier release),
-add them manually via **Admin → Door Games → Add Game**:
+When one of those files exists at startup, the matching
+`door_dos_browser` Game row is created automatically. You can also
+add the rows yourself via **Admin → Door Games → Add Game**:
 
 | Field | DOOM | Duke Nukem 3D |
 |-------|------|--------------|
@@ -806,12 +806,10 @@ SET ULTRASND=240,3,3,7,7
 ```
 
 The game's `DUKE3D.CFG` must also have `FXDevice = 9` and matching
-IRQ/DMA values. The pre-bundled Duke3D ZIP ships with a pre-configured
-`DUKE3D.CFG`; if you're bundling a fresh install, run `SETUP.EXE`
-under real DOSBox first, set FXDevice to 9, then bundle with
-`--exclude SETUP.EXE --gus`.
+IRQ/DMA values. Run `SETUP.EXE` under real DOSBox first, set
+FXDevice to 9, then bundle with `--exclude SETUP.EXE --gus`.
 
-### Rebuild commands (reference)
+### Bundling DOOM and Duke Nukem 3D
 
 ```bash
 # DOOM (Shareware)

@@ -86,7 +86,9 @@ class RunUpgradeTrustsOnlyEtcConfig(unittest.TestCase):
         self.assertNotIn('REGISTRY_URL', code)
         self.assertNotIn('BASH_SOURCE', code)
         self.assertNotIn('. /etc/anetbbs.install', code)
-        self.assertNotIn('http://*.tar.gz', code)
+        # Plain http only through the loopback gate (old shape accepted any).
+        self.assertNotIn('https://*.tar.gz|http://*.tar.gz', code)
+        self.assertIn('http://*.tar.gz) _is_loopback_http "$URL"', code)
         self.assertNotIn('$INSTALL_DIR/data/anetbbs_upgrade.log', code)
 
     def _script(self, tmp, conf):
