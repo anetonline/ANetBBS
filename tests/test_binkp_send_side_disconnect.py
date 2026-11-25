@@ -51,6 +51,9 @@ class SendSideDisconnectTests(unittest.TestCase):
                 raise ConnectionError("peer closed")
 
         client._recv_frame_logged = _fake_recv
+        # Never fall back to the cwd-relative data/binkp/inbound (audit L-18).
+        import tempfile
+        client._inbound_dir = tempfile.mkdtemp(prefix='binkp-inbound-')
         result = client._receive_messages(data_dir='/tmp')
         return sent, result
 

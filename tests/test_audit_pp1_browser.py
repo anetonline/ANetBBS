@@ -113,9 +113,16 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
 
         from playwright.sync_api import sync_playwright
         cls.pw = sync_playwright().start()
-        cls.browser = cls.pw.chromium.launch(args=[
-            '--host-resolver-rules=MAP bbs.test 127.0.0.1, MAP pages.bbs.test 127.0.0.1, '
-            'MAP pages-other.test 127.0.0.1'])
+        engine = os.environ.get('ANETBBS_BROWSER', 'chromium')
+        cls.engine = engine
+        if engine == 'firefox':
+            cls.browser = cls.pw.firefox.launch(firefox_user_prefs={
+                'network.dns.localDomains': 'bbs.test,pages.bbs.test,pages-other.test',
+                'network.proxy.allow_hijacking_localhost': True})
+        else:
+            cls.browser = cls.pw.chromium.launch(args=[
+                '--host-resolver-rules=MAP bbs.test 127.0.0.1, MAP pages.bbs.test 127.0.0.1, '
+                'MAP pages-other.test 127.0.0.1'])
         cls.ctx = cls.browser.new_context(accept_downloads=True)
         p = cls.ctx.new_page()
         base = cls.url('bbs.test', '/auth/login')
@@ -136,7 +143,8 @@ class PersonalPageBrowserIsolation(unittest.TestCase):
             except Exception:
                 pass
         cfg_mod.TestingConfig.SQLALCHEMY_DATABASE_URI = cls._orig
-        print('\nPP1-BROWSER-RESULTS ' + json.dumps(getattr(cls, 'results', {}), sort_keys=True))
+        print(f'\nPP1-BROWSER-RESULTS[{getattr(cls, "engine", "?")}] '
+              + json.dumps(getattr(cls, 'results', {}), sort_keys=True))
 
     @classmethod
     def url(cls, host, path):
