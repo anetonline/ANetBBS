@@ -93,6 +93,19 @@ class RestoreDbDetached(unittest.TestCase):
                 echo "detached-rc=$?" >> "$CALLS"
                 exit 0'''),
         }
+        # Failure injection (only when the test sets RESTORE_FAIL): a cp that
+        # fails, a cp that writes a corrupt copy, an mv that fails on the WAL.
+        shims['cp'] = textwrap.dedent('''\
+            case "${RESTORE_FAIL:-}" in
+                cp) echo "cp: injected failure" >&2; exit 1 ;;
+                corrupt) for a; do last="$a"; done; printf 'SQLite format 3\\000garbage' > "$last"; exit 0 ;;
+            esac
+            exec /bin/cp "$@"''')
+        shims['mv'] = textwrap.dedent('''\
+            if [ "${RESTORE_FAIL:-}" = mv-wal ]; then
+                for a; do case "$a" in *.db-wal) echo "mv: injected failure" >&2; exit 1 ;; esac; done
+            fi
+            exec /bin/mv "$@"''')
         for name, body in shims.items():
             p = bin_ / name
             p.write_text('#!/bin/bash\n' + body + '\n')
@@ -166,11 +179,98 @@ class RestoreDbDetached(unittest.TestCase):
         self.assertFalse([c for c in self.calls_list() if c.startswith(('systemctl stop', 'systemd-run'))])
 
 
+class RestoreDbFailureKeepsOriginal(RestoreDbDetached):
+    """A restore that fails part-way leaves the original database (and its
+    WAL) in place and usable, restarts exactly the services that were
+    running, and records the failure for Admin -> Backups."""
+
+    def _setup_live(self):
+        live = self.inst / 'data' / 'anetbbs.db'
+        _make_db(live, ['alice', 'bob', 'live-only'], wal=True)
+        wal = self.inst / 'data' / 'anetbbs.db-wal'
+        wal.write_bytes(b'')   # empty WAL: harmless, but it must survive untouched
+        _make_db(self.bk / 'anetbbs.db.bak', ['alice'])
+        return live, wal
+
+    def _check_original(self, live, wal, wal_before):
+        # WAL first: closing a sqlite connection checkpoints and removes it.
+        self.assertEqual(wal.read_bytes(), wal_before)
+        c = sqlite3.connect(live)
+        self.assertEqual(c.execute('pragma integrity_check').fetchone()[0], 'ok')
+        self.assertEqual([r[0] for r in c.execute('select name from users order by id')],
+                         ['alice', 'bob', 'live-only'])
+        c.close()
+        left = [p.name for p in (self.inst / 'data').iterdir() if 'pre-restore' in p.name]
+        self.assertEqual(left, [], 'nothing left set aside after a revert')
+        calls = self.calls_list()
+        want = 'anetbbs.service anetbbs-web.service anetbbs-mrc-bridge.service'
+        self.assertEqual([c for c in calls if c.startswith('systemctl stop')], [f'systemctl stop {want}'])
+        self.assertEqual([c for c in calls if c.startswith('systemctl start')], [f'systemctl start {want}'])
+        status = (self.inst / 'data' / 'backups' / '.last-restore').read_text()
+        self.assertRegex(status, r'^\d{4}-\d\d-\d\dT\S+Z fail ')
+        return status
+
+    def _run_failing(self, mode):
+        live, wal = self._setup_live()
+        wal_before = wal.read_bytes()
+        self.env['RESTORE_FAIL'] = mode
+        r = self.run_helper('db', str(self.bk))
+        self.assertEqual(r.returncode, 0, r.stderr)   # the request itself only starts the unit
+        detached = (self.tmp / 'calls.log.detached').read_text()
+        self.assertIn('detached-rc=1', self.calls_list(), detached)
+        return self._check_original(live, wal, wal_before), detached
+
+    def test_copy_failure_puts_original_back(self):
+        status, log = self._run_failing('cp')
+        self.assertIn('previous database put back', status)
+
+    def test_corrupt_result_puts_original_back(self):
+        status, log = self._run_failing('corrupt')
+        self.assertIn('fails PRAGMA integrity_check -- previous database put back', status)
+
+    def test_wal_move_failure_leaves_database_as_it_was(self):
+        status, log = self._run_failing('mv-wal')
+        self.assertIn('database left as it was', status)
+
+    def test_success_records_ok(self):
+        _make_db(self.inst / 'data' / 'anetbbs.db', ['x'])
+        _make_db(self.bk / 'anetbbs.db.bak', ['y'])
+        self.assertEqual(self.run_helper('db', str(self.bk)).returncode, 0)
+        status = (self.inst / 'data' / 'backups' / '.last-restore').read_text()
+        self.assertRegex(status, r' ok database restored from anetbbs-backup-20261125000000$')
+
+
 class RestoreDbFlashSaysStarted(unittest.TestCase):
     def test_message_does_not_claim_the_restore_already_finished(self):
         src = (ROOT / 'anetbbs' / 'web' / 'backups_admin.py').read_text()
         self.assertIn("'DB restore from ' + name + ' started", src)
         self.assertNotIn("'DB restored from '", src)
+
+
+class BackupsPageShowsLastRestore(unittest.TestCase):
+    def test_reader_parses_ok_and_fail_and_ignores_links(self):
+        import anetbbs.web.backups_admin as ba
+        with tempfile.TemporaryDirectory() as d:
+            orig = ba._backup_root
+            ba._backup_root = lambda: d
+            try:
+                f = Path(d) / '.last-restore'
+                f.write_text('2026-11-25T10:00:00Z fail copy failed -- previous database put back\n')
+                self.assertEqual(ba._last_restore(), {'when': '2026-11-25T10:00:00Z', 'ok': False,
+                                                      'message': 'copy failed -- previous database put back'})
+                f.write_text('2026-11-25T10:01:00Z ok database restored from anetbbs-backup-1\n')
+                self.assertTrue(ba._last_restore()['ok'])
+                f.write_text('garbage\n')
+                self.assertIsNone(ba._last_restore())
+                f.unlink(); os.symlink('/etc/hostname', f)
+                self.assertIsNone(ba._last_restore())
+            finally:
+                ba._backup_root = orig
+
+    def test_template_renders_it(self):
+        src = (ROOT / 'anetbbs' / 'templates' / 'admin' / 'backups.html').read_text()
+        self.assertIn('id="last-restore"', src)
+        self.assertNotIn('/tmp/anetbbs-backup-', src)
 
 
 if __name__ == '__main__':

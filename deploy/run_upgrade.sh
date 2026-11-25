@@ -38,7 +38,7 @@ LOG_DIR=/var/log/anetbbs
 ROOT_UID=0
 # First release with the privilege-boundary fixes. Nothing older is ever
 # installable through this wrapper.
-MIN_VERSION=v1.1.74
+MIN_VERSION=v1.1.75
 
 LOG_PREFIX="[upgrade]"
 RUN_ID="${ANETBBS_UPGRADE_RUN_ID:-}"

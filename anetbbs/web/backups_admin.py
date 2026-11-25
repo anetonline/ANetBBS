@@ -171,6 +171,23 @@ def _restore_helper() -> Optional[str]:
     return RESTORE_WRAPPER if os.path.isfile(RESTORE_WRAPPER) else None
 
 
+def _last_restore() -> Optional[dict]:
+    """The outcome deploy/run_restore.sh records after a database restore,
+    which finishes after this web process has been restarted."""
+    path = os.path.join(_backup_root(), '.last-restore')
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd) as f:
+            line = f.read(2048).strip().splitlines()[0]
+    except (OSError, IndexError, ValueError):
+        return None
+    when, _, rest = line.partition(' ')
+    status, _, message = rest.partition(' ')
+    if status not in ('ok', 'fail'):
+        return None
+    return {'when': when, 'ok': status == 'ok', 'message': message}
+
+
 @backups_bp.route('/', methods=['GET'])
 @login_required
 def index():
@@ -183,6 +200,7 @@ def index():
     helper = _restore_helper()
     return render_template('admin/backups.html',
                            rows=rows,
+                           last_restore=_last_restore(),
                            restore_available=bool(helper),
                            helper_path=helper)
 

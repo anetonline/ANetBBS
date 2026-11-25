@@ -32,12 +32,17 @@
     </div>
   {% endif %}
 
+  {% if last_restore %}
+    <div id="last-restore" class="alert alert-{{ 'success' if last_restore.ok else 'danger' }}">
+      Last database restore ({{ last_restore.when }}):
+      <strong>{{ 'ok' if last_restore.ok else 'FAILED' }}</strong> &mdash; {{ last_restore.message }}
+    </div>
+  {% endif %}
+
   {% if not rows %}
     <div class="alert alert-info">
-      No backups on disk yet. Backups land at
-      <code>/tmp/anetbbs-backup-*</code> the moment you start the next
-      upgrade. They survive reboots only if your distro persists
-      <code>/tmp</code> across boots (most don't).
+      No backups on disk yet. <code>update.sh</code> makes one under
+      <code>data/backups/</code> before every update.
     </div>
   {% else %}
   <div class="card bk-card">

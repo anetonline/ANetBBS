@@ -1,10 +1,11 @@
-# ANetBBS v1.1.74 — security and reliability maintenance release
+# ANetBBS v1.1.75 — security and reliability maintenance release
 
 Security maintenance release from a full audit after v1.1.73: hardening
 across installation and upgrades, the web interface, accounts and
 sessions, file transfers, echomail and netmail, Internet Mail, MRC chat,
 the Docker deployment, and outbound connections. All sysops are encouraged
-to update promptly.
+to update promptly. (v1.1.74 was an internal build that was never
+published; v1.1.75 replaces it.)
 
 Fixes and improvements:
 
@@ -30,8 +31,9 @@ Fixes and improvements:
   them, including in conversation view and quoting.
 - **Feeds** skip inactive boards and expired bulletins.
 - **Admin → Backups → Restore DB** now completes and brings the BBS back:
-  every service stops for the swap, the backup is integrity-checked first,
-  and the previous database is kept beside it.
+  every service stops for the swap, the backup and the result are
+  integrity-checked, the previous database is kept beside it (and put back
+  if anything fails), and the Backups page shows the outcome.
 - **Add-on downloads** accept an optional SHA-256 pin.
 
 Upgrade notes:

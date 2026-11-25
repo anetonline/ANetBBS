@@ -322,7 +322,7 @@ anetbbs_snapshot_create() {
         fi
     done
     ( cd "$snap/files" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum ) > "$snap/MANIFEST" || return 1
-    ( cd "$snap/files" && find . \( -type f -o -type l \) | sort ) > "$snap/LIST" || return 1
+    ( cd "$snap/files" && find . \( -type f -o -type l \) | LC_ALL=C sort ) > "$snap/LIST" || return 1
     echo complete > "$snap/COMPLETE"
     printf '%s\n' "$snap"
 }
@@ -343,7 +343,7 @@ anetbbs_snapshot_verify() {
     anetbbs_root_dir_ok "$snap" || return 1
     [[ -f "$snap/COMPLETE" && -f "$snap/MANIFEST" && -f "$snap/LIST" ]] || return 1
     ( cd "$snap/files" && sha256sum --quiet --strict -c "$snap/MANIFEST" ) >/dev/null 2>&1 || return 1
-    diff -q "$snap/LIST" <(cd "$snap/files" && find . \( -type f -o -type l \) | sort) >/dev/null
+    diff -q "$snap/LIST" <(cd "$snap/files" && find . \( -type f -o -type l \) | LC_ALL=C sort) >/dev/null
 }
 
 # anetbbs_snapshot_restore SNAP FILE...
@@ -369,7 +369,7 @@ anetbbs_snapshot_prune() {
     local root="$1" keep="$2" s
     local -a all
     anetbbs_root_dir_ok "$root" || return 0
-    mapfile -t all < <(find "$root" -mindepth 1 -maxdepth 1 -type d -name 'snap.*' | sort)
+    mapfile -t all < <(find "$root" -mindepth 1 -maxdepth 1 -type d -name 'snap.*' | LC_ALL=C sort)
     (( ${#all[@]} > keep )) || return 0
     for s in "${all[@]:0:${#all[@]}-keep}"; do rm -rf -- "$s"; done
 }

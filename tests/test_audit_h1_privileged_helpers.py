@@ -102,21 +102,21 @@ class RunUpgradeTrustsOnlyEtcConfig(unittest.TestCase):
     def test_env_registry_url_is_ignored(self):
         # .env (service-user-owned) names an attacker host; only the root
         # config counts, so the unsigned URL is refused before any download.
-        r = self._run('v1.1.75', 'https://evil.example/ANetBBS-v1.1.75.tar.gz', 'a' * 64,
+        r = self._run('v1.1.76', 'https://evil.example/ANetBBS-v1.1.76.tar.gz', 'a' * 64,
                       require_signed='no', set_by='operator', registry_host='bbs.a-net.fyi',
                       env_text='REGISTRY_URL=https://evil.example\n')
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("does not match REGISTRY_HOST 'bbs.a-net.fyi'", r.stderr)
 
     def test_missing_registry_host_line_defaults_and_still_refuses_other_hosts(self):
-        r = self._run('v1.1.75', 'https://evil.example/ANetBBS-v1.1.75.tar.gz', 'a' * 64,
+        r = self._run('v1.1.76', 'https://evil.example/ANetBBS-v1.1.76.tar.gz', 'a' * 64,
                       require_signed='no', set_by='operator', registry_host='',
                       env_text='REGISTRY_URL=https://evil.example\n')
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("'bbs.a-net.fyi'", r.stderr)
 
     def test_plain_http_refused(self):
-        r = self._run('v1.1.75', 'http://bbs.a-net.fyi/ANetBBS-v1.1.75.tar.gz', 'a' * 64)
+        r = self._run('v1.1.76', 'http://bbs.a-net.fyi/ANetBBS-v1.1.76.tar.gz', 'a' * 64)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn('over https', r.stderr)
 

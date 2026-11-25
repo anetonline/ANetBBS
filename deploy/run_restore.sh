@@ -152,7 +152,14 @@ sys.exit(0 if c.execute("pragma integrity_check").fetchone()[0] == "ok" else 1)'
             log "restore db: started in anetbbs-restore-db.service; the BBS restarts in a few seconds (journalctl -u anetbbs-restore-db)"
             exit 0
         fi
-        # Detached. Every running ANetBBS service holds the database open,
+        # Detached. The outcome goes to data/backups/.last-restore (written by
+        # the service user) so Admin -> Backups can show it after the restart.
+        _status() {
+            printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" \
+                | as_service sh -c 'cat > "$1.tmp" && mv -f "$1.tmp" "$1"' sh "$INSTALL_DIR/data/backups/.last-restore" || true
+        }
+        _fail() { _status fail "$1"; fail "$1"; }
+        # Every running ANetBBS service holds the database open,
         # so all of them stop for the swap and start again afterwards.
         mapfile -t UNITS < <(systemctl list-units --type=service --state=running --plain --no-legend 'anetbbs*' \
             | awk '{print $1}' | grep -vxE 'anetbbs-(restore-db|upgrade)\.service' || true)
@@ -163,27 +170,36 @@ sys.exit(0 if c.execute("pragma integrity_check").fetchone()[0] == "ok" else 1)'
         # be replayed onto the restored file. Only the latest set is kept.
         TS=$(date +%Y%m%d%H%M%S); PRE="$DST.pre-restore-$TS"
         for s in "" -wal -shm; do
-            if [ -L "$DST$s" ]; then _start_units; fail "refusing: $DST$s is a symlink"; fi
+            if [ -L "$DST$s" ]; then _start_units; _fail "refusing: $DST$s is a symlink"; fi
         done
         as_service find "$INSTALL_DIR/data" -maxdepth 1 -name 'anetbbs.db.pre-restore-*' -delete 2>/dev/null || true
-        for s in "" -wal -shm; do
-            if [ -e "$DST$s" ]; then
-                as_service mv -f -- "$DST$s" "$PRE$s" || { _start_units; fail "could not move $DST$s aside"; }
-            fi
-        done
-        _revert() {
+        # ORIG: what existed before; MOVED: what was actually set aside.
+        ORIG=" "; MOVED=" "
+        for s in "" -wal -shm; do if [ -e "$DST$s" ]; then ORIG+="[$s] "; fi; done
+        _revert() {   # put back exactly what was moved aside; never touch an original that wasn't
             local s
-            as_service rm -f -- "$DST" "$DST-wal" "$DST-shm" || true
             for s in "" -wal -shm; do
-                if [ -e "$PRE$s" ]; then as_service mv -f -- "$PRE$s" "$DST$s" || true; fi
+                if [[ "$MOVED" == *"[$s]"* ]]; then
+                    as_service rm -f -- "$DST$s" || true
+                    as_service mv -f -- "$PRE$s" "$DST$s" || true
+                elif [[ "$ORIG" != *"[$s]"* ]] && [[ "$MOVED" == *"[]"* ]]; then
+                    as_service rm -f -- "$DST$s" || true      # created after the swap began
+                fi
             done
             _start_units
         }
+        for s in "" -wal -shm; do
+            if [[ "$ORIG" == *"[$s]"* ]]; then
+                if as_service mv -f -- "$DST$s" "$PRE$s"; then MOVED+="[$s] "
+                else _revert; _fail "could not move $DST$s aside -- database left as it was"; fi
+            fi
+        done
         log "copying $SRC -> $DST (previous database kept as $PRE)"
-        as_service cp -f --remove-destination -- "$SRC" "$DST" || { _revert; fail "copy failed as $SERVICE_USER -- previous database put back"; }
+        as_service cp -f --remove-destination -- "$SRC" "$DST" || { _revert; _fail "copy from $(basename "$BACKUP") failed -- previous database put back"; }
         as_service chmod 600 -- "$DST"
-        _db_ok "$DST" || { _revert; fail "restored database fails PRAGMA integrity_check -- previous database put back"; }
+        _db_ok "$DST" || { _revert; _fail "restored database fails PRAGMA integrity_check -- previous database put back"; }
         _start_units
+        _status ok "database restored from $(basename "$BACKUP")"
         log "restore db: ok (restarted: ${UNITS[*]:-none})"
         ;;
     *)
