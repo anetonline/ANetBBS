@@ -1,0 +1,5 @@
+# Trusted ANetBBS release-signing keys (OpenSSH allowed_signers format).
+# One line per key:  anetbbs-release <key-type> <base64-public-key> [comment]
+# install.sh / update.sh copy this root-owned to /etc/anetbbs/release-signers.
+# Leave empty (comments only) and release signatures are not checked;
+# unsigned upgrades are then accepted only from the trusted REGISTRY_HOST.

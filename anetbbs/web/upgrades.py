@@ -239,11 +239,17 @@ def _latest_payload(req) -> Optional[dict]:
     # peers can pull the tarball without needing direct fs access.
     url = (req.host_url.rstrip('/')
            + url_for('downloads.serve', filename=top['name']))
+    # Detached OpenSSH signature published next to the tarball, if any.
+    sig_url = None
+    if os.path.isfile(top['path'] + '.sig'):
+        sig_url = (req.host_url.rstrip('/')
+                   + url_for('downloads.serve', filename=top['name'] + '.sig'))
     return {
         'version': top['version'],
         'name': top['name'],
         'url': url,
         'sha256': sha,
+        'sig_url': sig_url,
         'size': top['size'],
         'published_at': datetime.utcfromtimestamp(top['mtime'])
                                 .strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -437,7 +443,8 @@ def _reset_upgrade_log() -> None:
         return
 
 
-def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str) -> list:
+def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str,
+                      sig_url: str = '') -> list:
     """Build the exact (unprivileged-prefix) command the real upgrade
     spawns, WITHOUT the leading ``sudo -n`` -- shared by
     ``_spawn_upgrade()`` below and ``preflight.py``'s sudo-escalation
@@ -463,7 +470,16 @@ def build_upgrade_cmd(wrapper: str, target: str, url: str, sha256: str) -> list:
     thing sudoers ever needs to grant, forever: the wrapper and its
     three plain arguments, nothing else.
     """
-    return [wrapper, target, url, sha256]
+    cmd = [wrapper, target, url, sha256]
+    if sig_url:
+        cmd.append(sig_url)
+    return cmd
+
+
+def _valid_sig_url(value) -> bool:
+    return bool(isinstance(value, str) and value.startswith('https://')
+                and value.endswith('.tar.gz.sig')
+                and not re.search(r'[\s;&|`$<>"\'\\]', value))
 
 
 def _wrapper_path(cfg) -> str:
@@ -511,8 +527,8 @@ def install():
     url = upstream.get('url') or ''
     if not re.fullmatch(r'[0-9a-fA-F]{64}', sha256):
         return jsonify({'ok': False, 'error': 'upstream sha256 invalid'}), 502
-    if not url.startswith(('http://', 'https://')):
-        return jsonify({'ok': False, 'error': 'upstream url invalid'}), 502
+    if not url.startswith('https://'):
+        return jsonify({'ok': False, 'error': 'upstream url must be https'}), 502
 
     with _INSTALL_LOCK:
         if _install_state['running']:
@@ -525,7 +541,10 @@ def install():
     # Truncate prior log, then spawn the wrapper detached so the HTTP
     # request doesn't get killed when update.sh restarts gunicorn.
     _reset_upgrade_log()
-    _spawn_upgrade(wrapper, target, url, sha256, label='upgrade')
+    sig_url = upstream.get('sig_url') or ''
+    if sig_url and not _valid_sig_url(sig_url):
+        return jsonify({'ok': False, 'error': 'upstream signature url invalid'}), 502
+    _spawn_upgrade(wrapper, target, url, sha256, label='upgrade', sig_url=sig_url)
     return jsonify({'ok': True,
                     'log_url': url_for('upgrades_admin.log_tail')})
 
@@ -595,7 +614,7 @@ def _install_container(target, upstream):
 
 
 def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
-                   *, label: str) -> None:
+                   *, label: str, sig_url: str = '') -> None:
     """Spawn the privileged upgrade wrapper via sudo. The wrapper
     itself (``deploy/run_upgrade.sh``) is responsible for detaching
     into its own systemd unit before doing any real work -- this
@@ -622,7 +641,7 @@ def _spawn_upgrade(wrapper: str, target: str, url: str, sha256: str,
     nothing that can ever drift out of sync with how detachment
     actually works internally again.
     """
-    cmd = ['sudo', '-n'] + build_upgrade_cmd(wrapper, target, url, sha256)
+    cmd = ['sudo', '-n'] + build_upgrade_cmd(wrapper, target, url, sha256, sig_url)
 
     def _runner():
         try:
@@ -742,7 +761,12 @@ def rollback():
                                'started_at': time.time(),
                                'version': target})
     _reset_upgrade_log()
-    _spawn_upgrade(wrapper, target, url, sha, label='rollback')
+    sig_url = ''
+    if os.path.isfile(match['path'] + '.sig'):
+        sig_url = (request.host_url.rstrip('/')
+                   + url_for('downloads.serve', filename=match['name'] + '.sig'))
+    _spawn_upgrade(wrapper, target, url, sha, label='rollback',
+                   sig_url=sig_url if _valid_sig_url(sig_url) else '')
     return jsonify({'ok': True,
                     'log_url': url_for('upgrades_admin.log_tail')})
 

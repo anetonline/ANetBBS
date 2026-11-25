@@ -2596,6 +2596,8 @@ fi
 # Root-owned config the privileged helpers trust (audit H-1).
 anetbbs_write_install_conf "$INSTALL_DIR" "$SERVICE_USER" \
     || warn "Could not write /etc/anetbbs.install -- web upgrade/restore will refuse to run"
+anetbbs_install_release_signers "$SOURCE_DIR" \
+    || warn "Could not install /etc/anetbbs/release-signers -- signed releases will not be checked"
 
 # Tarballs built from FAT source trees lose the +x bit on these.
 for w in run_upgrade.sh run_restore.sh; do

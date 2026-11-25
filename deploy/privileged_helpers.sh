@@ -94,34 +94,62 @@ anetbbs_install_root_wrappers() {
     return 0
 }
 
+_anetbbs_env_value() {   # _anetbbs_env_value FILE KEY  -> value without quotes
+    [[ -r "$1" ]] || return 0
+    { grep -m1 "^$2=" "$1" || true; } | cut -d= -f2- | tr -d '"'"'"
+}
+
 # anetbbs_write_install_conf INSTALL_DIR SERVICE_USER [CONF] [ENV_FILE]
-# Write the root-owned config the privileged helpers trust. REGISTRY_HOST
-# is preserved from an existing CONF, else taken from the operator's
-# ANETBBS_REGISTRY_HOST, else the default. It is never copied from the
-# service-user-owned .env; if .env names a different host, warn so the
-# sysop can opt in explicitly.
+# Write the root-owned config the privileged helpers trust.
+#
+# REGISTRY_HOST (the only host an UNSIGNED web upgrade may come from):
+#   1. the operator's ANETBBS_REGISTRY_HOST, when set;
+#   2. else the value already in CONF (never silently changed later);
+#   3. else -- first run of a release that has this file, i.e. migrating
+#      from an older release whose wrapper trusted .env REGISTRY_URL --
+#      the host from .env REGISTRY_URL, so private feeds keep working
+#      with no manual step (same trust the old wrapper already gave it);
+#   4. else bbs.a-net.fyi.
+# After that one-time migration, changing .env never changes the host.
+#
+# REQUIRE_SIGNED_UPGRADES: operator's ANETBBS_REQUIRE_SIGNED_UPGRADES, else
+# the CONF value, else "yes" on a registry hub (REGISTRY_MODE_ENABLED=true;
+# its own releases dir is writable by the service user) and "no" elsewhere.
 anetbbs_write_install_conf() {
     local install_dir="$1" user="$2" conf="${3:-/etc/anetbbs.install}" envf="${4:-$1/.env}"
-    local host="" env_host="" line tmp
-    # Only trust a previous value from a file owned by us (root in real use).
+    local host="" req="" env_host="" line tmp owned=no
     if [[ -f "$conf" && ! -L "$conf" && "$(stat -c %u "$conf")" == "$(id -u)" ]]; then
+        owned=yes
         host=$({ grep -m1 '^REGISTRY_HOST=' "$conf" || true; } | cut -d= -f2- | tr -d '"'"'")
+        req=$({ grep -m1 '^REQUIRE_SIGNED_UPGRADES=' "$conf" || true; } | cut -d= -f2- | tr -d '"'"'")
     fi
-    [[ -n "${ANETBBS_REGISTRY_HOST:-}" ]] && host="$ANETBBS_REGISTRY_HOST"
+    line=$(_anetbbs_env_value "$envf" REGISTRY_URL)
+    env_host="${line#http://}"; env_host="${env_host#https://}"; env_host="${env_host%%/*}"
+    if [[ -n "${ANETBBS_REGISTRY_HOST:-}" ]]; then
+        host="$ANETBBS_REGISTRY_HOST"
+    elif [[ -z "$host" && -n "$env_host" ]]; then
+        host="$env_host"
+        _anetbbs_warn "Trusting upgrade feed host '$host' from .env REGISTRY_URL (one-time migration)."
+    fi
     [[ -n "$host" ]] || host="$ANETBBS_REGISTRY_HOST_DEFAULT"
     if ! [[ "$host" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
         _anetbbs_warn "invalid REGISTRY_HOST '$host' -- using $ANETBBS_REGISTRY_HOST_DEFAULT"
         host="$ANETBBS_REGISTRY_HOST_DEFAULT"
     fi
-    if [[ -r "$envf" ]]; then
-        line=$({ grep -m1 '^REGISTRY_URL=' "$envf" || true; } | cut -d= -f2- | tr -d '"'"'")
-        env_host="${line#http://}"; env_host="${env_host#https://}"; env_host="${env_host%%/*}"
-        if [[ -n "$env_host" && "$env_host" != "$host" ]]; then
-            _anetbbs_warn "REGISTRY_URL in .env points at '$env_host' but the trusted upgrade host is '$host'." \
-                "Web upgrades will only download from '$host'. To trust '$env_host', re-run as root with" \
-                "ANETBBS_REGISTRY_HOST=$env_host."
-        fi
+    if [[ -n "$env_host" && "$env_host" != "$host" ]]; then
+        _anetbbs_warn "REGISTRY_URL in .env points at '$env_host' but unsigned web upgrades are trusted only from '$host'." \
+            "Signed releases install from any host. To trust '$env_host' for unsigned releases, re-run as root with" \
+            "ANETBBS_REGISTRY_HOST=$env_host."
     fi
+    if [[ -n "${ANETBBS_REQUIRE_SIGNED_UPGRADES:-}" ]]; then
+        req="$ANETBBS_REQUIRE_SIGNED_UPGRADES"
+    elif [[ -z "$req" ]]; then
+        case "$(_anetbbs_env_value "$envf" REGISTRY_MODE_ENABLED | tr '[:upper:]' '[:lower:]')" in
+            true|1|yes|on) req=yes ;;
+            *) req=no ;;
+        esac
+    fi
+    [[ "$req" == yes ]] || req=no
     tmp="$conf.tmp.$$"
     ( umask 022
       {
@@ -130,9 +158,28 @@ anetbbs_write_install_conf() {
         echo "INSTALL_DIR=$install_dir"
         echo "SERVICE_USER=$user"
         echo "REGISTRY_HOST=$host"
+        echo "REQUIRE_SIGNED_UPGRADES=$req"
       } > "$tmp" ) || return 1
     if [[ "$(id -u)" == 0 ]]; then chown root:root "$tmp" || return 1; fi
     chmod 0644 "$tmp" && mv -f "$tmp" "$conf"
+    : "$owned"
+}
+
+# anetbbs_install_release_signers SRC_DIR [DEST]
+# Install the trusted release-signing public keys (OpenSSH allowed_signers
+# format) root-owned. Only non-comment content counts; an empty template
+# installs nothing, and signatures then simply aren't checked.
+anetbbs_install_release_signers() {
+    local src="$1/deploy/release-signers" dst="${2:-/etc/anetbbs/release-signers}"
+    [[ -f "$src" && ! -L "$src" ]] || return 0
+    if ! grep -qv '^\s*\(#\|$\)' "$src"; then
+        return 0
+    fi
+    install -d -m 0755 "$(dirname "$dst")" || return 1
+    if [[ "$(id -u)" == 0 ]]; then chown root:root "$(dirname "$dst")"; fi
+    install -m 0644 "$src" "$dst.new" || return 1
+    if [[ "$(id -u)" == 0 ]]; then chown root:root "$dst.new"; fi
+    mv -f "$dst.new" "$dst"
 }
 
 # anetbbs_link_console_scripts INSTALL_DIR [BIN_DIR]

@@ -228,6 +228,10 @@ class PrivilegedHelpersBehaviour(unittest.TestCase):
             conf = Path(tmp) / 'anetbbs.install'
             inst = Path(tmp) / 'inst'
             inst.mkdir()
+            # An install that already has a trusted host never takes a new
+            # one from .env (the one-time migration only applies when there
+            # is no host yet -- see test_audit_upgrade_feeds_and_signing).
+            conf.write_text('INSTALL_DIR=/x\nSERVICE_USER=anetbbs\nREGISTRY_HOST=bbs.a-net.fyi\n')
             (inst / '.env').write_text('REGISTRY_URL=https://evil.example/x\n')
             r = _bash(f'anetbbs_write_install_conf "{inst}" anetbbs "{conf}"',
                       env={'ANETBBS_REGISTRY_HOST': ''})

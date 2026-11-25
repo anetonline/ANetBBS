@@ -44,6 +44,8 @@ CONF=/etc/anetbbs.install
 _conf() { { grep -m1 "^$1=" "$CONF" || true; } | cut -d= -f2- | tr -d '"'"'"; }
 INSTALL_DIR=$(_conf INSTALL_DIR)
 REGISTRY_HOST=$(_conf REGISTRY_HOST)
+REQUIRE_SIGNED=$(_conf REQUIRE_SIGNED_UPGRADES)
+SIGNERS=/etc/anetbbs/release-signers
 [ -n "$REGISTRY_HOST" ] || REGISTRY_HOST="bbs.a-net.fyi"
 [[ "$INSTALL_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "INSTALL_DIR in $CONF is missing or invalid"
 [[ "$REGISTRY_HOST" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || fail "REGISTRY_HOST in $CONF is invalid"
@@ -110,10 +112,11 @@ fi
 # `&` inside conditional regex expressions as a special token even when
 # it's inside a character class, blowing up with "syntax error in
 # conditional expression: unexpected token `&'". Patterns sidestep that.
-[ $# -eq 3 ] || fail "usage: $0 <version> <url> <sha256>"
+[ $# -eq 3 ] || [ $# -eq 4 ] || fail "usage: $0 <version> <url> <sha256> [<sig-url>]"
 VERSION="$1"
 URL="$2"
 SHA="$3"
+SIG_URL="${4:-}"
 
 # Version: vX.Y[ab]Z.NN (alpha/beta build) or vX.Y.Z (stable release,
 # since the v1.0.0 milestone). Accept either form.
@@ -157,9 +160,34 @@ log "install dir: $INSTALL_DIR"
 
 _url_no_scheme="${URL#https://}"
 URL_HOST="${_url_no_scheme%%/*}"
-[ "$URL_HOST" = "$REGISTRY_HOST" ] \
-    || fail "url host '$URL_HOST' does not match this install's trusted REGISTRY_HOST '$REGISTRY_HOST' -- refusing to download from an unexpected origin"
-log "url origin verified against registry host: $REGISTRY_HOST"
+
+# Release signatures (OpenSSH `ssh-keygen -Y`). A release signed by a key
+# in root-owned /etc/anetbbs/release-signers may come from ANY https
+# host -- mirrors and private feeds that redistribute signed releases
+# just work. An unsigned release is accepted only from the trusted
+# REGISTRY_HOST, and only when this install doesn't require signatures.
+HAVE_SIGNERS=no
+if [ -f "$SIGNERS" ] && [ ! -L "$SIGNERS" ] && [ -s "$SIGNERS" ] \
+        && [ "$(stat -c %u "$SIGNERS")" = 0 ] \
+        && [ $(( 0$(stat -c %a "$SIGNERS") & 022 )) -eq 0 ]; then
+    HAVE_SIGNERS=yes
+fi
+if [ -n "$SIG_URL" ]; then
+    case "$SIG_URL" in
+        https://*.tar.gz.sig) ;;
+        *) fail "signature url $SIG_URL must be https and end in .tar.gz.sig" ;;
+    esac
+    case "$SIG_URL" in
+        *[\ \;\&\|\`\$\<\>\"\'\\]*) fail "signature url contains shell metacharacters" ;;
+    esac
+fi
+if [ -z "$SIG_URL" ] || [ "$HAVE_SIGNERS" != yes ]; then
+    [ "$REQUIRE_SIGNED" != yes ] \
+        || fail "this install requires signed upgrades and no verifiable signature was offered"
+    [ "$URL_HOST" = "$REGISTRY_HOST" ] \
+        || fail "url host '$URL_HOST' does not match this install's trusted REGISTRY_HOST '$REGISTRY_HOST' -- refusing an unsigned download from an unexpected origin"
+    log "url origin verified against registry host: $REGISTRY_HOST (unsigned release)"
+fi
 
 # ── Download tarball to a unique tempdir we own ───────────────────────────
 TMP=$(mktemp -d -t anetbbs-upgrade-XXXXXX)
@@ -188,6 +216,17 @@ if [ "$ACTUAL" != "$SHA_LC" ]; then
     fail "sha256 mismatch — expected $SHA_LC, got $ACTUAL"
 fi
 log "sha256 verified"
+
+if [ -n "$SIG_URL" ] && [ "$HAVE_SIGNERS" = yes ]; then
+    SIGFILE="$TMP/release.sig"
+    curl --fail --silent --show-error --proto '=https' --max-redirs 3 \
+         --connect-timeout 15 --max-time 60 --max-filesize 65536 \
+         -o "$SIGFILE" "$SIG_URL" || fail "signature download failed"
+    ssh-keygen -Y verify -f "$SIGNERS" -I anetbbs-release -n anetbbs-release \
+        -s "$SIGFILE" < "$TARBALL" >/dev/null 2>&1 \
+        || fail "release signature did NOT verify against $SIGNERS -- refusing to install"
+    log "release signature verified ($SIGNERS)"
+fi
 
 # ── Extract ───────────────────────────────────────────────────────────────
 EXTRACT="$TMP/ext"

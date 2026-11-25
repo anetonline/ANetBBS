@@ -16,7 +16,7 @@ GOOD_SHA = 'ab' * 32
 
 def _payload(**kw):
     p = {'version': 'v1.1.73', 'name': 'ANetBBS-v1.1.73.tar.gz',
-         'url': 'http://localhost:5000/downloads/ANetBBS-v1.1.73.tar.gz',
+         'url': 'https://bbs.example/downloads/ANetBBS-v1.1.73.tar.gz',
          'sha256': GOOD_SHA, 'size': 1234,
          'published_at': '2026-11-23T12:00:00Z'}
     p.update(kw)

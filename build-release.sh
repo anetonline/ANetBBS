@@ -170,3 +170,30 @@ if ! tar tf "$OUT" "${TOPDIR}/data/dos-games/duke3d.zip" >/dev/null 2>&1; then
 fi
 
 echo "Sanity check passed — ${TOPDIR}/update.sh present, no sensitive files."
+
+# ── sha256 sidecar + optional release signature ─────────────────────────────
+# The .sha256 sidecar is what /admin/upgrades/ and peers verify. A detached
+# OpenSSH signature (.sig) lets every install that trusts the key in
+# deploy/release-signers verify the release no matter which host serves it
+# (mirrors, private feeds). Signing key: ANETBBS_SIGNING_KEY, default
+# ~/.config/anetbbs/release_signing_key. Create one once with:
+#   ssh-keygen -t ed25519 -f ~/.config/anetbbs/release_signing_key -C anetbbs-release
+# and add "anetbbs-release <contents of the .pub file>" to deploy/release-signers.
+( cd "$(dirname "$OUT")" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256" )
+chmod 0644 "$OUT" "$OUT.sha256"
+SIGNING_KEY="${ANETBBS_SIGNING_KEY:-$HOME/.config/anetbbs/release_signing_key}"
+if [[ -f "$SIGNING_KEY" ]]; then
+  rm -f "$OUT.sig"
+  ssh-keygen -Y sign -f "$SIGNING_KEY" -n anetbbs-release "$OUT" >/dev/null \
+    || { echo "ERROR: signing failed"; exit 1; }
+  chmod 0644 "$OUT.sig"
+  if [[ -s "deploy/release-signers" ]] && grep -qv '^\s*\(#\|$\)' deploy/release-signers; then
+    ssh-keygen -Y verify -f deploy/release-signers -I anetbbs-release -n anetbbs-release \
+      -s "$OUT.sig" < "$OUT" >/dev/null \
+      || { echo "ERROR: signature does not verify against deploy/release-signers"; exit 1; }
+  fi
+  echo "Signed: $OUT.sig"
+else
+  echo "NOTE: no signing key at $SIGNING_KEY -- release is unsigned."
+fi
+echo "Upload together: $OUT  $OUT.sha256${SIGNING_KEY:+  (and $OUT.sig if signed)}"
