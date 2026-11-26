@@ -88,6 +88,19 @@ jobs:
           push: false
           tags: anetbbs:ci
 
+      - name: Fetch this workflow commit's tests (manual tag builds only)
+        # Older release tags predate fixes to their test fixtures (e.g. the
+        # H-1 fixtures that assumed a non-root runner). The image is still
+        # built from the tag's own tree above; only the test suite run
+        # against it comes from the workflow commit. Checked out AFTER the
+        # build, outside the image's build context.
+        if: inputs.release_tag != ''
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .ci-workflow-tree
+          sparse-checkout: tests
+
       - name: Run test suite inside the built image
         # Batched, not a single `pytest tests/` invocation. Real CI
         # failure found live (2026-08-28, run 33169124736): the whole
@@ -120,9 +133,15 @@ jobs:
         # tests/test_docker_ci_test_inputs.py fails if a test starts
         # reading another dockerignored repo file without a mount here.
         run: |
+          TESTS_MOUNT=()
+          if [ -d .ci-workflow-tree/tests ]; then
+            TESTS_MOUNT=(-v "$PWD/.ci-workflow-tree/tests:/app/tests")
+            echo "testing the $(git rev-parse --short HEAD) image with tests from $(git -C .ci-workflow-tree rev-parse --short HEAD)"
+          fi
           docker run --rm \
             -e FLASK_ENV=testing \
             -v "$PWD/deploy/sudoers.anetbbs:/app/deploy/sudoers.anetbbs:ro" \
+            "${TESTS_MOUNT[@]}" \
             anetbbs:ci \
             bash -c '
               set -e
