@@ -26,12 +26,37 @@ on:
     tags: ['v*', '*.*.*']
   pull_request:
     branches: [main]
+  # Manual run: build, test and (optionally) publish an EXISTING release
+  # tag's tree with this workflow definition. Used when a tag's own push
+  # run failed for a CI-environment reason and its images never reached
+  # GHCR. It never creates or moves a tag.
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag to build (e.g. v1.1.76); empty = this ref'
+        required: false
+        default: ''
+      publish:
+        description: 'Push the tested image to GHCR'
+        type: boolean
+        default: false
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || '' }}
+
+      - name: Check in-image test inputs (fails fast, before the build)
+        # The in-image run below cannot see files .dockerignore excludes.
+        # This checkout-side guard fails if a test reads such a file
+        # without the test step mounting it (see the test step's notes).
+        run: |
+          python3 -m venv /tmp/guard-venv
+          /tmp/guard-venv/bin/pip install --quiet pyyaml
+          /tmp/guard-venv/bin/python -m unittest discover -s tests -p test_docker_ci_test_inputs.py -v
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -68,9 +93,19 @@ jobs:
         # though the equivalent piped command worked fine on the dev
         # machine's own coreutils. Listing to a real file first sidesteps
         # the whole seekability question regardless of coreutils version.
+        #
+        # Real CI failure found live (v1.1.76 push, runs 45851106977 and
+        # 45851106629): .dockerignore keeps deploy/sudoers.anetbbs out of
+        # the runtime image (bare-metal only), but the H-1 security test
+        # reads that template. The test is not skipped or weakened: the
+        # checkout's own copy is mounted read-only at the same path, so
+        # the test checks exactly the file that ships in the release.
+        # tests/test_docker_ci_test_inputs.py fails if a test starts
+        # reading another dockerignored repo file without a mount here.
         run: |
           docker run --rm \
             -e FLASK_ENV=testing \
+            -v "$PWD/deploy/sudoers.anetbbs:/app/deploy/sudoers.anetbbs:ro" \
             anetbbs:ci \
             bash -c '
               set -e
@@ -84,7 +119,7 @@ jobs:
             '
 
   publish:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish && inputs.release_tag != '')
     needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
@@ -92,6 +127,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || '' }}
+          fetch-depth: 0
 
       - name: Set up QEMU (for arm64 emulation)
         uses: docker/setup-qemu-action@v3
@@ -108,7 +146,21 @@ jobs:
 
       - name: Extract version tag
         id: ver
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a release tag: $tag"; exit 1; }
+          # the checked-out tree must be exactly that tag
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$tag^{commit}")" ] || { echo "HEAD is not $tag"; exit 1; }
+          newest="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "$tag" = "$newest" ]; then
+            echo "tags=ghcr.io/anetonline/anetbbs:$tag,ghcr.io/anetonline/anetbbs:latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=ghcr.io/anetonline/anetbbs:$tag" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build + push multi-arch image
         uses: docker/build-push-action@v6
@@ -117,6 +169,4 @@ jobs:
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/anetonline/anetbbs:${{ steps.ver.outputs.tag }}
-            ghcr.io/anetonline/anetbbs:latest
+          tags: ${{ steps.ver.outputs.tags }}
