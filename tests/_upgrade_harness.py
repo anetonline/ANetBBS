@@ -64,7 +64,7 @@ class Wrapper:
     """A sandboxed copy of the real wrapper plus its trusted files."""
 
     def __init__(self, tmp, *, require_signed='yes', set_by='default',
-                 registry_host='bbs.a-net.fyi', installed='v1.1.75'):
+                 registry_host='bbs.a-net.fyi', installed='v1.1.76'):
         self.tmp = Path(tmp)
         self.inst = self.tmp / 'inst'
         (self.inst / 'data').mkdir(parents=True, exist_ok=True)

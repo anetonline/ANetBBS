@@ -174,7 +174,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
         rm -rf /usr/local/libexec/anetbbs /etc/anetbbs /var/log/anetbbs /var/lib/anetbbs
     elif [ ! -f /etc/anetbbs.install ] && [ -f /etc/sudoers.d/anetbbs ] \
             && grep -qF "$REAL_UNI_DIR/deploy/" /etc/sudoers.d/anetbbs; then
-        rm -f /etc/sudoers.d/anetbbs      # grant from a release before v1.1.75
+        rm -f /etc/sudoers.d/anetbbs      # grant from a release before v1.1.76
     else
         warn "/etc/anetbbs.install and the sudoers grant belong to another install (or are absent); left in place"
     fi

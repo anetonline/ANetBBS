@@ -1,20 +1,20 @@
 # ANetBBS Changelog
 
-Current private test candidate: **`v1.1.75`** (November 2026). This file covers `v1.0.0`
+Current private test candidate: **`v1.1.76`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
 
-## v1.1.75 — Security and reliability maintenance release (November 2026)
+## v1.1.76 — Security and reliability maintenance release (November 2026)
 
 Security maintenance release from a full audit after v1.1.73: hardening
 across installation and upgrades, the web interface, accounts and
 sessions, file transfers, echomail and netmail, Internet Mail, MRC chat,
 the Docker deployment, and outbound connections. All sysops are encouraged
-to update promptly. (v1.1.74 was an internal build that was never
-published; v1.1.75 replaces it.)
+to update promptly. (v1.1.74 and v1.1.75 were internal builds that were
+never published; v1.1.76 replaces them.)
 
 Fixes and improvements:
 

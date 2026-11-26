@@ -46,25 +46,25 @@ class WrapperTransport(unittest.TestCase):
 
     def test_non_loopback_http_and_disguised_hosts_refused(self):
         sha = 'a' * 64
-        for url in ('http://bbs.a-net.fyi/ANetBBS-v1.1.75.tar.gz',
-                    'http://10.0.0.5:5000/ANetBBS-v1.1.75.tar.gz',
-                    'http://localhost.evil.example/ANetBBS-v1.1.75.tar.gz',
-                    'http://127.0.0.1:5000@evil.example/ANetBBS-v1.1.75.tar.gz',
-                    'http://localhost:5evil.example/ANetBBS-v1.1.75.tar.gz'):
-            r = self.w.run('v1.1.75', url, sha)
+        for url in ('http://bbs.a-net.fyi/ANetBBS-v1.1.77.tar.gz',
+                    'http://10.0.0.5:5000/ANetBBS-v1.1.77.tar.gz',
+                    'http://localhost.evil.example/ANetBBS-v1.1.77.tar.gz',
+                    'http://127.0.0.1:5000@evil.example/ANetBBS-v1.1.77.tar.gz',
+                    'http://localhost:5evil.example/ANetBBS-v1.1.77.tar.gz'):
+            r = self.w.run('v1.1.77', url, sha)
             self.assertNotEqual(r.returncode, 0, url)
             self.assertNotIn('downloading', r.stdout + r.stderr, url)
 
     def test_unsigned_loopback_http_downloads_when_operator_allows_it(self):
         srv_dir = os.path.join(self.tmp, 'srv')
         os.makedirs(srv_dir)
-        with open(os.path.join(srv_dir, 'ANetBBS-v1.1.75.tar.gz'), 'wb') as f:
+        with open(os.path.join(srv_dir, 'ANetBBS-v1.1.77.tar.gz'), 'wb') as f:
             f.write(b'not the expected bytes')
         srv = _serve(srv_dir)
         self.addCleanup(srv.shutdown)
         host = f'127.0.0.1:{srv.server_address[1]}'
         self.w.write_conf(require_signed='no', set_by='operator', registry_host=host)
-        r = self.w.run('v1.1.75', f'http://{host}/ANetBBS-v1.1.75.tar.gz', 'a' * 64)
+        r = self.w.run('v1.1.77', f'http://{host}/ANetBBS-v1.1.77.tar.gz', 'a' * 64)
         self.assertIn('sha256 mismatch', r.stderr)       # downloaded over loopback http
 
     # The hub's signed loopback-http path, end to end, is covered by

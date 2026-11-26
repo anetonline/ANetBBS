@@ -1,11 +1,11 @@
-# ANetBBS v1.1.75 — security and reliability maintenance release
+# ANetBBS v1.1.76 — security and reliability maintenance release
 
 Security maintenance release from a full audit after v1.1.73: hardening
 across installation and upgrades, the web interface, accounts and
 sessions, file transfers, echomail and netmail, Internet Mail, MRC chat,
 the Docker deployment, and outbound connections. All sysops are encouraged
-to update promptly. (v1.1.74 was an internal build that was never
-published; v1.1.75 replaces it.)
+to update promptly. (v1.1.74 and v1.1.75 were internal builds that were
+never published; v1.1.76 replaces them.)
 
 Fixes and improvements:
 
