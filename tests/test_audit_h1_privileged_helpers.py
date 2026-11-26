@@ -190,13 +190,53 @@ def _bash(script, env=None):
                           timeout=30, env=dict(os.environ, **(env or {})))
 
 
+def _untrusted_dir(tmp):
+    """A directory a non-root account controls, whoever runs the tests.
+
+    As a normal user, mkdtemp() already gives one. As root (the Docker CI
+    image runs the suite as root) mkdtemp() gives a root-owned 0700 dir,
+    which IS root-trusted -- so hand it to nobody, the case the check
+    exists for. Real CI failure (v1.1.76 Docker run): the old fixture
+    assumed a non-root runner."""
+    if os.geteuid() == 0:
+        os.chown(tmp, 65534, 65534)
+    return tmp
+
+
 class PrivilegedHelpersBehaviour(unittest.TestCase):
     def test_dir_trust_check(self):
         with tempfile.TemporaryDirectory() as tmp:
+            d = _untrusted_dir(tmp)
             r = _bash(f'_anetbbs_dir_is_root_trusted / nobody && echo ROOT_OK; '
-                      f'_anetbbs_dir_is_root_trusted "{tmp}" nobody || echo TMP_REFUSED')
+                      f'_anetbbs_dir_is_root_trusted "{d}" nobody || echo TMP_REFUSED')
             self.assertIn('ROOT_OK', r.stdout, r.stderr)
             self.assertIn('TMP_REFUSED', r.stdout, r.stderr)
+
+    @unittest.skipUnless(os.geteuid() == 0, 'needs root to create root-owned directories')
+    def test_dir_trust_check_root_owned_cases(self):
+        # Only meaningful as root, which is how the helpers run on real hosts.
+        import grp
+        nogroup = grp.getgrgid(65534).gr_name
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = {}
+            for name, mode, gid in (('ok', 0o755, 0), ('world', 0o777, 0), ('sticky', 0o1777, 0),
+                                    ('grp_svc', 0o775, 65534), ('grp_other', 0o775, 0)):
+                d = os.path.join(tmp, name)
+                os.mkdir(d)
+                os.chown(d, 0, gid)
+                os.chmod(d, mode)
+                cases[name] = d
+            script = '; '.join(
+                f'if _anetbbs_dir_is_root_trusted "{d}" nobody; then echo "{n}=trusted"; else echo "{n}=refused"; fi'
+                for n, d in cases.items())
+            r = _bash(script)
+            got = dict(l.split('=') for l in r.stdout.split())
+            # grp_svc: group-writable by gid 65534, nobody's primary group -> the
+            # service user could write it. grp_other: group root, nobody not a member.
+            self.assertIn(nogroup, subprocess.run(['id', '-nG', 'nobody'], capture_output=True,
+                                                  text=True).stdout.split())
+            self.assertEqual(got, {'ok': 'trusted', 'world': 'refused', 'sticky': 'refused',
+                                   'grp_svc': 'refused', 'grp_other': 'trusted'}, r.stderr)
 
     def test_wrapper_install_refuses_untrusted_destination(self):
         with tempfile.TemporaryDirectory() as tmp:

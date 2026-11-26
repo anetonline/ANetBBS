@@ -367,6 +367,12 @@ class InstallGate(unittest.TestCase):
         inst = tmp / 'opt-anetbbs'
         inst.mkdir()
         (inst / '.env').write_text('x=1\n')
+        if os.geteuid() == 0:
+            # Run as root (the Docker CI image), mkdtemp() makes a root-owned
+            # tree, which the gate rightly accepts. Make it what the test is
+            # about: a tree a non-root account controls. (Real CI failure.)
+            for p in (inst, inst / '.env'):
+                os.chown(p, 65534, 65534)
         r = self._run(inst, tmp / 'src')
         self.assertNotIn('PASSED', r.stdout)
         self.assertIn('Refusing to install as root', r.stdout)

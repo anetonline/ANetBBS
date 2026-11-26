@@ -21,7 +21,10 @@ import shutil
 import subprocess
 import unittest
 
-import yaml
+try:
+    import yaml
+except ImportError:     # not in the runtime image; this check runs from the checkout
+    yaml = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKFLOW = os.path.join(ROOT, '.github', 'workflows', 'docker-build.yml')
@@ -117,6 +120,7 @@ def _referenced_paths():
                      and os.path.exists(os.path.join(ROOT, '.git')),
                      'needs the git checkout, .github/ and .dockerignore (not present inside the image)')
 @unittest.skipUnless(shutil.which('git'), 'git not available')
+@unittest.skipIf(yaml is None, 'PyYAML not installed')
 class DockerCiTestInputs(unittest.TestCase):
     def _test_step_run(self):
         wf = yaml.safe_load(open(WORKFLOW))
