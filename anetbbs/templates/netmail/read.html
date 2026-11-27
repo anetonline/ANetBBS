@@ -37,6 +37,10 @@
             {% endif %}
             <dt class="col-sm-2">CHRS</dt>
             <dd class="col-sm-10">{{ m.chrs }}</dd>
+            {% if m.direction == 'outbound' and m.error_message %}
+            <dt class="col-sm-2">Delivery</dt>
+            <dd class="col-sm-10 text-warning">{{ m.error_message }}</dd>
+            {% endif %}
         </dl>
     </div>
 </div>

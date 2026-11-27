@@ -962,7 +962,7 @@ class BinkPClient:
                  transcript: list = None, packet_password: str = '',
                  default_crash: bool = False, default_hold: bool = False,
                  default_direct: bool = False, compress_outbound: bool = False,
-                 freq_requests: list = None):
+                 freq_requests: list = None, require_remote_address: bool = False):
         self.host = host
         self.port = port
         self.our_address = our_address
@@ -970,6 +970,10 @@ class BinkPClient:
         self.password = password
         self.timeout = timeout
         self.use_tls = use_tls
+        # Anonymous direct mail has no link password to compensate for
+        # stale DNS pointing at a different FTN system.
+        self.require_remote_address = require_remote_address
+        self.acknowledged_messages = 0
         # FTS-0001 packet-HEADER password + per-network netmail flavor
         # defaults -- distinct from `password` above, which is the BinkP
         # SESSION auth secret. See EchomailNetwork's own model comment.
@@ -1053,6 +1057,7 @@ class BinkPClient:
         result = {'received': [], 'sent': 0, 'hatched_ids': [], 'hatch_failures': [],
                   'outbound_dir_sent': 0, 'outbound_dir_failures': [],
                   'freq_sent_ids': [], 'freq_failed_ids': []}
+        self.acknowledged_messages = 0
         # Persistent inbound path — the prior /tmp default was tmpfs on
         # most distros so anything stashed vanished on restart. Computed
         # once here since _wait_got()/_send_messages() may now also need
@@ -1073,6 +1078,10 @@ class BinkPClient:
             self._handshake()
             if outbound_messages:
                 result['sent'] = self._send_messages(outbound_messages, data_dir)
+                # Preserve the receipt if a later receive/disconnect
+                # fails. Direct-delivery callers must not resend an
+                # already acknowledged packet on that later failure.
+                self.acknowledged_messages = result['sent']
             if hatch_items:
                 result['hatched_ids'], result['hatch_failures'] = \
                     self._send_hatch(hatch_items)
@@ -1672,8 +1681,8 @@ class BinkPClient:
             tok_variants = {tok, bare}
             tok_variants.update(v.lower() for v in _point_variants(bare))
             if tok_variants & expected_variants:
-                return
-        if remote_tokens:
+                return True
+        if remote_tokens and not self.require_remote_address:
             logger.warning(
                 "BinkP: hub at %s:%s claims address(es) %r, none of "
                 "which match our configured hub_address %r -- possible "
@@ -1708,7 +1717,9 @@ class BinkPClient:
                        f'TIME {_dt.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")}')
         from .. import __version__ as _anetbbs_version
         self._send_cmd(CMD_NUL, f'VER ANetBBS/{_anetbbs_version} binkp/1.1')
-        self._send_cmd(CMD_NUL, 'OPT CRAM-MD5')
+        # The answering peer advertises CRAM-MD5 with its challenge.
+        # A bare OPT CRAM-MD5 announcement is unnecessary and is
+        # rejected by Spitfire-X as an invalid challenge option.
         # Send ONE address per M_ADR -- qualified (`addr@domain`) when we
         # have a domain, bare otherwise. Previously sent BOTH forms as a
         # "cover whichever form the peer keys on" compat measure, but
@@ -1735,6 +1746,7 @@ class BinkPClient:
         cram_challenge = None
         password_sent = False
         authenticated = False
+        remote_verified = False
 
         # Real gap found in a security/performance audit: this was
         # still hard-capped at 50 frames, the same "fixed iteration
@@ -1769,7 +1781,11 @@ class BinkPClient:
                             logger.info("BinkP: hub offered CRAM-MD5 challenge")
             elif cmd == CMD_ADR:
                 logger.debug("BinkP remote ADR: %s", text)
-                self._verify_remote_address(text)
+                remote_verified = bool(self._verify_remote_address(text)) or remote_verified
+                if self.require_remote_address and not remote_verified:
+                    # Do not disclose a configured recipient's password
+                    # to a host announcing only unrelated addresses.
+                    continue
                 if password_sent:
                     continue
                 pw = self.password or '-'
@@ -1799,6 +1815,9 @@ class BinkPClient:
 
         if not authenticated:
             raise ConnectionError("BinkP: handshake did not complete")
+        if self.require_remote_address and not remote_verified:
+            raise ConnectionError(
+                f'BinkP: peer did not announce expected recipient {self.hub_address}')
 
     def _send_messages(self, messages, data_dir: str) -> int:
         """Package and send outbound messages as a .pkt file.

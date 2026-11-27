@@ -168,7 +168,7 @@ def poll_node_now(app, node_id: int):
             _do_poll_node(app, node)
 
 
-def trigger_immediate_delivery(app, network_id=None, to_address=None):
+def trigger_immediate_delivery(app, network_id=None, to_address=None, netmail_id=None):
     """Best-effort out-of-schedule delivery attempt for a crash-flagged
     netmail or file-echo item -- dial out RIGHT NOW instead of waiting
     for the next scheduled poll. Runs synchronously in the calling
@@ -177,7 +177,11 @@ def trigger_immediate_delivery(app, network_id=None, to_address=None):
     the netmail compose route), since a real BinkP dial can take several
     seconds and this is typically called from a web request handler.
 
-    Prefers a direct dial to a known, dialable downstream BinkPNode
+    With netmail_id, deliver only that message to its configured or
+    nodelisted recipient; errors leave it queued for direct retry.
+
+    Without netmail_id (the file-echo compatibility path), prefers a
+    direct dial to a known, dialable downstream BinkPNode
     matching *to_address* -- real crash-mail semantics is straight to
     the actual destination, not relayed through the hub. Falls back to
     polling the owning EchomailNetwork's hub otherwise (the node has no
@@ -189,6 +193,13 @@ def trigger_immediate_delivery(app, network_id=None, to_address=None):
     queued for the next normal scheduled poll either way, exactly as if
     this had never been called.
     """
+    # Netmail has a recipient-specific queue and must not use the file
+    # echo helper's best-effort hub fallback. Preserve that behavior for
+    # existing file-echo callers that do not supply a message id.
+    if netmail_id is not None:
+        from .direct_netmail import send_queued_netmail
+        send_queued_netmail(app, netmail_id)
+        return
     node = None
     if to_address:
         addrs = [to_address]
@@ -401,6 +412,11 @@ def _do_poll(app, network):
     appropriate client, and imports inbound messages.
     """
     from ..models import db, EchomailMessage, EchomailPollLog
+    from .direct_netmail import retry_queued_netmail
+
+    # Direct mail has a recipient-specific route even when this BBS
+    # hosts the network and therefore must not dial its own hub.
+    direct_attempts = retry_queued_netmail(app, network)
 
     # Check self-referential BEFORE creating any log row at all -- this
     # is expected, static, unchanging configuration state (a hub's own
@@ -414,6 +430,9 @@ def _do_poll(app, network):
     # this specific thing; the web UI shouldn't see it at all.
     self_ref = _self_referential_reason(network, app)
     if self_ref:
+        if direct_attempts:
+            network.last_poll_at = datetime.utcnow()
+            db.session.commit()
         logger.debug("Poller: skipping %s -- %s. This is expected if "
                      "this install is the hub for this network; peer "
                      "sysops should point their own install at the hub, "
@@ -514,7 +533,13 @@ def _do_poll(app, network):
                 # (get_pending_netmail_for_network's own include_hold
                 # path in binkp_server.py), just never on our schedule.
                 NetmailMessage.is_hold.isnot(True),
+                NetmailMessage.is_crash.isnot(True),
             ).all()
+            # Scheduled retries follow the same direct route as the
+            # compose-time attempt. Never put a failed crash message in
+            # the hub's packet merely because it remains queued.
+            if network.default_crash or network.default_direct:
+                outbound_nm = []
 
         outbound = list(outbound_echo) + [_NetmailAdapter(nm) for nm in outbound_nm]
 
@@ -1237,7 +1262,7 @@ def _import_message(network, msg_data: dict) -> int:
     return 1
 
 
-def _import_netmail(network, msg_data: dict) -> int:
+def _import_netmail(network, msg_data: dict, trust=None) -> int:
     """Import an inbound netmail message and link it to a local user
     when the recipient name or to_address matches one of their AKAs.
     Falls back to the configured DefaultRecipient if no match.
@@ -1336,6 +1361,7 @@ def _import_netmail(network, msg_data: dict) -> int:
         kludges=_json.dumps(msg_data.get('kludges') or []),
         direction='inbound',
         status='received',
+        trust=trust,
         created_at=datetime.utcnow(),
         received_at=datetime.utcnow(),
     )

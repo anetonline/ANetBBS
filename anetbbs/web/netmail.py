@@ -474,16 +474,19 @@ def compose(reply_to=None):
             _app = current_app._get_current_object()
             _network_id = m.network_id
             _to_address = m.to_address
+            _netmail_id = m.id
 
             def _run():
                 try:
                     trigger_immediate_delivery(_app, network_id=_network_id,
-                                               to_address=_to_address)
+                                               to_address=_to_address,
+                                               netmail_id=_netmail_id)
                 except Exception as exc:
                     _app.logger.error('Crash immediate-delivery thread error: %s', exc)
 
             threading.Thread(target=_run, daemon=True).start()
-            flash('Crash-flagged -- attempting immediate delivery now.', 'info')
+            flash('Attempting direct delivery to the recipient now. '
+                  'If unsuccessful, the message stays queued for a direct retry.', 'info')
             return redirect(url_for('netmail.read', msg_id=m.id))
         flash('Netmail queued for next outbound poll.', 'success')
         return redirect(url_for('netmail.read', msg_id=m.id))

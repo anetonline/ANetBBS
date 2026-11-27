@@ -1423,6 +1423,7 @@ class NetmailMessage(db.Model):
     # status values:
     #   'draft' - user is composing; not queued
     #   'queued' - ready to send on next poll
+    #   'sending' - claimed by a direct-delivery worker (lease below)
     #   'sent' - successfully transmitted to uplink/peer
     #   'received' - inbound, sitting in user's inbox
     #   'read' - inbound, user has read it
@@ -1431,6 +1432,9 @@ class NetmailMessage(db.Model):
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     sent_at = db.Column(db.DateTime, index=True)
+    # Lease for recipient-specific delivery. Other queue readers only
+    # select 'queued'; interrupted 'sending' claims expire after 30 min.
+    delivery_started_at = db.Column(db.DateTime)
     # Indexed as of v1.0b2.145 -- poller.py's content-based netmail dedup
     # fallback (v1.0b2.143) filters on this column to bound its lookback
     # window, but without an index that filter does nothing at the SQL

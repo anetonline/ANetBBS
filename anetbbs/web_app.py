@@ -1300,6 +1300,7 @@ def _lightweight_migrate(app):
     # NULL so their numeric login cookies remain valid until password change.
     _ensure_column('users', 'auth_version', 'VARCHAR(64)')
     _ensure_column('password_reset_tokens', 'auth_version', 'VARCHAR(64)')
+    _ensure_column('netmail_messages', 'delivery_started_at', 'TIMESTAMP')
 
     # Posts: pinning + locking
     _ensure_column('posts', 'is_pinned',

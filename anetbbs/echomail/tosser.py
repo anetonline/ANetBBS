@@ -377,7 +377,8 @@ def get_pending_netmail_for_network(network_id: int, include_hold=False):
     get_pending_netmail_for_node() above -- see its docstring, including
     the include_hold reasoning.
     """
-    from ..models import NetmailMessage
+    from ..models import db, NetmailMessage, EchomailNetwork
+    from .direct_netmail import address_key, requires_direct
 
     query = NetmailMessage.query.filter(
         NetmailMessage.network_id == network_id,
@@ -385,7 +386,15 @@ def get_pending_netmail_for_network(network_id: int, include_hold=False):
         NetmailMessage.status == 'queued')
     if not include_hold:
         query = query.filter(NetmailMessage.is_hold.isnot(True))
-    return query.all()
+    messages = query.all()
+    network = db.session.get(EchomailNetwork, network_id)
+    if network is None:
+        return messages
+    # An upstream hub polling IN must not collect direct mail intended
+    # for some other nodelisted recipient. It may collect its own mail.
+    hub = address_key(network.hub_address)
+    return [m for m in messages if not requires_direct(m, network)
+            or (hub is not None and address_key(m.to_address) == hub)]
 
 
 def mark_netmail_sent(netmail_rows: list) -> int:
