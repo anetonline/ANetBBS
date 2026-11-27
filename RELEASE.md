@@ -1,3 +1,19 @@
+# ANetBBS v1.1.77 — direct netmail delivery fixes
+
+- Resolve direct-netmail recipients through configured BinkP connections
+  or the selected network's nodelist, including custom ports.
+- Keep failed direct messages queued for direct retry.
+- Preserve recipient-specific credentials and require the expected peer AKA.
+- Prevent duplicate concurrent sends and retain acknowledged delivery status.
+- Fix Spitfire-X handshake compatibility while retaining CRAM-MD5 authentication.
+- Show direct-delivery errors and routing details.
+- Add regression coverage and the automatic delivery-lease schema migration.
+
+Validation: 72 targeted tests passed; live direct packet transfer to
+Spitfire-X was acknowledged successfully.
+
+---
+
 # ANetBBS v1.1.76 — security and reliability maintenance release
 
 Security maintenance release from a full audit after v1.1.73: hardening
