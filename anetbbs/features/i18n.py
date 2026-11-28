@@ -137,6 +137,9 @@ def get_translation(lang, key, default):
 # SysOps can edit/add translations; seeding never replaces an existing row.
 DEFAULT_TRANSLATIONS = {
     'es': {
+        'file_areas.description_view': 'Vista de descripciones:',
+        'file_areas.description_compact': 'Compacta',
+        'file_areas.description_full': 'Completa',
         'admin.hub.section.content': 'Contenido y presentación',
         'admin.hub.section.files': 'Gestión de archivos',
         'admin.hub.section.messages': 'Sistema de mensajes',
@@ -894,6 +897,9 @@ DEFAULT_TRANSLATIONS = {
         'validation.username_taken': 'Ese nombre de usuario ya está en uso. Elige otro.',
     },
     'de': {
+        'file_areas.description_view': 'Beschreibungsansicht:',
+        'file_areas.description_compact': 'Kompakt',
+        'file_areas.description_full': 'Vollständig',
         'nav.home': 'Startseite',
         'nav.messaging': 'Nachrichten',
         'nav.chat': 'Chat',
