@@ -1,11 +1,41 @@
 # ANetBBS Changelog
 
-Current private test candidate: **`v1.1.76`** (November 2026). This file covers `v1.0.0`
+Current private test candidate: **`v1.1.78`** (November 2026). This file covers `v1.0.0`
 onward, which follows standard semantic versioning — patch releases are
 `v1.0.1`, `v1.0.2`, and so on. The full internal beta build-number
 history (`v1.0a1.1` through `v1.0b2.239`) that got the project to this
 release is preserved in
 [`CHANGELOG-beta.md`](CHANGELOG-beta.md).
+
+## v1.1.78 — federation setup and file-description views
+
+- Fix installer persistence of the public hostname as BBS_DOMAIN (#43),
+  including test/behind installations using an existing reverse proxy.
+- Leave localhost-only installer defaults without a public hostname.
+- Report missing, local-only or malformed federation hostnames before
+  contacting the hub, and show useful registration recovery guidance.
+- Add persistent Compact / Full file-description views, contributed by
+  Jürgen (neo67) in PR #42. Preserve individual toggles, ANSI rendering,
+  original line breaks and independent file-sharing dialogs.
+- Add English, Spanish and German labels for the description controls.
+- Document recovery for existing installations whose hostname was not saved.
+
+Validation: 19 targeted tests and 35 subtests passed on the combined changes;
+shell syntax and diff whitespace checks passed.
+
+## v1.1.77 — direct netmail delivery fixes
+
+- Resolve direct-netmail recipients through configured BinkP connections
+  or the selected network's nodelist, including custom ports.
+- Keep failed direct messages queued for direct retry.
+- Preserve recipient-specific credentials and require the expected peer AKA.
+- Prevent duplicate concurrent sends and retain acknowledged delivery status.
+- Fix Spitfire-X handshake compatibility while retaining CRAM-MD5 authentication.
+- Show direct-delivery errors and routing details.
+- Add regression coverage and the automatic delivery-lease schema migration.
+
+Validation: 72 targeted tests passed; live direct packet transfer to
+Spitfire-X was acknowledged successfully.
 
 ## v1.1.76 — Security and reliability maintenance release (November 2026)
 
