@@ -24,6 +24,13 @@
 <div class="card mb-3">
     <div class="card-body p-0">
     {% if files %}
+        <div id="file-description-controls" class="d-none p-2 text-center">
+            <span class="small text-muted me-2">{{ t('file_areas.description_view', 'Description view:') }}</span>
+            <div class="btn-group btn-group-sm" role="group" aria-label="{{ t('file_areas.description_view', 'Description view:') }}">
+                <button type="button" class="btn btn-outline-secondary" data-description-mode="compact" aria-pressed="true">{{ t('file_areas.description_compact', 'Compact') }}</button>
+                <button type="button" class="btn btn-outline-secondary" data-description-mode="full" aria-pressed="false">{{ t('file_areas.description_full', 'Full') }}</button>
+            </div>
+        </div>
         <table class="table table-sm table-hover mb-0">
             <thead><tr>
                 {% macro sort_hdr(label, col, default_dir) %}
@@ -55,9 +62,9 @@
                     <td>
                         {% if f.description %}
                         {% set short_desc = f.description.split('\n')[0][:120] %}
-                        <small class="text-muted">{{ short_desc | strip_ansi }}</small>
+                        <small class="text-muted file-description-preview">{{ short_desc | strip_ansi }}</small>
                         {% if '\n' in f.description or f.description|length > 120 %}
-                        <details class="mt-1">
+                        <details class="mt-1 file-description-details">
                             <summary class="small text-secondary">full description</summary>
                             <pre class="mt-1 p-2 rounded" style="background:#000;color:#aaaaaa;white-space:pre;overflow-x:auto;overflow-y:auto;max-height:320px;font-family:'Courier New',Courier,monospace;font-size:0.8rem;line-height:1.2;">{{ f.description | ansi_art }}</pre>
                         </details>
@@ -153,4 +160,5 @@
 <div class="mt-3">
     <a href="{{ url_for('file_areas.index') }}" class="btn btn-link">← All file areas</a>
 </div>
+<script src="{{ url_for('static', filename='js/file-description-view.js') }}" defer></script>
 {% endblock %}
