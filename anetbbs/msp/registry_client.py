@@ -32,9 +32,11 @@ default). Sysops who don't want their BBS published on a federation
 list just leave it off; they can still pull the public list via
 the anetbbs_directory refresher.
 """
+import ipaddress
 import json
 import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -101,6 +103,25 @@ def _our_metadata(app):
     }
 
 
+def _registration_host_error(host):
+    """Check our configured identity before sending it to the public hub."""
+    hint = 'Set BBS_DOMAIN to your public hostname (for example, bbs.example.com).'
+    if not host:
+        return f'BBS_DOMAIN is not configured. {hint}'
+    try:
+        address = ipaddress.ip_address(host.strip('[]'))
+    except ValueError:
+        address = None
+    if (host.rstrip('.') == 'localhost' or host.rstrip('.').endswith('.localhost')
+            or (address is not None and (address.is_loopback or address.is_unspecified))):
+        return f'BBS_DOMAIN points to a local-only address. {hint}'
+    # Match the hub's accepted host syntax: a hostname/IP, without a URL
+    # scheme, port or path. Do not derive this identity from request headers.
+    if not re.fullmatch(r'[a-z0-9](?:[a-z0-9\-.]{0,253}[a-z0-9])?', host):
+        return f'BBS_DOMAIN is invalid; enter a hostname without a scheme, port or path. {hint}'
+    return ''
+
+
 def start_self_register_thread(app):
     """Spawn the daemon thread. Idempotent. No-op if self-register is
     not enabled OR if required metadata (BBS_DOMAIN, SYSOP_EMAIL) is
@@ -109,10 +130,9 @@ def start_self_register_thread(app):
     if not app.config.get('REGISTRY_SELF_REGISTER'):
         return
     meta = _our_metadata(app)
-    if not meta['host']:
-        logger.info('registry-client: SELF_REGISTER on but BBS_DOMAIN '
-                    'is blank — skipping. Set BBS_DOMAIN to your '
-                    'public hostname to enable.')
+    host_error = _registration_host_error(meta['host'])
+    if host_error:
+        logger.info('registry-client: %s Skipping self-registration.', host_error)
         return
     if not meta['contact_email']:
         logger.info('registry-client: SELF_REGISTER on but SYSOP_EMAIL '
@@ -177,6 +197,9 @@ def _tick(app):
         return {'ok': False, 'action': 'skipped',
                 'reason': 'REGISTRY_URL is not configured'}
     meta = _our_metadata(app)
+    host_error = _registration_host_error(meta['host'])
+    if host_error:
+        return {'ok': False, 'action': 'skipped', 'reason': host_error}
     state = _load_state(app)
     sess = requests.Session()
 

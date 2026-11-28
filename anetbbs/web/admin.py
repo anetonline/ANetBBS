@@ -3656,7 +3656,8 @@ def _setup_wizard_impl():
         # Federation self-registration. The plumbing already exists for
         # daily heartbeats; this just persists the sysop's metadata to
         # .env and triggers an immediate registration tick. Failures
-        # are non-fatal — the daily thread retries.
+        # are non-fatal; a missing identity can also prevent the daily
+        # thread from starting, so do not promise an automatic retry.
         if federation_register and sysop_email and sysop_name:
             env_updates = {
                 'SYSOP_NAME': sysop_name,
@@ -3685,11 +3686,13 @@ def _setup_wizard_impl():
                     # anywhere at all. Show the real reason instead.
                     flash(f'Saved sysop details, but federation registration '
                           f'did not go through: {result.get("reason", "unknown error")}. '
-                          f'The daily heartbeat will retry once REGISTRY_URL is set.',
+                          f'Resolve the reported problem, then retry from '
+                          f'Admin → Network → Register with Hub.',
                           'warning')
             except Exception as exc:
                 flash(f'Saved sysop details, but the immediate registration '
-                      f'tick failed: {exc}. The daily heartbeat will retry.',
+                      f'tick failed: {exc}. Resolve the reported problem, then '
+                      f'retry from Admin → Network → Register with Hub.',
                       'info')
 
         # Each section is independent — one failure shouldn't abort the others.

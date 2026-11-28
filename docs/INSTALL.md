@@ -410,6 +410,14 @@ restart anetbbs`.
 
 ## Troubleshooting
 
+- **Federation registration returns `HTTP 400: invalid host`** → check
+  `BBS_DOMAIN` in `.env`. Older `install.sh` versions collected the hostname
+  but did not save it. Set `BBS_DOMAIN=bbs.example.com` to your actual public
+  hostname (without a scheme, port or path), restart `anetbbs-web`, and retry
+  from **Admin → Network → Register with Hub**. Upgrading preserves an
+  existing `.env`, so it cannot recover a hostname that was never saved.
+  Test/behind mode can use a public hostname through an existing reverse
+  proxy; localhost-only installs should leave `BBS_DOMAIN` blank.
 - **MRC (or other static assets) 404/fails to load through nginx, but
   works fine going straight to the Flask port** and the `/static/`
   `alias` path and file permissions all look correct → if your install
